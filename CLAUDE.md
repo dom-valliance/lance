@@ -92,6 +92,7 @@ Promoted here when the same lesson appears more than twice in `.claude/notes/`.
 - Jamie's REST API is read-only. Do not write a Jamie write connector or a `FF_JAMIE_WRITES` flag. ADR 0005.
 - `@anthropic-ai/claude-agent-sdk` is not used. Agents run on the `@anthropic-ai/sdk` tool runner. ADR 0001.
 - Never force `tool_choice` on current models; name the tool in the prompt and use `strict: true`.
+- GitHub is Dom's. Plain git only: branches and commits. Never install or use the `gh` CLI, never open PRs. Hand over branch names and commit ranges. ADR 0007.
 
 ## Memory
 
