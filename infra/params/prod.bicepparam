@@ -3,10 +3,8 @@ using '../main.bicep'
 param environmentName = 'prod'
 param location = 'uksouth'
 
-// MUST BE FILLED before the first deploy. This placeholder is not a valid principal
-// and the deployment will fail on it. Get the real value with:
-//   az ad signed-in-user show --query id -o tsv
-param postgresEntraAdminObjectId = '00000000-0000-0000-0000-000000000000'
+// Dom's Entra object id, from: az ad signed-in-user show --query id -o tsv
+param postgresEntraAdminObjectId = '19fb2afd-6814-4600-8697-eb798ec5691f'
 param postgresEntraAdminPrincipalName = 'dom@valliance.ai'
 
 // Password fallback only (ADR 0008). Nothing in the running system uses it. Export
