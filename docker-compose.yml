@@ -1,5 +1,6 @@
 services:
   postgres:
+    image: lance-postgres:16
     build:
       context: ./infra/docker/postgres
     ports:

@@ -13,3 +13,5 @@ One file per decision, numbered, never edited after acceptance except to add a `
 | 0007 | Git hosting on GitHub | Accepted |
 | 0008 | Postgres authentication from Container Apps | Accepted |
 | 0009 | Tasks have one home in Notion | Accepted |
+| 0010 | Relational schema and pool live in packages/db | Accepted |
+| 0011 | Retention nulls ledger payloads without lifting immutability | Accepted |

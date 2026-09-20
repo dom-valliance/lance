@@ -53,7 +53,8 @@ apps/api      Fastify 5, tRPC 11, Zod. Auth (Entra), proposals, policy CRUD, led
               Slack events and interactivity, log-ingest webhook.
 apps/worker   Node 22. Scheduler, watchers, triage, planner, critic, executor,
               promotion analyser, retention jobs. Model agents on @anthropic-ai/sdk (ADR 0001).
-packages/     shared, ledger, policy, ontology (AGE), connectors (graph, jamie, notion, slack), agents
+packages/     shared, db (Drizzle schema, migrations, pool; ADR 0010), ledger, policy, ontology (AGE),
+              connectors (graph, jamie, notion, slack), agents
 infra/        Bicep
 docs/         adr, runbooks, compliance, voice
 fixtures/     connector recordings; eval sets arrive as a private submodule in Phase 2
