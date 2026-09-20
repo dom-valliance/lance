@@ -1,7 +1,7 @@
 import { proposals, type Db } from '@lance/db';
-import { LedgerWriter } from '@lance/ledger';
+import { LedgerWriter, SystemControl } from '@lance/ledger';
 import { newUlid, nowIso } from '@lance/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import type { PauseGate } from '../scheduler/gate.js';
 import { QUEUES, type ExecuteJob } from '../scheduler/queues.js';
@@ -47,16 +47,6 @@ export async function executeProposal(
     return { status: 'skipped', reason: `proposal ${job.proposalId} does not exist` };
   }
 
-  if (!verdict.runnable) {
-    if (proposal.status === 'approved' || proposal.status === 'edited') {
-      await deps.db
-        .update(proposals)
-        .set({ status: 'held', updatedAt: new Date(nowIso()) })
-        .where(eq(proposals.id, proposal.id));
-    }
-    return { status: 'held', reason: verdict.reason };
-  }
-
   if (proposal.status !== 'approved' && proposal.status !== 'edited') {
     return {
       status: 'skipped',
@@ -64,12 +54,49 @@ export async function executeProposal(
     };
   }
 
-  const ledger = new LedgerWriter(deps.db);
-  await deps.db
+  if (!verdict.runnable) {
+    const held = await deps.db
+      .update(proposals)
+      .set({ status: 'held', updatedAt: new Date(nowIso()) })
+      .where(and(eq(proposals.id, proposal.id), inArray(proposals.status, ['approved', 'edited'])))
+      .returning({ id: proposals.id });
+    if (held.length > 0) {
+      await new SystemControl(deps.db).recordHold([{ id: proposal.id, from: proposal.status }], {
+        actor: EXECUTOR_ACTOR,
+        reason: verdict.reason,
+      });
+    }
+    return { status: 'held', reason: verdict.reason };
+  }
+
+  // Compare-and-swap: only the worker that moves the row from approved or
+  // edited to executing performs the write, so a redelivered job or a second
+  // replica cannot execute the same proposal twice.
+  const claimed = await deps.db
     .update(proposals)
     .set({ status: 'executing', updatedAt: new Date(nowIso()) })
-    .where(eq(proposals.id, proposal.id));
+    .where(and(eq(proposals.id, proposal.id), inArray(proposals.status, ['approved', 'edited'])))
+    .returning({ id: proposals.id });
+  if (claimed.length === 0) {
+    return { status: 'skipped', reason: `proposal ${proposal.id} was claimed by another worker` };
+  }
 
+  // The gate is checked again after the claim so a pause that landed in the
+  // meantime stops the write and the proposal goes back to held.
+  const recheck = await deps.gate.check();
+  if (!recheck.runnable) {
+    await deps.db
+      .update(proposals)
+      .set({ status: 'held', updatedAt: new Date(nowIso()) })
+      .where(eq(proposals.id, proposal.id));
+    await new SystemControl(deps.db).recordHold([{ id: proposal.id, from: proposal.status }], {
+      actor: EXECUTOR_ACTOR,
+      reason: recheck.reason,
+    });
+    return { status: 'held', reason: recheck.reason };
+  }
+
+  const ledger = new LedgerWriter(deps.db);
   try {
     const result = await deps.write.perform(proposal.id);
     const event = await ledger.append({
@@ -79,7 +106,6 @@ export async function executeProposal(
       sourceSystem: proposal.targetSystem,
       sourceRecordId: result.targetRecordId,
       correlationId: proposal.correlationId,
-      policyDecisionId: null,
       payload: { proposalId: proposal.id, actionClass: proposal.actionClass },
     });
     await deps.db

@@ -96,6 +96,16 @@ describe('kill switch', () => {
     expect(perform).not.toHaveBeenCalled();
   }, 30000);
 
+  it('releases a proposal the executor held once the system resumes', async () => {
+    await control.pause({ reason: 'drill', actor: 'user:dom' });
+    const id = await insertApprovedProposal('held by executor');
+    await boss.send(QUEUES.execute, { proposalId: id });
+    expect(await waitForStatus(id, ['held'])).toBe('held');
+    const resumed = await control.resume({ actor: 'user:dom' });
+    expect(resumed.releasedProposalIds).toContain(id);
+    expect(await statusOf(id)).toBe('approved');
+  }, 30000);
+
   it('executes a released proposal after resume and records the executed event', async () => {
     const id = await insertApprovedProposal('released on resume');
     await control.pause({ reason: 'drill', actor: 'user:dom' });
