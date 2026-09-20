@@ -1,4 +1,5 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { startPostgresContainer } from '@lance/db/testing';
+import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createDb, proposals, runMigrations, seed, type Db } from '@lance/db';
 import { LedgerReader, SystemControl } from '@lance/ledger';
 import { newUlid, nowIso } from '@lance/shared';
@@ -10,7 +11,6 @@ import { PauseGate } from '../scheduler/gate.js';
 import { QUEUES } from '../scheduler/queues.js';
 import { registerExecutor, type ConnectorWrite } from './index.js';
 
-const POSTGRES_IMAGE = 'lance-postgres:16';
 const FAILING_PROPOSAL_MARKER = 'fail-me';
 
 let container: StartedPostgreSqlContainer;
@@ -62,11 +62,7 @@ async function waitForStatus(id: string, expected: string[], timeoutMs = 15000):
 }
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE)
-    .withDatabase('lance')
-    .withUsername('postgres')
-    .withPassword('postgres')
-    .start();
+  container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
   db = createDb({ connectionString, password: 'postgres' });

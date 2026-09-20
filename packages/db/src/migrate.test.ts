@@ -1,15 +1,14 @@
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runMigrations } from './migrate.js';
+import { startPostgresContainer } from './testing.js';
 
 /**
  * The migration suite runs against the same image production and CI use
  * (ADR 0004) because the guarantees under test are database guarantees:
  * extensions, roles, grants and the `ledger_immutable` trigger.
  */
-
-const POSTGRES_IMAGE = 'lance-postgres:16';
 
 /** insufficient_privilege: the statement was stopped by a missing grant. */
 const PERMISSION_DENIED = '42501';
@@ -85,11 +84,7 @@ const asRole = async <T>(role: string, work: () => Promise<T>): Promise<T> => {
 };
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE)
-    .withDatabase('lance')
-    .withUsername('postgres')
-    .withPassword('postgres')
-    .start();
+  container = await startPostgresContainer();
 
   await runMigrations({ connectionString: container.getConnectionUri() });
 

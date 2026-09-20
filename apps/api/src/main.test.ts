@@ -1,7 +1,8 @@
+import { startPostgresContainer } from '@lance/db/testing';
 import { agentRuns, createDb, cursors, runMigrations, seed, type Db } from '@lance/db';
 import { LedgerReader } from '@lance/ledger';
 import { newUlid } from '@lance/shared';
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEntraVerifier, entraIssuer } from './auth/entra.js';
@@ -25,7 +26,6 @@ import {
  * and a resume from Slack both land in the ledger.
  */
 
-const POSTGRES_IMAGE = 'lance-postgres:16';
 const TENANT_ID = '11111111-2222-3333-4444-555555555555';
 const CLIENT_ID = '66666666-7777-8888-9999-000000000000';
 
@@ -59,11 +59,7 @@ const slashCommand = async (
 };
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE)
-    .withDatabase('lance')
-    .withUsername('postgres')
-    .withPassword('postgres')
-    .start();
+  container = await startPostgresContainer();
 
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
