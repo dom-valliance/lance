@@ -4,15 +4,16 @@ import pino, { type DestinationStream, type Logger, type LoggerOptions } from 'p
 const REDACTED = '[redacted]';
 
 /** Keys whose values are always replaced with REDACTED, at any depth. */
+// Matched case-insensitively: keys are lower-cased before lookup.
 const SECRET_KEYS = new Set([
   'authorization',
   'cookie',
   'password',
   'token',
-  'apiKey',
+  'apikey',
   'api_key',
   'secret',
-  'refreshToken',
+  'refreshtoken',
   'refresh_token',
 ]);
 
@@ -49,11 +50,12 @@ function redactObject(
 ): Record<string, unknown> {
   const output: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
-    if (SECRET_KEYS.has(key)) {
+    const lowerKey = key.toLowerCase();
+    if (SECRET_KEYS.has(lowerKey)) {
       output[key] = REDACTED;
       continue;
     }
-    if (CONTENT_KEYS.has(key)) {
+    if (CONTENT_KEYS.has(lowerKey)) {
       if (allowContent) {
         output[key] = redactValue(value, allowContent, seen);
       }

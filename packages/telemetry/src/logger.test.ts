@@ -198,3 +198,18 @@ describe('createLogger trace correlation', () => {
     expect(line?.span_id).toMatch(/^[0-9a-f]{16}$/);
   });
 });
+
+describe('createLogger key matching', () => {
+  it('redacts secret keys regardless of case', () => {
+    const lines: string[] = [];
+    const logger = createLogger({
+      name: 'case',
+      destination: { write: (chunk: string) => void lines.push(chunk) },
+    });
+    logger.info({ Authorization: 'Bearer abc', ApiKey: 'k', RefreshToken: 'r' }, 'headers');
+    const record = JSON.parse(lines[0] ?? '{}') as Record<string, unknown>;
+    expect(record['Authorization']).toBe('[redacted]');
+    expect(record['ApiKey']).toBe('[redacted]');
+    expect(record['RefreshToken']).toBe('[redacted]');
+  });
+});
