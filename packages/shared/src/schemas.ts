@@ -81,8 +81,21 @@ export type LedgerEvent = z.infer<typeof LedgerEventSchema>;
  * `hashRecord`). The caller supplies `ts`, the event time, which is not
  * necessarily "now".
  */
-export const LedgerEventInputSchema = LedgerEventSchema.omit({ id: true, payloadHash: true });
+export const LedgerEventInputSchema = LedgerEventSchema.omit({
+  id: true,
+  payloadHash: true,
+}).extend({
+  sourceSystem: SourceSystemSchema.nullable().default(null),
+  sourceRecordId: z.string().nullable().default(null),
+  sourceRecordHash: z.string().nullable().default(null),
+  idempotencyKey: z.string().nullable().default(null),
+  parentEventId: UlidSchema.nullable().default(null),
+  policyDecisionId: UlidSchema.nullable().default(null),
+  payload: JsonRecordSchema.nullable().default(null),
+});
 export type LedgerEventInput = z.infer<typeof LedgerEventInputSchema>;
+/** What a caller passes to the ledger writer: nullable fields may be omitted. */
+export type LedgerEventInputCandidate = z.input<typeof LedgerEventInputSchema>;
 
 /** The `PolicyRule` interface, spec 6.2, verbatim. */
 export const PolicyRuleSchema = z.object({
