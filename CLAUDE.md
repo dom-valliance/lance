@@ -54,7 +54,7 @@ apps/api      Fastify 5, tRPC 11, Zod. Auth (Entra), proposals, policy CRUD, led
 apps/worker   Node 22. Scheduler, watchers, triage, planner, critic, executor,
               promotion analyser, retention jobs. Model agents on @anthropic-ai/sdk (ADR 0001).
 packages/     shared, db (Drizzle schema, migrations, pool; ADR 0010), ledger, policy, ontology (AGE),
-              connectors (graph, jamie, notion, slack), agents
+              connectors (graph, jamie, notion, slack), agents, telemetry (OTel, pino)
 infra/        Bicep
 docs/         adr, runbooks, compliance, voice
 fixtures/     connector recordings; eval sets arrive as a private submodule in Phase 2
@@ -71,7 +71,8 @@ Stack decisions and versions are in the ADRs. Model ids live in `packages/shared
 - All times stored UTC, displayed Europe/London.
 - Tests beside source. Test names describe behaviour.
 - pnpm workspaces with Turborepo. `pnpm lint`, `pnpm typecheck`, `pnpm test` must pass before any task is marked done.
-- Local Postgres via `docker-compose.yml` (PostgreSQL 16 with AGE and pgvector). Testcontainers for the ledger suite.
+- Local Postgres via `docker-compose.yml` (PostgreSQL 16 with AGE and pgvector). Integration tests start containers through `startPostgresContainer` from `@lance/db/testing`; build the image with `docker compose build` first.
+- Shell: Node 22 via nvm (`nvm use 22`), pnpm through corepack. Run `pnpm install` from the root after adding a dependency.
 
 ## Open questions and defaults (spec section 16)
 
