@@ -27,12 +27,15 @@ param postgresEntraAdminObjectId string
 @description('Principal name of the Postgres Entra administrator, normally Dom\'s UPN.')
 param postgresEntraAdminPrincipalName string
 
-@description('Postgres administrator login for the password fallback that ADR 0008 allows. Password authentication stays enabled so the fallback exists, but nothing in the running system uses it.')
+@description('Enable Postgres password authentication alongside Entra. Off by default: the admin password is the one credential that could disable the ledger guard, and nothing in the running system uses it (ADR 0008 keeps it as a fallback only).')
+param postgresPasswordAuthEnabled bool = false
+
+@description('Postgres administrator login, used only when password authentication is enabled.')
 param postgresAdministratorLogin string = 'lanceadmin'
 
-@description('Password for the Postgres administrator login. Supply it from the shell at deploy time; never commit it. See docs/runbooks/deploy.md.')
+@description('Password for the Postgres administrator login, used only when password authentication is enabled. Supply it from the shell at deploy time; never commit it.')
 @secure()
-param postgresAdministratorPassword string
+param postgresAdministratorPassword string = ''
 
 @description('Tag on the three container images in the registry.')
 param containerImageTag string = 'bootstrap'
@@ -113,6 +116,7 @@ module postgres 'modules/postgres.bicep' = {
     uniqueSuffix: uniqueSuffix
     entraAdminObjectId: postgresEntraAdminObjectId
     entraAdminPrincipalName: postgresEntraAdminPrincipalName
+    passwordAuthEnabled: postgresPasswordAuthEnabled
     administratorLogin: postgresAdministratorLogin
     administratorPassword: postgresAdministratorPassword
   }

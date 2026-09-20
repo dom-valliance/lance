@@ -93,6 +93,14 @@ resource migrateJob 'Microsoft.App/jobs@2025-01-01' = {
               value: postgresFqdn
             }
             {
+              name: 'PG_PORT'
+              value: '5432'
+            }
+            {
+              name: 'PG_SSL'
+              value: 'require'
+            }
+            {
               name: 'PG_DATABASE'
               value: databaseName
             }

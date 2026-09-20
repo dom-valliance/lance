@@ -51,6 +51,8 @@ The order matters. The environment stands up on a public bootstrap image first, 
    export LANCE_PG_ADMIN_PASSWORD="$(openssl rand -base64 24)"
    ```
 
+   Only needed when `postgresPasswordAuthEnabled` is true. It is false by default, so Entra is the only authentication and this step can be skipped.
+
    Record it in the password manager if you want the fallback to be usable. If you lose it, reset it in the portal.
 
 ## 3. Deploy the environment on the bootstrap image

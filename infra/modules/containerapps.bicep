@@ -277,6 +277,15 @@ resource containerApps 'Microsoft.App/containerApps@2025-01-01' = [
                   value: databaseName
                 }
                 {
+                  name: 'PG_PORT'
+                  value: '5432'
+                }
+                {
+                  // TLS with certificate verification; the password is an Entra token.
+                  name: 'PG_SSL'
+                  value: 'require'
+                }
+                {
                   // The Postgres principal created for this identity by
                   // pgaadauth_create_principal. ADR 0008.
                   name: 'PG_USER'

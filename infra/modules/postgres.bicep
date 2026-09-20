@@ -27,6 +27,9 @@ param entraAdminObjectId string
 @description('Principal name of the Entra administrator, normally a UPN.')
 param entraAdminPrincipalName string
 
+@description('Whether password authentication is enabled alongside Entra.')
+param passwordAuthEnabled bool
+
 @description('Administrator login for the password fallback.')
 param administratorLogin string
 
@@ -52,12 +55,12 @@ resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' =
   }
   properties: {
     version: '16'
-    administratorLogin: administratorLogin
-    administratorLoginPassword: administratorPassword
+    administratorLogin: passwordAuthEnabled ? administratorLogin : null
+    administratorLoginPassword: passwordAuthEnabled ? administratorPassword : null
     createMode: 'Default'
     authConfig: {
       activeDirectoryAuth: 'Enabled'
-      passwordAuth: 'Enabled'
+      passwordAuth: passwordAuthEnabled ? 'Enabled' : 'Disabled'
       tenantId: subscription().tenantId
     }
     storage: {

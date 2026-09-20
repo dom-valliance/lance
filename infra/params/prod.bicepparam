@@ -11,6 +11,7 @@ param postgresEntraAdminPrincipalName = 'dom@valliance.ai'
 
 // Password fallback only (ADR 0008). Nothing in the running system uses it. Export
 // LANCE_PG_ADMIN_PASSWORD in the deploying shell; never commit a value here.
+param postgresPasswordAuthEnabled = false
 param postgresAdministratorPassword = readEnvironmentVariable('LANCE_PG_ADMIN_PASSWORD', '')
 
 // Prod never deploys on the bootstrap image. Set containerImageTag to the immutable
