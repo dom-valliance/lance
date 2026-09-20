@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Lints the commit message being authored against commitlint.config.js.
+# Installed by `pnpm prepare` (git config core.hooksPath .githooks).
+npx --no-install commitlint --edit "$1"
