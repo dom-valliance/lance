@@ -22,6 +22,13 @@
       "when": 1789893009041,
       "tag": "0002_ledger_guard_and_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789893911195,
+      "tag": "0003_pgboss_schema",
+      "breakpoints": true
     }
   ]
 }
