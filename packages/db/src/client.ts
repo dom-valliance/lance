@@ -80,19 +80,43 @@ const resolvePassword = (
 /**
  * Build a Drizzle instance over a `pg.Pool`. Close it with `db.$client.end()`.
  */
-export const createDb = (options: CreateDbOptions = {}): Db => {
+/**
+ * Connection settings from the environment. `DATABASE_URL` wins; otherwise
+ * the `PG_*` variables the Container Apps carry (ADR 0008) are assembled,
+ * with TLS verification on whenever `PG_SSL` is `require`.
+ */
+const connectionFromEnv = (options: CreateDbOptions): pg.PoolConfig => {
   const connectionString = options.connectionString ?? process.env.DATABASE_URL;
-  if (connectionString === undefined || connectionString === '') {
+  if (connectionString !== undefined && connectionString !== '') {
+    return { connectionString };
+  }
+  const host = process.env.PG_HOST;
+  if (host === undefined || host === '') {
     throw new Error(
-      'No database connection string. Set DATABASE_URL, or pass connectionString to createDb.',
+      'No database connection. Set DATABASE_URL, or PG_HOST with PG_DATABASE and PG_USER, or pass connectionString to createDb.',
     );
   }
+  const config: pg.PoolConfig = {
+    host,
+    port: Number(process.env.PG_PORT ?? '5432'),
+    database: process.env.PG_DATABASE ?? 'lance',
+    user: process.env.PG_USER,
+  };
+  if (process.env.PG_SSL === 'require') {
+    config.ssl = { rejectUnauthorized: true };
+  }
+  return config;
+};
 
-  const config: pg.PoolConfig = { connectionString };
+/**
+ * Build a Drizzle instance over a `pg.Pool`. Close it with `db.$client.end()`.
+ */
+export const createDb = (options: CreateDbOptions = {}): Db => {
+  const config = connectionFromEnv(options);
   if (options.max !== undefined) {
     config.max = options.max;
   }
-  const password = resolvePassword(options, connectionString);
+  const password = resolvePassword(options, config.connectionString ?? '');
   if (password !== undefined) {
     config.password = password;
   }

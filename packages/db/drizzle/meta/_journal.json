@@ -29,6 +29,13 @@
       "when": 1789893911195,
       "tag": "0003_pgboss_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789914943348,
+      "tag": "0004_retention_observations",
+      "breakpoints": true
     }
   ]
 }
