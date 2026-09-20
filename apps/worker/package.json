@@ -10,6 +10,20 @@
     "build": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@lance/db": "workspace:*",
+    "@lance/ledger": "workspace:*",
+    "@lance/shared": "workspace:*",
+    "drizzle-orm": "^0.45.0",
+    "pg-boss": "^12.33.0"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "12.1.0",
+    "@types/node": "26.6.2",
+    "tsx": "4.23.13"
   }
 }
