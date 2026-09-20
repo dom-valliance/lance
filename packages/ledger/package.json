@@ -11,5 +11,16 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@lance/db": "workspace:*",
+    "@lance/shared": "workspace:*",
+    "drizzle-orm": "^0.45.0"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "12.1.0",
+    "@types/node": "26.6.2",
+    "@types/pg": "8.23.1",
+    "pg": "8.23.0"
   }
 }
