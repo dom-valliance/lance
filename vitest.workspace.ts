@@ -8,6 +8,7 @@ export default defineWorkspace([
   'packages/ontology',
   'packages/connectors',
   'packages/agents',
+  'packages/telemetry',
   'apps/web',
   'apps/api',
   'apps/worker',
