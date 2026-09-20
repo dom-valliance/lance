@@ -220,6 +220,9 @@ importers:
       '@lance/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@lance/telemetry':
+        specifier: workspace:*
+        version: link:../../packages/telemetry
       '@trpc/server':
         specifier: 11.19.0
         version: 11.19.0(typescript@6.0.3)
@@ -306,6 +309,9 @@ importers:
       '@lance/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@lance/telemetry':
+        specifier: workspace:*
+        version: link:../../packages/telemetry
       drizzle-orm:
         specifier: ^0.45.0
         version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)

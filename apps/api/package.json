@@ -23,7 +23,8 @@
     "drizzle-orm": "0.45.2",
     "fastify": "5.12.5",
     "jose": "6.2.12",
-    "zod": "4.6.5"
+    "zod": "4.6.5",
+    "@lance/telemetry": "workspace:*"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.1.0",

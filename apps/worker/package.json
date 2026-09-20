@@ -19,7 +19,8 @@
     "@lance/ledger": "workspace:*",
     "@lance/shared": "workspace:*",
     "drizzle-orm": "^0.45.0",
-    "pg-boss": "^12.33.0"
+    "pg-boss": "^12.33.0",
+    "@lance/telemetry": "workspace:*"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.1.0",

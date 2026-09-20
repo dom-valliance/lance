@@ -1,6 +1,7 @@
 import { createDb, type Db } from '@lance/db';
 import { LedgerReader, LedgerWriter, SystemControl } from '@lance/ledger';
 import { getConfig, readSecret, type Config } from '@lance/shared';
+import { initTelemetry } from '@lance/telemetry';
 import { pathToFileURL } from 'node:url';
 import { createEntraVerifier } from './auth/entra.js';
 import type { ApiDeps, SlackDeps, TokenVerifier } from './deps.js';
@@ -69,6 +70,11 @@ const port = (): number => {
 
 export const main = async (): Promise<void> => {
   const config = getConfig();
+  const telemetry = initTelemetry({
+    serviceName: 'lance-api',
+    serviceVersion: '0.1.0',
+    environment: config.nodeEnv,
+  });
   const db = createDb();
 
   const deps = createApiDeps({
@@ -93,6 +99,7 @@ export const main = async (): Promise<void> => {
     void server
       .close()
       .then(() => db.$client.end())
+      .then(() => telemetry.shutdown())
       .then(() => process.exit(0));
   };
   process.on('SIGTERM', () => {
