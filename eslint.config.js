@@ -24,7 +24,12 @@ const fullBoundaryRestriction = [
     patterns: [
       { group: ['@anthropic-ai/sdk/*'], message: SDK_BOUNDARY_MESSAGE },
       {
-        group: ['@lance/connectors/writes', '@lance/connectors/writes/*'],
+        group: [
+          '@lance/connectors/writes',
+          '@lance/connectors/writes/*',
+          '**/connectors/src/writes',
+          '**/connectors/src/writes/**',
+        ],
         message: WRITES_BOUNDARY_MESSAGE,
       },
     ],
@@ -37,7 +42,12 @@ const agentsBoundaryRestriction = [
   {
     patterns: [
       {
-        group: ['@lance/connectors/writes', '@lance/connectors/writes/*'],
+        group: [
+          '@lance/connectors/writes',
+          '@lance/connectors/writes/*',
+          '**/connectors/src/writes',
+          '**/connectors/src/writes/**',
+        ],
         message: WRITES_BOUNDARY_MESSAGE,
       },
     ],
@@ -53,7 +63,7 @@ const executorBoundaryRestriction = [
   },
 ];
 
-const sourceGlobs = ['apps/*/src/**/*.ts', 'packages/*/src/**/*.ts'];
+const sourceGlobs = ['apps/*/src/**/*.{ts,tsx}', 'packages/*/src/**/*.{ts,tsx}'];
 
 export default tseslint.config(
   {
@@ -81,7 +91,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.ts'],
+    files: ['**/*.{ts,tsx,mts,cts}'],
     plugins: { 'import-x': importX },
     settings: {
       'import-x/resolver-next': [
@@ -97,13 +107,13 @@ export default tseslint.config(
     },
   },
   {
-    files: ['packages/agents/src/**/*.ts'],
+    files: ['packages/agents/src/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': agentsBoundaryRestriction,
     },
   },
   {
-    files: ['apps/worker/src/executor/**/*.ts'],
+    files: ['apps/worker/src/executor/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': executorBoundaryRestriction,
     },
