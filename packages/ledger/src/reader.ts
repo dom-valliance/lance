@@ -1,5 +1,5 @@
-import type { Db } from '@lance/db';
 import { ledgerEvents } from '@lance/db';
+import type { DbExecutor } from './writer.js';
 import type { LedgerKind } from '@lance/shared';
 import { and, asc, desc, eq, gte, lte, type SQL } from 'drizzle-orm';
 
@@ -20,7 +20,7 @@ const MAX_LIMIT = 2000;
 
 /** Read side of the ledger. Every filter is optional; results are newest first. */
 export class LedgerReader {
-  constructor(private readonly db: Db) {}
+  constructor(private readonly db: DbExecutor) {}
 
   async byCorrelation(correlationId: string): Promise<LedgerEventRow[]> {
     return this.db

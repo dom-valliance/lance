@@ -2,7 +2,7 @@ import { SYSTEM_STATE_ID, proposals, systemState, type Db, type SystemState } fr
 import { newUlid, nowIso, type SystemMode } from '@lance/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { LedgerReader } from './reader.js';
-import { LedgerWriter } from './writer.js';
+import { LedgerWriter, type DbExecutor } from './writer.js';
 
 export interface ActorOptions {
   /** Ledger actor, for example user:dom or system:cost-guard. */
@@ -27,12 +27,37 @@ export interface ResumeResult {
 
 /** Proposal statuses that are waiting for the executor and can be held. */
 const HOLDABLE_STATUSES = ['approved', 'edited'] as const;
-type HoldableStatus = (typeof HOLDABLE_STATUSES)[number];
+export type HoldableStatus = (typeof HOLDABLE_STATUSES)[number];
+const PAGE = 200;
 
-interface HeldProposal {
+export interface HeldProposal {
   id: string;
   /** Status to restore on resume, so an edited proposal stays edited. */
   from: HoldableStatus;
+}
+
+/** Moves every approved or edited proposal to held and returns what was moved. */
+async function holdProposals(executor: DbExecutor, ts: string): Promise<HeldProposal[]> {
+  const holdable = await executor
+    .select({ id: proposals.id, status: proposals.status })
+    .from(proposals)
+    .where(inArray(proposals.status, [...HOLDABLE_STATUSES]));
+  const held: HeldProposal[] = holdable.map((row) => ({
+    id: row.id,
+    from: row.status as HoldableStatus,
+  }));
+  if (held.length > 0) {
+    await executor
+      .update(proposals)
+      .set({ status: 'held', updatedAt: new Date(ts) })
+      .where(
+        inArray(
+          proposals.id,
+          held.map((row) => row.id),
+        ),
+      );
+  }
+  return held;
 }
 
 function readHeld(payload: Record<string, unknown> | null): HeldProposal[] {
@@ -64,7 +89,11 @@ export class SystemControl {
   }
 
   async read(): Promise<SystemState> {
-    const rows = await this.db
+    return this.readWith(this.db);
+  }
+
+  private async readWith(executor: DbExecutor): Promise<SystemState> {
+    const rows = await executor
       .select()
       .from(systemState)
       .where(eq(systemState.id, SYSTEM_STATE_ID))
@@ -83,157 +112,189 @@ export class SystemControl {
   }
 
   async pause(options: PauseOptions): Promise<PauseResult> {
-    const current = await this.read();
-    const ts = nowIso();
-    const correlationId = newUlid();
+    return this.db.transaction(async (tx) => {
+      const current = await this.readWith(tx);
+      const ts = nowIso();
+      const correlationId = newUlid();
 
-    const holdable = await this.db
-      .select({ id: proposals.id, status: proposals.status })
-      .from(proposals)
-      .where(inArray(proposals.status, [...HOLDABLE_STATUSES]));
-    const held: HeldProposal[] = holdable.map((row) => ({
-      id: row.id,
-      from: row.status as HoldableStatus,
-    }));
-    if (held.length > 0) {
-      await this.db
-        .update(proposals)
-        .set({ status: 'held', updatedAt: new Date(ts) })
-        .where(
-          inArray(
-            proposals.id,
-            held.map((row) => row.id),
-          ),
-        );
-    }
-    const heldProposalIds = held.map((row) => row.id);
+      const held = await holdProposals(tx, ts);
+      const heldProposalIds = held.map((row) => row.id);
 
-    if (!current.paused) {
-      await this.db
-        .update(systemState)
-        .set({
-          paused: true,
-          pausedReason: options.reason,
-          pausedBy: options.actor,
-          pausedAt: new Date(ts),
-          updatedAt: new Date(ts),
-        })
-        .where(eq(systemState.id, SYSTEM_STATE_ID));
-    }
+      if (!current.paused) {
+        await tx
+          .update(systemState)
+          .set({
+            paused: true,
+            pausedReason: options.reason,
+            pausedBy: options.actor,
+            pausedAt: new Date(ts),
+            updatedAt: new Date(ts),
+          })
+          .where(eq(systemState.id, SYSTEM_STATE_ID));
+      }
 
+      const event = await this.writer.append(
+        {
+          ts,
+          actor: options.actor,
+          kind: 'state_changed',
+          sourceSystem: 'lance',
+          correlationId,
+          payload: {
+            change: 'pause',
+            paused: true,
+            alreadyPaused: current.paused,
+            reason: options.reason,
+            heldProposalIds,
+            held,
+          },
+        },
+        tx,
+      );
+
+      return { changed: !current.paused, heldProposalIds, eventId: event.id };
+    });
+  }
+
+  /**
+   * Records that the executor held a proposal because the system was paused
+   * when its job ran, so resume can release it (spec 4.3). The executor calls
+   * this after moving the proposal to held.
+   */
+  async recordHold(
+    held: HeldProposal[],
+    options: ActorOptions & { reason: string },
+  ): Promise<{ eventId: string }> {
     const event = await this.writer.append({
-      ts,
+      ts: nowIso(),
       actor: options.actor,
       kind: 'state_changed',
       sourceSystem: 'lance',
-      correlationId,
-      payload: {
-        change: 'pause',
-        paused: true,
-        alreadyPaused: current.paused,
-        reason: options.reason,
-        heldProposalIds,
-        held,
-      },
+      correlationId: newUlid(),
+      payload: { change: 'hold', reason: options.reason, held },
     });
-
-    return { changed: !current.paused, heldProposalIds, eventId: event.id };
+    return { eventId: event.id };
   }
 
   async resume(options: ActorOptions): Promise<ResumeResult> {
-    const current = await this.read();
-    const ts = nowIso();
-    const outstanding = await this.heldSinceLastResume();
-    const releasedProposalIds: string[] = [];
-    for (const from of HOLDABLE_STATUSES) {
-      const ids = outstanding.held.filter((row) => row.from === from).map((row) => row.id);
-      if (ids.length === 0) continue;
-      const released = await this.db
-        .update(proposals)
-        .set({ status: from, updatedAt: new Date(ts) })
-        .where(and(eq(proposals.status, 'held'), inArray(proposals.id, ids)))
-        .returning({ id: proposals.id });
-      releasedProposalIds.push(...released.map((row) => row.id));
-    }
+    return this.db.transaction(async (tx) => {
+      const current = await this.readWith(tx);
+      const ts = nowIso();
+      const outstanding = await this.heldSinceLastResume(tx);
+      const releasedProposalIds: string[] = [];
+      for (const from of HOLDABLE_STATUSES) {
+        const ids = outstanding.held.filter((row) => row.from === from).map((row) => row.id);
+        if (ids.length === 0) continue;
+        const released = await tx
+          .update(proposals)
+          .set({ status: from, updatedAt: new Date(ts) })
+          .where(and(eq(proposals.status, 'held'), inArray(proposals.id, ids)))
+          .returning({ id: proposals.id });
+        releasedProposalIds.push(...released.map((row) => row.id));
+      }
 
-    if (current.paused) {
-      await this.db
-        .update(systemState)
-        .set({
-          paused: false,
-          pausedReason: null,
-          pausedBy: null,
-          pausedAt: null,
-          updatedAt: new Date(ts),
-        })
-        .where(eq(systemState.id, SYSTEM_STATE_ID));
-    }
+      if (current.paused) {
+        await tx
+          .update(systemState)
+          .set({
+            paused: false,
+            pausedReason: null,
+            pausedBy: null,
+            pausedAt: null,
+            updatedAt: new Date(ts),
+          })
+          .where(eq(systemState.id, SYSTEM_STATE_ID));
+      }
 
-    const event = await this.writer.append({
-      ts,
-      actor: options.actor,
-      kind: 'state_changed',
-      sourceSystem: 'lance',
-      correlationId: outstanding.lastPause?.correlationId ?? newUlid(),
-      parentEventId: outstanding.lastPause?.eventId ?? null,
-      payload: {
-        change: 'resume',
-        paused: false,
-        wasPaused: current.paused,
-        releasedProposalIds,
-      },
+      const event = await this.writer.append(
+        {
+          ts,
+          actor: options.actor,
+          kind: 'state_changed',
+          sourceSystem: 'lance',
+          correlationId: outstanding.lastPause?.correlationId ?? newUlid(),
+          parentEventId: outstanding.lastPause?.eventId ?? null,
+          payload: {
+            change: 'resume',
+            paused: false,
+            wasPaused: current.paused,
+            releasedProposalIds,
+          },
+        },
+        tx,
+      );
+
+      return { changed: current.paused, releasedProposalIds, eventId: event.id };
     });
-
-    return { changed: current.paused, releasedProposalIds, eventId: event.id };
   }
 
   async setMode(
     mode: SystemMode,
     options: ActorOptions,
   ): Promise<{ changed: boolean; eventId: string }> {
-    const current = await this.read();
-    const ts = nowIso();
-    if (current.mode !== mode) {
-      await this.db
-        .update(systemState)
-        .set({ mode, updatedAt: new Date(ts) })
-        .where(eq(systemState.id, SYSTEM_STATE_ID));
-    }
-    const event = await this.writer.append({
-      ts,
-      actor: options.actor,
-      kind: 'state_changed',
-      sourceSystem: 'lance',
-      correlationId: newUlid(),
-      payload: { change: 'mode', from: current.mode, to: mode },
+    return this.db.transaction(async (tx) => {
+      const current = await this.readWith(tx);
+      const ts = nowIso();
+      if (current.mode !== mode) {
+        await tx
+          .update(systemState)
+          .set({ mode, updatedAt: new Date(ts) })
+          .where(eq(systemState.id, SYSTEM_STATE_ID));
+      }
+      const event = await this.writer.append(
+        {
+          ts,
+          actor: options.actor,
+          kind: 'state_changed',
+          sourceSystem: 'lance',
+          correlationId: newUlid(),
+          payload: { change: 'mode', from: current.mode, to: mode },
+        },
+        tx,
+      );
+      return { changed: current.mode !== mode, eventId: event.id };
     });
-    return { changed: current.mode !== mode, eventId: event.id };
   }
 
   /**
-   * Every proposal held by pause events since the most recent resume, with the
-   * status each had before it was held. Newest pause first, so its correlation
-   * id links the resume. A second pause while already paused adds to the set
-   * rather than replacing it, which is what keeps a double pause from
-   * stranding the first pause's proposals.
+   * Every proposal held since the most recent resume, by a pause or by the
+   * executor finding the system paused, with the status each had before.
+   * Walks state_changed events newest first in pages until a resume is seen,
+   * so mode changes cannot push a pause out of view. Newest pause first, so
+   * its correlation id links the resume. A second pause while already paused
+   * adds to the set rather than replacing it.
    */
-  private async heldSinceLastResume(): Promise<{
+  private async heldSinceLastResume(executor: DbExecutor): Promise<{
     lastPause: { eventId: string; correlationId: string } | null;
     held: HeldProposal[];
   }> {
-    const events = await this.reader.query({ kind: 'state_changed', limit: 200 });
+    const reader = new LedgerReader(executor);
     const held = new Map<string, HeldProposal>();
     let lastPause: { eventId: string; correlationId: string } | null = null;
-    for (const event of events) {
-      const payload = event.payload as Record<string, unknown> | null;
-      const change = payload?.['change'];
-      if (change === 'resume') break;
-      if (change !== 'pause') continue;
-      lastPause ??= { eventId: event.id, correlationId: event.correlationId };
-      for (const row of readHeld(payload)) {
-        if (!held.has(row.id)) held.set(row.id, row);
+    let before: string | undefined;
+    for (;;) {
+      const page = await reader.query({
+        kind: 'state_changed',
+        limit: PAGE,
+        ...(before ? { to: before } : {}),
+      });
+      const events =
+        before === undefined ? page : page.filter((event) => event.ts.toISOString() < before!);
+      for (const event of events) {
+        const payload = event.payload as Record<string, unknown> | null;
+        const change = payload?.['change'];
+        if (change === 'resume') return { lastPause, held: [...held.values()] };
+        if (change !== 'pause' && change !== 'hold') continue;
+        if (change === 'pause')
+          lastPause ??= { eventId: event.id, correlationId: event.correlationId };
+        for (const row of readHeld(payload)) {
+          if (!held.has(row.id)) held.set(row.id, row);
+        }
       }
+      if (page.length < PAGE) return { lastPause, held: [...held.values()] };
+      const oldest = page[page.length - 1];
+      if (oldest === undefined) return { lastPause, held: [...held.values()] };
+      before = oldest.ts.toISOString();
     }
-    return { lastPause, held: [...held.values()] };
   }
 }

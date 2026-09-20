@@ -1,5 +1,8 @@
 import type { Db } from '@lance/db';
 import { ledgerEvents, observations } from '@lance/db';
+
+/** A pool or an open transaction; both expose the same query builders. */
+export type DbExecutor = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
 import {
   LedgerEventInputSchema,
   hashRecord,
@@ -61,14 +64,21 @@ export function observedProvenance(input: ProvenanceFields): ObservedProvenance 
 export class LedgerWriter {
   constructor(private readonly db: Db) {}
 
-  async append(candidate: LedgerEventInputCandidate): Promise<AppendResult> {
+  /**
+   * Appends inside `executor` when one is given (an open transaction from the
+   * caller), so state changes and their ledger events commit together.
+   */
+  async append(
+    candidate: LedgerEventInputCandidate,
+    executor: DbExecutor = this.db,
+  ): Promise<AppendResult> {
     const input = LedgerEventInputSchema.parse(candidate);
     const id = newUlid();
     const payload = input.payload ?? null;
     const payloadHash = hashRecord(payload);
     if (input.kind === 'observed') observedProvenance(input);
 
-    return this.db.transaction(async (tx) => {
+    return executor.transaction(async (tx) => {
       const inserted = await tx
         .insert(ledgerEvents)
         .values({

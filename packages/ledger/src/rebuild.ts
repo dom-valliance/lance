@@ -13,6 +13,8 @@ export async function rebuildObservations(db: Db): Promise<{ rebuilt: number }> 
     const events = await tx.select().from(ledgerEvents).where(eq(ledgerEvents.kind, 'observed'));
     for (const event of events) {
       const payload = event.payload as Record<string, unknown> | null;
+      // Retention has nulled this event's payload (ADR 0011); its observation row was nulled with it.
+      if (payload === null) continue;
       const provenance = observedProvenance(event);
       await tx.insert(observations).values({
         id: event.id,
