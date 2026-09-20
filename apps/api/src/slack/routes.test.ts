@@ -73,6 +73,11 @@ describe('Slack request signing', () => {
     expect(response.statusCode).toBe(200);
   });
 
+  it('refuses status to a Slack user other than Dom', async () => {
+    const response = await post('/slack/commands', command('status', 'U0STRANGER'), FORM);
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ text: string }>().text).toContain('Dom only');
+  });
   it('rejects a slash command whose signature does not match the body', async () => {
     const response = await post('/slack/commands', command('status'), FORM, {
       signature: 'v0=0000000000000000000000000000000000000000000000000000000000000000',

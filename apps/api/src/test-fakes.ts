@@ -150,6 +150,8 @@ export interface SignOptions {
   audience?: string;
   /** Anything `jose` accepts: "5m", a Unix second count, or a Date. */
   expiresAt?: string | number | Date;
+  /** Leave `exp` out entirely, to prove the verifier requires it. */
+  omitExpiry?: boolean;
 }
 
 export interface TestJwks {
@@ -171,13 +173,13 @@ export const createTestJwks = async (issuer: string, audience: string): Promise<
   return {
     jwks: createLocalJWKSet({ keys: [publicJwk] }),
     async sign(claims: Record<string, unknown>, options: SignOptions = {}): Promise<string> {
-      return new SignJWT(claims)
+      const jwt = new SignJWT(claims)
         .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
         .setIssuer(options.issuer ?? issuer)
         .setAudience(options.audience ?? audience)
-        .setIssuedAt()
-        .setExpirationTime(options.expiresAt ?? '5m')
-        .sign(privateKey);
+        .setIssuedAt();
+      if (!options.omitExpiry) jwt.setExpirationTime(options.expiresAt ?? '5m');
+      return jwt.sign(privateKey);
     },
   };
 };

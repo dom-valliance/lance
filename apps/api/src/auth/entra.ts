@@ -28,10 +28,11 @@ const jwksUrl = (tenantId: string): URL =>
 
 /**
  * Entra puts the signed-in user's name in `preferred_username`. Older
- * tokens and some guest scenarios use `upn`; `email` is the last resort.
+ * tokens use `upn`. `email` is deliberately not consulted: it is not a
+ * verified claim in Entra tokens.
  */
 const claimedUpn = (payload: Record<string, unknown>): string | null => {
-  for (const claim of ['preferred_username', 'upn', 'email']) {
+  for (const claim of ['preferred_username', 'upn']) {
     const value = payload[claim];
     if (typeof value === 'string' && value.length > 0) return value;
   }
@@ -84,7 +85,13 @@ export const createEntraVerifier = (options: EntraVerifierOptions): TokenVerifie
 
       let payload: Record<string, unknown>;
       try {
-        const result = await jwtVerify(bearer, keys, { issuer, audience: options.clientId });
+        const result = await jwtVerify(bearer, keys, {
+          issuer,
+          audience: options.clientId,
+          algorithms: ['RS256'],
+          requiredClaims: ['exp', 'iat'],
+          clockTolerance: '60s',
+        });
         payload = result.payload;
       } catch (error) {
         throw rejection(error);

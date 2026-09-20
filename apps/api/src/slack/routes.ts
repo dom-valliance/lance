@@ -177,7 +177,11 @@ export const slackRoutes =
 
       switch (verb) {
         case 'status':
-          return handleStatus(deps);
+          return mayControl(deps, parsed.data.user_id)
+            ? handleStatus(deps)
+            : ephemeral(
+                `${displayName} status is available to Dom only; it includes cursor ages and spend.`,
+              );
         case 'pause':
           return mayControl(deps, parsed.data.user_id)
             ? handlePause(deps, rest, displayName)

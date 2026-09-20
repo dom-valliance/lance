@@ -47,9 +47,14 @@ describe('createEntraVerifier', () => {
     await expect(verifier.verify(token)).resolves.toEqual({ upn: TEST_UPN });
   });
 
-  it('falls back to the email claim when neither other claim is present', async () => {
+  it('does not accept the unverified email claim on its own', async () => {
     const token = await keys.sign({ email: TEST_UPN });
-    await expect(verifier.verify(token)).resolves.toEqual({ upn: TEST_UPN });
+    await expect(verifier.verify(token)).rejects.toBeInstanceOf(UnauthorisedError);
+  });
+
+  it('rejects a token without an expiry', async () => {
+    const token = await keys.sign({ preferred_username: TEST_UPN }, { omitExpiry: true });
+    await expect(verifier.verify(token)).rejects.toBeInstanceOf(UnauthorisedError);
   });
 
   it('rejects a token issued for a different application', async () => {
