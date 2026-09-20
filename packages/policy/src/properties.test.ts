@@ -235,11 +235,17 @@ describe('policy engine properties', () => {
         fc.constantFrom(...HARD_FLOOR_ACTION_CLASSES),
         ({ raw, rules }, actionClass) => {
           const result = evaluate({ ...raw, actionClass }, rules);
+          expect(result.unmetConditions).toEqual([]);
+          if (actionClass === 'rule_change' && result.reason === 'rule_matched') {
+            // The propose floor may be tightened by a matching forbid rule, never loosened.
+            expect(result.decision).toBe('forbid');
+            expect(rules.find((rule) => rule.id === result.ruleId)?.decision).toBe('forbid');
+            return;
+          }
           expect(result.reason).toBe('hard_floor');
           expect(result.decision).toBe(actionClass === 'rule_change' ? 'propose' : 'forbid');
           expect(result.ruleId).toBeNull();
           expect(result.specificity).toBeNull();
-          expect(result.unmetConditions).toEqual([]);
         },
       ),
       { numRuns: RUNS },

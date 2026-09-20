@@ -43,8 +43,23 @@ export function evaluate(
   const input = PolicyInputSchema.parse(rawInput);
 
   if (isHardFloorActionClass(input.actionClass)) {
+    const floor = hardFloorDecision(input.actionClass);
+    // A floor at propose can still be tightened to forbid by a rule; it can
+    // never be loosened to auto (validateRule rejects such rules and the
+    // floor is applied here regardless).
+    const stricter = floor === 'propose' ? selectRule(rules, input) : null;
+    if (stricter !== null && stricter.decision === 'forbid') {
+      return {
+        decision: 'forbid',
+        reason: 'rule_matched',
+        ruleId: stricter.id,
+        specificity: specificityOf(stricter),
+        unmetConditions: [],
+        requiresCriticPass: false,
+      };
+    }
     return {
-      decision: hardFloorDecision(input.actionClass),
+      decision: floor,
       reason: 'hard_floor',
       ruleId: null,
       specificity: null,
