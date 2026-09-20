@@ -62,6 +62,10 @@ var webSecretBindings = [
     secretName: 'entra-client-secret'
     envName: 'ENTRA_CLIENT_SECRET'
   }
+  {
+    secretName: 'allowed-upn'
+    envName: 'ALLOWED_UPN'
+  }
 ]
 
 var apiSecretBindings = [
@@ -119,6 +123,10 @@ var workerSecretBindings = [
   {
     secretName: 'entra-client-secret'
     envName: 'ENTRA_CLIENT_SECRET'
+  }
+  {
+    secretName: 'allowed-upn'
+    envName: 'ALLOWED_UPN'
   }
 ]
 
