@@ -69,7 +69,7 @@ az keyvault secret set --vault-name $KV --name entra-client-secret --value '<the
 az keyvault secret set --vault-name $KV --name allowed-upn --value dom@valliance.ai
 ```
 
-Type the secret value on the command line only in a shell with history disabled (`set +o history` in bash, `unsetopt HIST_IGNORE_SPACE` is not enough in zsh; use `read -s SECRET` then `--value "$SECRET"`).
+Keep the secret out of shell history: `read -s SECRET` first, then pass `--value "$SECRET"`.
 
 ## 6. Postgres Entra administrator
 
