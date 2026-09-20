@@ -1,4 +1,4 @@
-import { ulid } from 'ulid';
+import { monotonicFactory } from 'ulid';
 
 /**
  * Crockford base32, 26 characters: the canonical ULID shape used for every
@@ -14,15 +14,18 @@ const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 export type Ulid = string & { readonly __brand: 'Ulid' };
 
 /**
- * Generates a new, lexicographically sortable ULID.
+ * Generates a new, lexicographically sortable ULID. Monotonic within this
+ * process, so two ids minted in the same millisecond still order correctly.
  *
  * Uses the `ulid` npm package rather than a hand-rolled generator: ULID
  * generation must be monotonic-safe and cryptographically random, and a
  * small, widely used, dependency-free implementation is less risk than
  * maintaining the same logic in this repository.
  */
+const nextUlid = monotonicFactory();
+
 export function newUlid(): Ulid {
-  return ulid() as Ulid;
+  return nextUlid() as Ulid;
 }
 
 /**
