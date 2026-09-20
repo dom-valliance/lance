@@ -4,12 +4,30 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./router": "./src/router.ts"
   },
   "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
     "build": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@lance/db": "workspace:*",
+    "@lance/ledger": "workspace:*",
+    "@lance/shared": "workspace:*",
+    "@trpc/server": "11.19.0",
+    "drizzle-orm": "0.45.2",
+    "fastify": "5.12.5",
+    "jose": "6.2.12",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "12.1.0",
+    "@types/node": "26.6.2",
+    "tsx": "4.23.13"
   }
 }
