@@ -6,6 +6,11 @@ dist/
 .turbo/
 coverage/
 .next/
+playwright-report/
 fixtures/evals/
 *.log
 .DS_Store
+apps/web/test-results/
+apps/web/next-env.d.ts
+apps/web/CLAUDE.md
+apps/web/AGENTS.md

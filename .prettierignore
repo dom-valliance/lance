@@ -1,5 +1,6 @@
 node_modules
 dist
+.next
 .turbo
 coverage
 pnpm-lock.yaml
@@ -9,3 +10,4 @@ fixtures/evals
 CLAUDE.md
 Ian-Assistant_Spec_v1.md
 docs/
+next-env.d.ts
