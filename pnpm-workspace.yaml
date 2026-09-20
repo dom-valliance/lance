@@ -2,4 +2,16 @@ packages:
   - 'apps/*'
   - 'packages/*'
 allowBuilds:
+  # drizzle-kit and tsx run their TypeScript through esbuild, which needs its
+  # platform binary installed by the postinstall script.
+  esbuild: true
   unrs-resolver: true
+  # Optional native extras pulled in by testcontainers' Docker client. The
+  # JavaScript fallbacks are used, so the build scripts are not needed.
+  cpu-features: false
+  protobufjs: false
+  ssh2: false
+overrides:
+  # vite lists tsx as an optional peer; without a pin pnpm auto-installs the
+  # newest release, which lands a second tsx in the lockfile.
+  tsx: 4.23.13

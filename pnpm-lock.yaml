@@ -244,7 +244,21 @@ importers:
         specifier: 4.23.13
         version: 4.23.13
 
-  packages/ledger: {}
+  packages/ledger:
+    dependencies:
+      '@lance/db':
+        specifier: workspace:*
+        version: link:../db
+      '@lance/shared':
+        specifier: workspace:*
+        version: link:../shared
+      drizzle-orm:
+        specifier: ^0.45.0
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
+    devDependencies:
+      '@types/node':
+        specifier: 26.6.2
+        version: 26.6.2
 
   packages/ontology: {}
 
