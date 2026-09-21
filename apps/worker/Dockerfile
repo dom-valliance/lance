@@ -1,13 +1,13 @@
-# Build context is the repository root, not apps/api: the api imports
-# @lance/db, @lance/ledger and @lance/shared as workspace TypeScript source.
+# Build context is the repository root, not apps/worker: the worker imports
+# @lance/db, @lance/ledger, @lance/shared and @lance/telemetry as workspace
+# TypeScript source.
 #
-#   docker build -f apps/api/Dockerfile -t lance-api .
+#   docker build -f apps/worker/Dockerfile -t lance-worker .
 #
-# The image runs the TypeScript directly under tsx rather than shipping a
-# compiled bundle. Every package in this repository exports `./src/*.ts` and
-# every build script is `tsc --noEmit`, so there is no emit step to copy: a
-# compiled api would need a new build pipeline for four packages to gain
-# nothing but start-up time. Revisit when the packages emit JavaScript.
+# Runs the TypeScript under tsx, for the same reason as apps/api/Dockerfile.
+# The same image serves the migration job with a different command
+# (infra/modules/migrate-job.bicep), so the db package's drizzle folder and
+# migrate script are included.
 
 FROM node:22-alpine AS deps
 # The root `prepare` script points core.hooksPath at .githooks, so pnpm
@@ -30,13 +30,13 @@ COPY packages/ontology/package.json packages/ontology/
 COPY packages/policy/package.json packages/policy/
 COPY packages/shared/package.json packages/shared/
 COPY packages/telemetry/package.json packages/telemetry/
-RUN git init -q . && pnpm install --frozen-lockfile --filter @lance/api... && rm -rf .git
+RUN git init -q . && pnpm install --frozen-lockfile --filter @lance/worker... && rm -rf .git
 
-# Only the source the api actually loads. Nothing else is copied, so the
+# Only the source the worker actually loads. Nothing else is copied, so the
 # image carries no fixtures, no tests from other packages and no .env.
 COPY tsconfig.base.json ./
-COPY apps/api/tsconfig.json apps/api/
-COPY apps/api/src apps/api/src
+COPY apps/worker/tsconfig.json apps/worker/
+COPY apps/worker/src apps/worker/src
 COPY packages/db/src packages/db/src
 COPY packages/db/drizzle packages/db/drizzle
 COPY packages/ledger/src packages/ledger/src
@@ -45,13 +45,11 @@ COPY packages/telemetry/src packages/telemetry/src
 
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
-ENV PORT=3001
-WORKDIR /app/apps/api
+WORKDIR /app/apps/worker
 
 COPY --from=deps --chown=node:node /app /app
 
 # The node image ships an unprivileged `node` user; the process never needs root.
 USER node
-EXPOSE 3001
 
 CMD ["./node_modules/.bin/tsx", "src/main.ts"]
