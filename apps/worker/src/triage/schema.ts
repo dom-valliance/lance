@@ -83,6 +83,13 @@ export const AlertCandidateSchema = z.object({
   recordId: z.string().min(1),
 });
 
+/** A decision or an open question from a meeting transcript (spec 10.4), with its quote. */
+export const QuotedPointSchema = z.object({
+  text: z.string().min(1).max(300),
+  evidenceQuote,
+  recordId: z.string().min(1),
+});
+
 /** Spec 7.2. Proposals are submitted through the create_proposal tool, so the output only counts them. */
 export const TriageOutputSchema = z.object({
   importance: z.number().min(0).max(1),
@@ -93,8 +100,12 @@ export const TriageOutputSchema = z.object({
   taskCandidates: z.array(TaskCandidateSchema).max(20),
   proposalsSubmitted: z.number().int().min(0),
   alertCandidates: z.array(AlertCandidateSchema).max(10),
+  /** Meeting transcripts only (spec 10.4); empty for everything else. */
+  decisions: z.array(QuotedPointSchema).max(20).default([]),
+  openQuestions: z.array(QuotedPointSchema).max(20).default([]),
 });
 
 export type TriageOutput = z.infer<typeof TriageOutputSchema>;
 export type TaskCandidate = z.infer<typeof TaskCandidateSchema>;
 export type AlertCandidate = z.infer<typeof AlertCandidateSchema>;
+export type QuotedPoint = z.infer<typeof QuotedPointSchema>;

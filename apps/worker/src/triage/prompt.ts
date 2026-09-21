@@ -28,7 +28,8 @@ export function triageSystemPrompt(displayName: string): string {
       '. Never close with: ' +
       BANNED_CLOSERS.join(', ') +
       '. Most sentences under fifteen words. Open on the specific thing. Close on the ask or the fact.',
-    '8. Reply with only the JSON object once you have finished any tool calls.',
+    '8. A meeting transcript (an observation from the jamie watcher with a transcript) also yields decisions and openQuestions, each one sentence with its verbatim quote and recordId; leave both empty for anything that is not a transcript. Commitments from a transcript are extracted separately, so list only the ones you are sure of.',
+    '9. Reply with only the JSON object once you have finished any tool calls.',
   ].join('\n');
 }
 

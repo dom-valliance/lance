@@ -1,5 +1,6 @@
 import {
   createAnthropicClient,
+  createCommitmentExtractor,
   dbRunRecorder,
   dbSpendReader,
   sdkModelRunner,
@@ -9,15 +10,19 @@ import {
   createAccessTokenProvider,
   createGraphConnector,
   createGraphReads,
+  createJamieConnector,
+  createJamieReads,
   createNotionConnector,
   createSlackSurface,
   InMemoryTokenStore,
   KeyVaultTokenStore,
   type GraphReads,
+  type JamieReads,
   type NotionConnector,
   type SlackSurface,
 } from '@lance/connectors';
 import { createDb, observations, proposals, type Db } from '@lance/db';
+import { OntologyRepository } from '@lance/ontology';
 import { expireProposals, LedgerWriter, SystemControl, toProposal } from '@lance/ledger';
 import { getConfig, nowIso, readSecret, type Config, type ProvenanceRef } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
@@ -37,6 +42,8 @@ import { createBoss, startBoss } from './scheduler/boss.js';
 import { PauseGate } from './scheduler/gate.js';
 import { QUEUES } from './scheduler/queues.js';
 import { runTriage } from './triage/run.js';
+import { createJamieWatcher } from './watchers/jamie/index.js';
+import { createNotionWatcher, notionWatcherReads } from './watchers/notion/index.js';
 import { pgBossTriageEnqueuer, registerWatcher, type TriageJob } from './watchers/runner.js';
 import {
   createGraphCalendarWatcher,
@@ -153,6 +160,27 @@ function buildNotion(
   return { connector, writers: notionExecutionWriters(connector, config) };
 }
 
+/** Jamie is optional at boot: without JAMIE_API_KEY the worker runs everything else (ADR 0005). */
+function buildJamie(db: Db): JamieReads | null {
+  if (env('JAMIE_API_KEY') === undefined) return null;
+  const jamie = createJamieConnector({
+    apiKey: readSecret('JAMIE_API_KEY'),
+    events: {
+      onOpen: async (name, error) => {
+        await raiseAlert(db, {
+          kind: 'breaker_open',
+          severity: 'P1',
+          dedupeKey: `breaker:${name}`,
+          title: `${name} circuit breaker opened`,
+          body: error instanceof Error ? error.message : String(error),
+          actor: `agent:worker@${WORKER_VERSION}`,
+        });
+      },
+    },
+  });
+  return createJamieReads(jamie);
+}
+
 function buildSlack(config: Config): SlackSurface | null {
   if (env('SLACK_BOT_TOKEN') === undefined) return null;
   return createSlackSurface({
@@ -233,6 +261,16 @@ async function main(): Promise<void> {
   const notion = buildNotion(config, db);
   const slack = buildSlack(config);
   const agent = buildAgentDeps(config, db);
+  const jamie = buildJamie(db);
+  const ontology = new OntologyRepository(db);
+  const extractCommitments =
+    agent === null
+      ? null
+      : createCommitmentExtractor({
+          agent,
+          model: config.models.triage,
+          displayName: config.agentDisplayName,
+        });
 
   // A second mail watcher instance with no labeller: used only to normalise a
   // re-fetched message for the executor's hash check, never to poll.
@@ -350,7 +388,19 @@ async function main(): Promise<void> {
           await boss.send(QUEUES.triage, job.data, { startAfter: TRIAGE_RETRY_WHILE_PAUSED_S });
           continue;
         }
-        await runTriage({ db, config, agent, createProposal }, job.data);
+        await runTriage(
+          {
+            db,
+            config,
+            agent,
+            createProposal,
+            ontology,
+            extractCommitments,
+            dom: { ...config.dom, notionUserId: config.notion.domUserId },
+            debrief: { slack },
+          },
+          job.data,
+        );
       }
     });
   }
@@ -377,6 +427,27 @@ async function main(): Promise<void> {
       config.timeZone,
     );
   }
+  const phaseTwoRunnerDeps = { db, gate, control, enqueueTriage: pgBossTriageEnqueuer(boss) };
+  if (jamie !== null) {
+    await registerWatcher(
+      boss,
+      phaseTwoRunnerDeps,
+      createJamieWatcher({ reads: jamie, domEmail: config.dom.email }),
+      config.timeZone,
+    );
+  }
+  if (notion !== null) {
+    await registerWatcher(
+      boss,
+      phaseTwoRunnerDeps,
+      createNotionWatcher({
+        reads: notionWatcherReads(notion.connector),
+        tasksDataSourceId: config.notion.tasksDataSourceId,
+        meetingsDataSourceId: config.notion.meetingsDataSourceId,
+      }),
+      config.timeZone,
+    );
+  }
 
   console.info(
     {
@@ -384,6 +455,7 @@ async function main(): Promise<void> {
       seededRules: seeded.inserted,
       graph: graph !== null,
       notion: notion !== null,
+      jamie: jamie !== null,
       slack: slack !== null,
       agents: agent !== null,
       displayName: config.agentDisplayName,

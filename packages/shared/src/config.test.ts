@@ -270,3 +270,24 @@ describe('getConfig', () => {
     }
   });
 });
+
+describe('dom identity', () => {
+  it('defaults the email to ALLOWED_UPN and the name to Dom Selvon', () => {
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      DATABASE_URL: 'postgres://postgres:postgres@localhost:5432/lance',
+      ALLOWED_UPN: 'dom@example.test',
+    });
+    expect(config.dom).toEqual({ name: 'Dom Selvon', email: 'dom@example.test' });
+  });
+
+  it('takes DOM_EMAIL and DOM_NAME when set', () => {
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      DATABASE_URL: 'postgres://postgres:postgres@localhost:5432/lance',
+      DOM_NAME: 'D. Selvon',
+      DOM_EMAIL: 'd@example.test',
+    });
+    expect(config.dom).toEqual({ name: 'D. Selvon', email: 'd@example.test' });
+  });
+});
