@@ -189,13 +189,13 @@ Run this once per environment, as the Entra administrator from step 2, before th
    az deployment sub create --location uksouth --template-file infra/main.bicep --parameters infra/params/dev.bicepparam
    ```
 
-2. Connect with an Entra access token as the password:
+2. Connect to the `postgres` maintenance database, not `lance`, with an Entra access token as the password. The `pgaadauth_*` functions exist only there; roles are cluster-wide, so principals created here apply to `lance`:
 
    ```
    PGHOST=<postgres FQDN from the outputs>
    PGPASSWORD=$(az account get-access-token \
      --resource-type oss-rdbms --query accessToken -o tsv) \
-   psql "host=$PGHOST port=5432 dbname=lance user=dom@valliance.ai sslmode=require"
+   psql "host=$PGHOST port=5432 dbname=postgres user=dom@valliance.ai sslmode=require"
    ```
 
 3. Create a principal for each managed identity. The arguments are `isAdmin` and `isMfa`. The migrate identity is an admin principal because the migrations create roles and extensions, which needs `azure_pg_admin`; the three app identities are not:
@@ -227,7 +227,7 @@ az containerapp job logs show -g rg-lance-dev -n caj-lance-migrate-dev --contain
 
 ## 9. Grant the application roles
 
-Back in the psql session from step 7, now that the migrations have created the roles. The three app identities get `lance_app`, which has INSERT and SELECT on the ledger and no UPDATE or DELETE there:
+Back in the psql session from step 7 (still on the `postgres` database; roles are cluster-wide), now that the migrations have created the roles. The three app identities get `lance_app`, which has INSERT and SELECT on the ledger and no UPDATE or DELETE there:
 
 ```sql
 GRANT lance_app TO "id-lance-web-dev";
