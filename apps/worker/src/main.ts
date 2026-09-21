@@ -36,7 +36,13 @@ import { createBoss, startBoss } from './scheduler/boss.js';
 import { PauseGate } from './scheduler/gate.js';
 import { QUEUES } from './scheduler/queues.js';
 import { runTriage } from './triage/run.js';
-import { pgBossTriageEnqueuer, type TriageJob } from './watchers/runner.js';
+import { pgBossTriageEnqueuer, registerWatcher, type TriageJob } from './watchers/runner.js';
+import {
+  createGraphCalendarWatcher,
+  createGraphMailWatcher,
+  createHaikuLabeller,
+} from './watchers/graph/index.js';
+import { hashRecord } from '@lance/shared';
 
 const WORKER_VERSION = '0.1.0';
 const EXPIRY_QUEUE = 'expire-proposals';
@@ -200,6 +206,16 @@ async function main(): Promise<void> {
   const slack = buildSlack(config);
   const agent = buildAgentDeps(config, db);
 
+  // A second mail watcher instance with no labeller: used only to normalise a
+  // re-fetched message for the executor's hash check, never to poll.
+  const verifier = createGraphMailWatcher({
+    reads:
+      graph === null
+        ? { deltaMessages: () => Promise.reject(new Error('verifier does not poll')) }
+        : graph.reads,
+    label: () => Promise.resolve([]),
+  });
+
   const createProposal = createProposalHandler({
     db,
     config,
@@ -220,8 +236,28 @@ async function main(): Promise<void> {
       ...(notion === null ? {} : { notion: notion.writers }),
     },
     loadRules: () => loadActiveRules(db),
-    // The mail normaliser lands with the watchers; until it is wired, a target is treated as unknown rather than unchanged.
-    verifyTarget: () => Promise.resolve('unknown' as const),
+    verifyTarget: async (proposal) => {
+      // Spec 7.5 step 2: re-fetch the target and compare the same content hash
+      // the watcher recorded. Only Graph messages are checked in v1.
+      if (graph === null || proposal.targetSystem !== 'graph' || proposal.targetRecordId === null)
+        return 'unknown';
+      const ref = proposal.provenance.find(
+        (entry) => entry.system === 'graph' && entry.recordId === proposal.targetRecordId,
+      );
+      if (ref === undefined) return 'unknown';
+      try {
+        const message = await graph.reads.getMessage(proposal.targetRecordId);
+        const partition =
+          typeof message.parentFolderId === 'string' ? message.parentFolderId : 'inbox';
+        const observation = await verifier.normalise(
+          { id: message.id, observedAt: nowIso(), raw: message },
+          partition,
+        );
+        return hashRecord(observation.record) === ref.hash ? 'unchanged' : 'changed';
+      } catch {
+        return 'unknown';
+      }
+    },
     loadProposal: async (id) => {
       const rows = await db.select().from(proposals).where(eq(proposals.id, id)).limit(1);
       return rows[0] === undefined ? null : toProposal(rows[0]);
@@ -244,7 +280,29 @@ async function main(): Promise<void> {
       }
     });
   }
-  void pgBossTriageEnqueuer;
+  if (graph !== null) {
+    const runnerDeps = { db, gate, control, enqueueTriage: pgBossTriageEnqueuer(boss) };
+    const label =
+      agent === null
+        ? () => Promise.resolve(['Unlabelled'])
+        : createHaikuLabeller({
+            agent,
+            model: config.models.label,
+            displayName: config.agentDisplayName,
+          });
+    await registerWatcher(
+      boss,
+      runnerDeps,
+      createGraphMailWatcher({ reads: graph.reads, label }),
+      config.timeZone,
+    );
+    await registerWatcher(
+      boss,
+      runnerDeps,
+      createGraphCalendarWatcher({ reads: graph.reads }),
+      config.timeZone,
+    );
+  }
 
   console.info(
     {
