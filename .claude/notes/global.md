@@ -118,3 +118,10 @@
 **Correction**: Dom pasted the CI log.
 **Rule**: A verification command is judged by its exit code, with its last lines shown unfiltered. Never pipe lint, typecheck or test output through a grep that can drop the failure, and never print a success message after a pipeline whose exit status was not checked.
 **Applies to**: global
+
+### [2026-09-21] Every control needs a caller and every setting a reader
+
+**Context**: Dom ran pause and resume in dry run and the proposals stayed held, as designed, but nothing outside the tests called `SystemControl.setMode`, so dry run could never end, and the three write feature flags were parsed from the environment but read by nothing. Both were listed as done in the plan because the code and the config existed.
+**Correction**: Dom asked what happens next and whether more had to be built.
+**Rule**: A control (mode, kill switch, flag) is only done when the path Dom uses to work it exists (Slack command, admin route or page) and the code that must obey it reads it. Grep for the reader before calling a config value done; a value with no reader is a gap, not a feature. The going-live sequence in the deploy runbook is the checklist.
+**Applies to**: apps/api/src/slack, apps/api/src/routes/admin.ts, apps/worker/src/executor
