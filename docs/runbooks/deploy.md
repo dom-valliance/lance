@@ -182,7 +182,14 @@ az acr repository show-tags --name $ACR --repository lance-web -o tsv
 
 Run this once per environment, as the Entra administrator from step 2, before the migration job. The identity names come from the `identityNames` deployment output and are exactly `id-lance-web-dev`, `id-lance-api-dev`, `id-lance-worker-dev` and `id-lance-migrate-dev`.
 
-1. Connect with an Entra access token as the password:
+1. Open the firewall to your machine. The server accepts Azure services only, so a psql connection from outside times out. Export your public IP and redeploy; the template adds a single-address rule. Unset the variable and redeploy later to remove it:
+
+   ```
+   export LANCE_ADMIN_CLIENT_IP=$(curl -s https://api.ipify.org)
+   az deployment sub create --location uksouth --template-file infra/main.bicep --parameters infra/params/dev.bicepparam
+   ```
+
+2. Connect with an Entra access token as the password:
 
    ```
    PGHOST=<postgres FQDN from the outputs>
@@ -191,7 +198,7 @@ Run this once per environment, as the Entra administrator from step 2, before th
    psql "host=$PGHOST port=5432 dbname=lance user=dom@valliance.ai sslmode=require"
    ```
 
-2. Create a principal for each managed identity. The arguments are `isAdmin` and `isMfa`. The migrate identity is an admin principal because the migrations create roles and extensions, which needs `azure_pg_admin`; the three app identities are not:
+3. Create a principal for each managed identity. The arguments are `isAdmin` and `isMfa`. The migrate identity is an admin principal because the migrations create roles and extensions, which needs `azure_pg_admin`; the three app identities are not:
 
    ```sql
    SELECT * FROM pgaadauth_create_principal('id-lance-migrate-dev', true, false);

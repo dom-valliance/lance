@@ -9,6 +9,9 @@ param postgresEntraAdminPrincipalName = 'dom@valliance.ai'
 
 // Password fallback only (ADR 0008). Nothing in the running system uses it. Export
 // LANCE_PG_ADMIN_PASSWORD in the deploying shell; never commit a value here.
+// Your public IP for the psql steps in deploy.md, exported at deploy time and never
+// committed. Leave the variable unset to remove the rule on the next deploy.
+param postgresAdminClientIp = readEnvironmentVariable('LANCE_ADMIN_CLIENT_IP', '')
 param postgresPasswordAuthEnabled = false
 param postgresAdministratorPassword = readEnvironmentVariable('LANCE_PG_ADMIN_PASSWORD', '')
 
