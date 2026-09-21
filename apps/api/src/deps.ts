@@ -9,7 +9,7 @@ import type {
   ProposalFilter,
   ResumeResult,
 } from '@lance/ledger';
-import type { Config, LedgerEventInputCandidate, Proposal } from '@lance/shared';
+import type { Config, LedgerEventInputCandidate, Proposal, SystemMode } from '@lance/shared';
 import type { FeedEvent, FeedListener } from './events.js';
 import type { DecisionRequest } from './proposals/decide.js';
 import type { StatusSource } from './status.js';
@@ -25,6 +25,11 @@ export interface SystemControlLike {
   read(): Promise<SystemState>;
   pause(options: { reason: string; actor: string }): Promise<PauseResult>;
   resume(options: { actor: string }): Promise<ResumeResult>;
+  /** Switches between dry run and live (spec 6.3); records a state_changed event either way. */
+  setMode(
+    mode: SystemMode,
+    options: { actor: string },
+  ): Promise<{ changed: boolean; eventId: string }>;
 }
 
 export interface LedgerReaderLike {

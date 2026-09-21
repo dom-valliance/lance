@@ -197,6 +197,33 @@ describe('/lance resume', () => {
   });
 });
 
+describe('/lance mode', () => {
+  it('reports the current mode when no mode is given', async () => {
+    const text = await slashText('mode');
+    expect(text).toContain('Lance is in dry_run mode.');
+    expect(harness.control.modeCalls).toEqual([]);
+  });
+
+  it('switches to live and says how held proposals are released', async () => {
+    const text = await slashText('mode live');
+    expect(harness.control.modeCalls).toEqual([{ mode: 'live', actor: 'user:dom' }]);
+    expect(text).toContain('Lance is now in live mode.');
+    expect(text).toContain('/lance pause then /lance resume');
+  });
+
+  it('refuses a word that is not a mode', async () => {
+    const text = await slashText('mode shadow');
+    expect(harness.control.modeCalls).toEqual([]);
+    expect(text).toContain('is not a mode');
+  });
+
+  it('refuses a user who is not on the Slack allowlist', async () => {
+    const text = await slashText('mode live', 'U0INTRUDER');
+    expect(harness.control.modeCalls).toEqual([]);
+    expect(text).toContain('Only Dom');
+  });
+});
+
 describe('the commands that arrive in a later phase', () => {
   it('says so for brief', async () => {
     expect(await slashText('brief')).toBe(
@@ -220,7 +247,7 @@ describe('the commands that arrive in a later phase', () => {
 describe('an unrecognised slash command', () => {
   it('replies with the usage line', async () => {
     expect(await slashText('sing')).toBe(
-      'Usage: /lance status | pause [reason] | resume | brief | task <text> | chase <commitment id>',
+      'Usage: /lance status | pause [reason] | resume | mode [live|dry_run] | brief | task <text> | chase <commitment id>',
     );
   });
 
