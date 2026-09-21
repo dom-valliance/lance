@@ -27,9 +27,6 @@ param entraAdminObjectId string
 @description('Principal name of the Entra administrator, normally a UPN.')
 param entraAdminPrincipalName string
 
-@description('Public IPv4 address allowed to reach the server from outside Azure, for psql during the runbook steps. Empty means no rule.')
-param adminClientIp string = ''
-
 @description('Whether password authentication is enabled alongside Entra.')
 param passwordAuthEnabled bool
 
@@ -145,9 +142,10 @@ resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-0
 }
 
 // The 0.0.0.0 to 0.0.0.0 rule is the Azure convention for "allow Azure services",
-// which is how the Container Apps environment reaches the server. The only other
-// rule is Dom's client IP for psql, supplied at deploy time and removed by
-// redeploying without it. Phase 5 replaces all of this with a private endpoint.
+// which is how the Container Apps environment reaches the server. It is the only
+// rule the template owns. Access for psql from a laptop is opened and closed per
+// session by scripts/psql-admin.sh, because the address changes with the network.
+// Phase 5 replaces all of this with a private endpoint.
 resource allowAzureServices 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2024-08-01' = {
   parent: postgresServer
   name: 'AllowAllAzureServicesAndResourcesWithinAzureIps'
@@ -157,18 +155,6 @@ resource allowAzureServices 'Microsoft.DBforPostgreSQL/flexibleServers/firewallR
   }
   dependsOn: [
     database
-  ]
-}
-
-resource allowAdminClient 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2024-08-01' = if (adminClientIp != '') {
-  parent: postgresServer
-  name: 'AllowAdminClient'
-  properties: {
-    startIpAddress: adminClientIp
-    endIpAddress: adminClientIp
-  }
-  dependsOn: [
-    allowAzureServices
   ]
 }
 
@@ -183,7 +169,6 @@ resource logConnections 'Microsoft.DBforPostgreSQL/flexibleServers/configuration
   }
   dependsOn: [
     allowAzureServices
-    allowAdminClient
   ]
 }
 

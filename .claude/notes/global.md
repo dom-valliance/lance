@@ -139,3 +139,10 @@
 **Correction**: Dom pasted the timeout.
 **Rule**: A psql timeout against Flexible Server is checked first against the current public IP and the `AllowAdminClient` rule. The fix is `export LANCE_ADMIN_CLIENT_IP=$(curl -s https://api.ipify.org)` and a redeploy, never a hand-edited rule. The runbook says to take the value from `curl` every time.
 **Applies to**: docs/runbooks/deploy.md, infra/modules/postgres.bicep
+
+### [2026-09-21] The template owns no client firewall rule
+
+**Context**: The single-address rule from `LANCE_ADMIN_CLIENT_IP` went stale within a day because Dom moves between home, work and elsewhere. Supersedes the entry above about refreshing the variable.
+**Correction**: Dom: "I will not always be on the same IP as I move between work and home".
+**Rule**: Access for a laptop is opened per session by `scripts/psql-admin.sh`, which adds a rule for the current address, waits for it, runs psql with an Entra token, and removes the rule on exit. The template's only firewall rule is the Azure services one. Anything tied to where a person happens to be is never a deployment parameter.
+**Applies to**: scripts/psql-admin.sh, infra/modules/postgres.bicep, docs/runbooks/deploy.md

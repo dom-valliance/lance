@@ -193,21 +193,15 @@ az acr repository show-tags --name $ACR --repository lance-web -o tsv
 
 Run this once per environment, as the Entra administrator from step 2, before the migration job. The identity names come from the `identityNames` deployment output and are exactly `id-lance-web-dev`, `id-lance-api-dev`, `id-lance-worker-dev` and `id-lance-migrate-dev`.
 
-1. Open the firewall to your machine. The server accepts Azure services only, so a psql connection from outside times out. Export your public IP and redeploy; the template adds a single-address rule. Unset the variable and redeploy later to remove it. The rule is one address: when your network changes, psql times out again, and the fix is the same export and redeploy, so set the variable from `curl` in the shell you deploy from every time rather than keeping an old value:
+1. Open the server to your machine for this session. The server accepts Azure services only, and your public address changes with the network you are on, so the template owns no client rule. `scripts/psql-admin.sh` adds a rule for your current address, waits for it to take effect, opens psql with an Entra token as the password, and removes the rule when psql exits. It logs in as the account `az login` holds, which must be the Entra administrator from step 2:
 
    ```
-   export LANCE_ADMIN_CLIENT_IP=$(curl -s https://api.ipify.org)
-   az deployment sub create --location uksouth --template-file infra/main.bicep --parameters infra/params/dev.bicepparam
+   scripts/psql-admin.sh postgres
    ```
 
-2. Connect to the `postgres` maintenance database, not `lance`, with an Entra access token as the password. The `pgaadauth_*` functions exist only there; roles are cluster-wide, so principals created here apply to `lance`:
+   The first argument is the database (`postgres` for the steps below, `lance` for anything else); further arguments go to psql, so `scripts/psql-admin.sh lance -c 'select 1'` runs one statement and closes the rule again.
 
-   ```
-   PGHOST=<postgres FQDN from the outputs>
-   PGPASSWORD=$(az account get-access-token \
-     --resource-type oss-rdbms --query accessToken -o tsv) \
-   psql "host=$PGHOST port=5432 dbname=postgres user=dom@valliance.ai sslmode=require"
-   ```
+2. The script has opened psql on the `postgres` maintenance database, not `lance`. The `pgaadauth_*` functions exist only there; roles are cluster-wide, so principals created here apply to `lance`.
 
 3. Create a principal for each managed identity. The arguments are `isAdmin` and `isMfa`. The migrate identity is an admin principal because the migrations create roles and extensions, which needs `azure_pg_admin`; the three app identities are not:
 
@@ -238,7 +232,7 @@ az containerapp job logs show -g rg-lance-dev -n caj-lance-migrate-dev --contain
 
 ## 9. Grant the application roles
 
-Back in the psql session from step 7 (still on the `postgres` database; roles are cluster-wide), now that the migrations have created the roles. The three app identities get `lance_app`, which has INSERT and SELECT on the ledger and no UPDATE or DELETE there:
+Open psql again with `scripts/psql-admin.sh postgres` (roles are cluster-wide, so the `postgres` database is fine), now that the migrations have created the roles. The three app identities get `lance_app`, which has INSERT and SELECT on the ledger and no UPDATE or DELETE there:
 
 ```sql
 GRANT lance_app TO "id-lance-web-dev";
@@ -248,13 +242,13 @@ GRANT lance_app TO "id-lance-worker-dev";
 
 The role names are case sensitive and the identity names must stay in double quotes. `lance_retention` arrives with the retention jobs in Phase 5 (ADR 0011); its identity and grant are added then.
 
-The three apps connect with `PG_ROLE=lance_app` (set by the template), so every session acts as the shared role and anything created at runtime, pg-boss's queue tables above all, is owned by `lance_app` rather than by whichever identity made it. An environment deployed before `PG_ROLE` existed has pg-boss tables owned by the worker identity, which the api cannot read; repair it once, from the same psql session but connected to the `lance` database:
+The three apps connect with `PG_ROLE=lance_app` (set by the template), so every session acts as the shared role and anything created at runtime, pg-boss's queue tables above all, is owned by `lance_app` rather than by whichever identity made it. An environment deployed before `PG_ROLE` existed has pg-boss tables owned by the worker identity, which the api cannot read; repair it once with `scripts/psql-admin.sh lance`:
 
 ```sql
 REASSIGN OWNED BY "id-lance-worker-dev" TO lance_app;
 ```
 
-Quit psql.
+Quit psql; the script closes the firewall rule.
 
 ## 10. Verify
 
