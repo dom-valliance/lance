@@ -34,3 +34,17 @@
 **Correction**: Dom pasted the failing build log.
 **Rule**: "Exercise every runbook step" means every image, not a sample. Root lifecycle scripts (`prepare`, `postinstall`) must tolerate a container with no git and no repository. Every repo with a Dockerfile gets a root `.dockerignore` before the first remote build. A local `docker build` is the minimum; when the remote builder differs (ACR packs the context itself), check the context size it reports too.
 **Applies to**: global
+
+### [2026-09-21] Never fix infra by hand that the template will later own
+
+**Context**: To unblock Dom on Key Vault I created a Secrets Officer role assignment from the CLI, then added the same assignment to the Bicep. The next deploy failed with RoleAssignmentExists because Azure keys assignments by name and the template's deterministic name differed from the hand-made one.
+**Correction**: Dom pasted the failed deployment.
+**Rule**: When a gap is found in the template, fix the template and redeploy; the deploy is the unblock. If a hand-made change is unavoidable, record it as a step to undo before the next deploy and put that in the runbook at the same time.
+**Applies to**: infra/
+
+### [2026-09-21] Probe deployed endpoints, not just revision state
+
+**Context**: After the image flip the api revision showed Running. A curl of the web app showed the sign-in callback pointing at 0.0.0.0:3000 because AUTH_URL was never set and no AUTH_SECRET was bound; a local image start had shown the same and I had not read the redirect target.
+**Correction**: Found while checking Dom's step 6 output.
+**Rule**: A Running revision proves the process started, nothing more. After every deploy, request each public endpoint and read the full response, redirect targets included, and compare against what a user would do next (sign in, run a command). Framework env that only matters in production (AUTH_URL, secrets the framework reads implicitly) belongs in the Bicep bindings from the first draft; check the framework's production checklist when writing the template.
+**Applies to**: global
