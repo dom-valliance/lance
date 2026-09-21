@@ -5,8 +5,10 @@ vi.mock('@/auth', () => ({ auth: () => Promise.resolve(null) }));
 
 const connectUrl = 'http://api.test/auth/graph/connect';
 
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
 function proxyWith(idToken: string | undefined, upstream: () => Response) {
-  const fetchImpl = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(upstream()));
+  const fetchImpl = vi.fn<FetchLike>(() => Promise.resolve(upstream()));
   return {
     handler: createConnectProxy({
       idToken: () => Promise.resolve(idToken),
@@ -36,10 +38,12 @@ describe('GET /api/graph/connect', () => {
 
     expect(response.status).toBe(302);
     expect(response.headers.get('location')).toBe(consentUrl);
-    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const call = fetchImpl.mock.calls[0];
+    if (call === undefined) throw new Error('The api was not called.');
+    const [url, init] = call;
     expect(url).toBe(connectUrl);
-    expect(new Headers(init.headers).get('authorization')).toBe('Bearer id-token');
-    expect(init.redirect).toBe('manual');
+    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer id-token');
+    expect(init?.redirect).toBe('manual');
   });
 
   it('reports an api that did not redirect as 502 with the status', async () => {
