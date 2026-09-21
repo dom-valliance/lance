@@ -69,3 +69,10 @@
 **Correction**: All seven were error pastes, not instructions; every one was a gap between what passed locally and what the managed platform does.
 **Rule**: Treat the first deployment of any environment as a test run to be driven end to end by Claude before Dom touches it: build every image, deploy, restart for static parameters, run the job, probe every endpoint, and sign in. Each provider restriction found goes into the template and the runbook the same day.
 **Applies to**: global
+
+### [2026-09-21] Superuser tests hide privilege checks, and the migrator hides the error
+
+**Context**: Migration 0002 reassigns table ownership to lance_migrator. On Azure the migrate identity is not a superuser, so Postgres enforced that the new owner must hold CREATE on the schema, which lance_migrator did not. The local suites run as the container superuser and never exercised that check. The drizzle migrator reported the failure only as "Connection terminated unexpectedly" from a checked-out client, and I spent a round chasing tokens and TLS before bisecting the migrations statement by statement against the real server.
+**Correction**: Found by probing after Dom's job failures; no user instruction.
+**Rule**: Run at least one integration test of the migrations as a non-superuser member of lance_migrator so ownership and grant checks are exercised. When a managed platform reports only a dropped connection, bisect the actual statements against it before theorising about the transport. The migrator now prints the underlying query error.
+**Applies to**: packages/db/
