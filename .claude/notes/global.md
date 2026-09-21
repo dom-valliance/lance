@@ -111,3 +111,10 @@
 **Correction**: Dom reported that nothing new appeared after the deploy; the worker log showed the assertion.
 **Rule**: Every registration `main.ts` performs (queues, schedules, workers) has a test that performs it against real pg-boss in a container. When a boot path only runs with credentials that are absent locally, stub the credentials and run it anyway. After a deploy, read each container's console log, not only its revision state.
 **Applies to**: apps/worker/src/main.ts, apps/worker/src/watchers/
+
+### [2026-09-21] Verification output is read by exit code, never by grep
+
+**Context**: The consent button branch failed CI lint on two unused parameters. The local check had piped eslint through `grep -E "error|✖"` and printed "checks done" regardless of the exit code, and the lines that mattered were lost.
+**Correction**: Dom pasted the CI log.
+**Rule**: A verification command is judged by its exit code, with its last lines shown unfiltered. Never pipe lint, typecheck or test output through a grep that can drop the failure, and never print a success message after a pipeline whose exit status was not checked.
+**Applies to**: global
