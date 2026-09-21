@@ -1,34 +1,236 @@
-import { createDb } from '@lance/db';
-import { SystemControl } from '@lance/ledger';
-import { getConfig } from '@lance/shared';
+import {
+  createAnthropicClient,
+  dbRunRecorder,
+  dbSpendReader,
+  sdkModelRunner,
+  type AgentDeps,
+} from '@lance/agents';
+import {
+  createAccessTokenProvider,
+  createGraphConnector,
+  createGraphReads,
+  createNotionConnector,
+  createSlackSurface,
+  InMemoryTokenStore,
+  KeyVaultTokenStore,
+  type GraphReads,
+  type NotionConnector,
+  type SlackSurface,
+} from '@lance/connectors';
+import { createDb, proposals, type Db } from '@lance/db';
+import { expireProposals, LedgerWriter, SystemControl, toProposal } from '@lance/ledger';
+import { getConfig, nowIso, readSecret, type Config } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
-import { noConnectorWrites, registerExecutor } from './executor/index.js';
+import { eq } from 'drizzle-orm';
+import type { PgBoss } from 'pg-boss';
+import { raiseAlert } from './alerts/raise.js';
+import { critique } from './critic/index.js';
+import { createProposalHandler } from './executor/createProposal.js';
+import { createConnectorWrite, type ExecutionWriters } from './executor/dispatch.js';
+import { graphExecutionWriters, notionExecutionWriters } from './executor/writers.js';
+import { registerExecutor } from './executor/index.js';
+import { ensureSeedRules, loadActiveRules } from './policy/rules.js';
 import { createBoss, startBoss } from './scheduler/boss.js';
 import { PauseGate } from './scheduler/gate.js';
+import { QUEUES } from './scheduler/queues.js';
+import { runTriage } from './triage/run.js';
+import { pgBossTriageEnqueuer, type TriageJob } from './watchers/runner.js';
+
+const WORKER_VERSION = '0.1.0';
+const EXPIRY_QUEUE = 'expire-proposals';
+
+const env = (name: string): string | undefined => {
+  const value = process.env[name];
+  return value === undefined || value === '' ? undefined : value;
+};
+
+interface GraphBundle {
+  reads: GraphReads;
+  writers: NonNullable<ExecutionWriters['graph']>;
+}
+
+/** Graph is optional at boot: without the Entra values the worker runs everything else. */
+function buildGraph(db: Db): GraphBundle | null {
+  const tenantId = env('ENTRA_TENANT_ID');
+  const clientId = env('ENTRA_CLIENT_ID');
+  if (tenantId === undefined || clientId === undefined || env('ENTRA_CLIENT_SECRET') === undefined)
+    return null;
+  const store =
+    env('KEY_VAULT_URL') !== undefined
+      ? KeyVaultTokenStore.fromEnv()
+      : InMemoryTokenStore.fromEnv();
+  const accessToken = createAccessTokenProvider({
+    store,
+    tenantId,
+    clientId,
+    clientSecret: readSecret('ENTRA_CLIENT_SECRET'),
+    onRefreshFailed: async (error) => {
+      await raiseAlert(db, {
+        kind: 'token_refresh_failed',
+        severity: 'P0',
+        dedupeKey: 'token:graph',
+        title: 'Graph refresh token was refused',
+        body: `${error.message} Re-run the delegated consent in docs/runbooks/entra-setup.md section 7.`,
+        actor: `agent:worker@${WORKER_VERSION}`,
+      });
+    },
+  });
+  const graph = createGraphConnector({
+    accessToken,
+    events: {
+      onOpen: async (connector, error) => {
+        await raiseAlert(db, {
+          kind: 'breaker_open',
+          severity: 'P1',
+          dedupeKey: `breaker:${connector}`,
+          title: `${connector} circuit breaker opened`,
+          body: error instanceof Error ? error.message : String(error),
+          actor: `agent:worker@${WORKER_VERSION}`,
+        });
+      },
+    },
+  });
+  const reads = createGraphReads(graph);
+  return { reads, writers: graphExecutionWriters(graph, reads) };
+}
+
+function buildNotion(
+  config: Config,
+  db: Db,
+): { connector: NotionConnector; writers: NonNullable<ExecutionWriters['notion']> } | null {
+  if (env('NOTION_TOKEN') === undefined) return null;
+  const connector = createNotionConnector({
+    token: readSecret('NOTION_TOKEN'),
+    events: {
+      onOpen: async (name, error) => {
+        await raiseAlert(db, {
+          kind: 'breaker_open',
+          severity: 'P1',
+          dedupeKey: `breaker:${name}`,
+          title: `${name} circuit breaker opened`,
+          body: error instanceof Error ? error.message : String(error),
+          actor: `agent:worker@${WORKER_VERSION}`,
+        });
+      },
+    },
+  });
+  return { connector, writers: notionExecutionWriters(connector, config) };
+}
+
+function buildSlack(config: Config): SlackSurface | null {
+  if (env('SLACK_BOT_TOKEN') === undefined) return null;
+  return createSlackSurface({
+    token: readSecret('SLACK_BOT_TOKEN'),
+    channelId: config.slack.channelId,
+  });
+}
+
+function buildAgentDeps(config: Config, db: Db): AgentDeps | null {
+  if (env('ANTHROPIC_API_KEY') === undefined) return null;
+  const client = createAnthropicClient(config);
+  const startOfLondonDay = (): Date => {
+    const now = new Date();
+    const local = new Intl.DateTimeFormat('en-GB', {
+      timeZone: config.timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .formatToParts(now)
+      .reduce<Record<string, string>>((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+    return new Date(`${local['year']}-${local['month']}-${local['day']}T00:00:00Z`);
+  };
+  return {
+    runner: sdkModelRunner(client),
+    recorder: dbRunRecorder(db),
+    ledger: new LedgerWriter(db),
+    config,
+    readSpendUsd: dbSpendReader(db, startOfLondonDay),
+  };
+}
+
+async function registerExpiry(boss: PgBoss, db: Db): Promise<void> {
+  await boss.createQueue(EXPIRY_QUEUE);
+  await boss.schedule(EXPIRY_QUEUE, '*/15 * * * *', {}, { key: EXPIRY_QUEUE });
+  await boss.work(EXPIRY_QUEUE, async () => {
+    const expired = await expireProposals(db);
+    if (expired.length > 0) console.info({ expired: expired.length }, 'proposals expired');
+  });
+}
 
 async function main(): Promise<void> {
   const config = getConfig();
   const telemetry = initTelemetry({
     serviceName: 'lance-worker',
-    serviceVersion: '0.1.0',
+    serviceVersion: WORKER_VERSION,
     environment: config.nodeEnv,
   });
   const db = createDb();
   const control = new SystemControl(db);
   const gate = new PauseGate(control);
   const boss = createBoss(db);
-
   boss.on('error', (error: Error) => {
     console.error({ err: error }, 'pg-boss error');
   });
 
+  const seeded = await ensureSeedRules(db, config.slack.channelId);
+  const graph = buildGraph(db);
+  const notion = buildNotion(config, db);
+  const slack = buildSlack(config);
+  const agent = buildAgentDeps(config, db);
+
+  const createProposal = createProposalHandler({
+    db,
+    config,
+    control,
+    loadRules: () => loadActiveRules(db),
+    critique: (draft) =>
+      critique(draft, { permittedNotionProperties: config.notion.permittedTaskProperties }),
+    slack,
+    enqueueExecute: async (proposalId) => {
+      await boss.send(QUEUES.execute, { proposalId });
+    },
+  });
+
+  const write = createConnectorWrite({
+    db,
+    writers: {
+      ...(graph === null ? {} : { graph: graph.writers }),
+      ...(notion === null ? {} : { notion: notion.writers }),
+    },
+    loadRules: () => loadActiveRules(db),
+    // The mail normaliser lands with the watchers; until it is wired, a target is treated as unknown rather than unchanged.
+    verifyTarget: () => Promise.resolve('unknown' as const),
+    loadProposal: async (id) => {
+      const rows = await db.select().from(proposals).where(eq(proposals.id, id)).limit(1);
+      return rows[0] === undefined ? null : toProposal(rows[0]);
+    },
+  });
+
   await startBoss(boss);
-  await registerExecutor(boss, { db, gate, write: noConnectorWrites });
+  await registerExecutor(boss, { db, gate, write });
+  await registerExpiry(boss, db);
+
+  if (agent !== null) {
+    await boss.work<TriageJob>(QUEUES.triage, async (jobs) => {
+      for (const job of jobs) {
+        if (!(await gate.check()).runnable) return;
+        await runTriage({ db, config, agent, createProposal }, job.data);
+      }
+    });
+  }
+  void pgBossTriageEnqueuer;
+
   console.info(
     {
       mode: config.mode,
-      tickSeconds: config.scheduler.tickSeconds,
+      seededRules: seeded.inserted,
+      graph: graph !== null,
+      notion: notion !== null,
+      slack: slack !== null,
+      agents: agent !== null,
       displayName: config.agentDisplayName,
+      startedAt: nowIso(),
     },
     'worker started',
   );
