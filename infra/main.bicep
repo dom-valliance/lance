@@ -97,6 +97,12 @@ module keyVault 'modules/keyvault.bicep' = {
     tags: tags
     uniqueSuffix: uniqueSuffix
     secretsUserPrincipalIds: identity.outputs.principalIds
+    graphTokenWriterPrincipalIds: [
+      identity.outputs.identities.api.principalId
+      identity.outputs.identities.worker.principalId
+    ]
+    // The placeholder secret is set during deploy.md step 4, after the bootstrap deploy.
+    graphTokenSecretExists: !useBootstrapImage
     vaultWriterObjectId: postgresEntraAdminObjectId
   }
 }
