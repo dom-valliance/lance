@@ -43,6 +43,13 @@
       "when": 1789988599627,
       "tag": "0005_pgboss_database_create",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790020800000,
+      "tag": "0006_ontology_labels_and_grants",
+      "breakpoints": true
     }
   ]
 }
