@@ -73,6 +73,7 @@ describe('loadConfig defaults', () => {
     expect(config.notion).toEqual({
       tasksDataSourceId: '20257534-6e48-81fe-b4b5-000b69ecace6',
       tasksDatabaseId: '20257534-6e48-8190-9ebb-cfb6997b3bb4',
+      meetingsDataSourceId: '1fc57534-6e48-804e-a193-000bec4176ab',
       domUserId: '1fdd872b-594c-8146-b22f-00028f1f5a41',
       permittedTaskProperties: [
         'Title',
@@ -151,6 +152,7 @@ describe('loadConfig env overrides', () => {
       SLACK_CHANNEL_ID: 'C0OVERRIDE',
       NOTION_TASKS_DATA_SOURCE_ID: 'override-data-source',
       NOTION_TASKS_DATABASE_ID: 'override-database',
+      NOTION_MEETINGS_DATA_SOURCE_ID: 'override-meetings-data-source',
       NOTION_DOM_USER_ID: 'override-user',
       NOTION_PERMITTED_TASK_PROPERTIES: 'Title, Status',
     };
@@ -202,6 +204,7 @@ describe('loadConfig env overrides', () => {
     expect(config.notion).toEqual({
       tasksDataSourceId: 'override-data-source',
       tasksDatabaseId: 'override-database',
+      meetingsDataSourceId: 'override-meetings-data-source',
       domUserId: 'override-user',
       permittedTaskProperties: ['Title', 'Status'],
     });

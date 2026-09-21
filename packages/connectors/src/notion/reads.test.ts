@@ -7,10 +7,12 @@ import { FakeClock } from '../core/testing.js';
 import { createNotionConnector, type NotionConnector } from './client.js';
 import {
   getDataSourceSchema,
+  getPageText,
   getTask,
   getUser,
   listUsers,
   MAX_QUERY_PAGES,
+  queryMeetingsEditedSince,
   queryTasksEditedSince,
 } from './reads.js';
 
@@ -215,5 +217,228 @@ describe('the paging cap', () => {
     expect(pages).toBe(MAX_QUERY_PAGES);
     expect(error.message).toContain(`within ${MAX_QUERY_PAGES} pages`);
     expect(error.message).toContain('Check the Notion workspace member count');
+  });
+});
+
+const MEETINGS_DATA_SOURCE_ID = '1fc57534-6e48-804e-a193-000bec4176ab';
+const MEETINGS_QUERY_URL = `https://api.notion.com/v1/data_sources/${MEETINGS_DATA_SOURCE_ID}/query`;
+const MEETING_PAGE_ID = 'cc33dd44-ee55-4ff6-8a07-112233445566';
+const BLOCKS_URL = `https://api.notion.com/v1/blocks/${MEETING_PAGE_ID}/children`;
+
+/** A synthetic Meetings row. No real names, addresses or page ids appear here. */
+function meetingPage(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    object: 'page',
+    id: MEETING_PAGE_ID,
+    url: `https://www.notion.so/Pilot-review-${MEETING_PAGE_ID.replace(/-/g, '')}`,
+    created_time: '2026-09-15T08:00:00.000Z',
+    last_edited_time: '2026-09-21T09:30:00.000Z',
+    properties: {
+      Name: { type: 'title', title: [{ plain_text: 'Pilot review' }] },
+      Attendees: {
+        type: 'people',
+        people: [{ id: '1fdd872b-594c-8146-b22f-00028f1f5a41' }],
+      },
+      Owner: { type: 'people', people: [{ id: '1fdd872b-594c-8146-b22f-00028f1f5a41' }] },
+      Type: { type: 'select', select: { name: 'Client Meeting' } },
+      'Event time': {
+        type: 'date',
+        date: { start: '2026-09-21T09:00:00.000Z', end: '2026-09-21T10:00:00.000Z' },
+      },
+      Date: { type: 'date', date: { start: '2026-09-21' } },
+      Summary: { type: 'rich_text', rich_text: [{ plain_text: 'Agreed the pilot scope.' }] },
+      'AI summary': { type: 'rich_text', rich_text: [{ plain_text: 'Scope agreed.' }] },
+      'Attendees 1': { type: 'rich_text', rich_text: [{ plain_text: 'Sample Counterparty' }] },
+      Projects: { type: 'relation', relation: [{ id: '5c9e2a71-8d3b-4c6f-9a10-2b3c4d5e6f70' }] },
+      'Accounts (Clients)': {
+        type: 'relation',
+        relation: [{ id: '8f2b5d04-b06e-4f92-ad43-5e6f70819203' }],
+      },
+      'Thread Tag': { type: 'multi_select', multi_select: [{ name: 'Pilot' }] },
+      'Thread Session': { type: 'relation', relation: [] },
+    },
+    ...overrides,
+  };
+}
+
+function meetingList(
+  results: Record<string, unknown>[],
+  nextCursor: string | null,
+): Record<string, unknown> {
+  return { object: 'list', results, next_cursor: nextCursor, has_more: nextCursor !== null };
+}
+
+function textBlock(id: string, type: string, text: string): Record<string, unknown> {
+  return {
+    object: 'block',
+    id,
+    type,
+    has_children: false,
+    [type]: { rich_text: [{ plain_text: text }] },
+  };
+}
+
+function blockList(
+  results: Record<string, unknown>[],
+  nextCursor: string | null = null,
+): Record<string, unknown> {
+  return { object: 'list', results, next_cursor: nextCursor, has_more: nextCursor !== null };
+}
+
+describe('queryMeetingsEditedSince', () => {
+  it('queries the Meetings data source on last_edited_time, oldest edit first', async () => {
+    let body: unknown;
+    server.use(
+      http.post(MEETINGS_QUERY_URL, async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json(meetingList([], null));
+      }),
+    );
+    await queryMeetingsEditedSince(connector(), {
+      dataSourceId: MEETINGS_DATA_SOURCE_ID,
+      since: '2026-09-20T00:00:00.000Z',
+    });
+    expect(body).toEqual({
+      filter: {
+        timestamp: 'last_edited_time',
+        last_edited_time: { after: '2026-09-20T00:00:00.000Z' },
+      },
+      sorts: [{ timestamp: 'last_edited_time', direction: 'ascending' }],
+      page_size: 100,
+    });
+  });
+
+  it('normalises every property the Meetings DB carries', async () => {
+    server.use(
+      http.post(MEETINGS_QUERY_URL, () => HttpResponse.json(meetingList([meetingPage()], null))),
+    );
+    const result = await queryMeetingsEditedSince(connector(), {
+      dataSourceId: MEETINGS_DATA_SOURCE_ID,
+      since: '2026-09-20T00:00:00.000Z',
+    });
+    expect(result.meetings).toEqual([
+      {
+        id: MEETING_PAGE_ID,
+        url: `https://www.notion.so/Pilot-review-${MEETING_PAGE_ID.replace(/-/g, '')}`,
+        name: 'Pilot review',
+        attendeeIds: ['1fdd872b-594c-8146-b22f-00028f1f5a41'],
+        ownerIds: ['1fdd872b-594c-8146-b22f-00028f1f5a41'],
+        type: 'Client Meeting',
+        eventTimeStart: '2026-09-21T09:00:00.000Z',
+        eventTimeEnd: '2026-09-21T10:00:00.000Z',
+        date: '2026-09-21',
+        summary: 'Agreed the pilot scope.',
+        aiSummary: 'Scope agreed.',
+        attendeeNames: 'Sample Counterparty',
+        projectIds: ['5c9e2a71-8d3b-4c6f-9a10-2b3c4d5e6f70'],
+        accountIds: ['8f2b5d04-b06e-4f92-ad43-5e6f70819203'],
+        threadTags: ['Pilot'],
+        threadSessionIds: [],
+        createdTime: '2026-09-15T08:00:00.000Z',
+        lastEditedTime: '2026-09-21T09:30:00.000Z',
+      },
+    ]);
+    expect(result.cursor).toBeNull();
+  });
+
+  it('follows next_cursor to the end of the window', async () => {
+    const cursors: (string | undefined)[] = [];
+    server.use(
+      http.post(MEETINGS_QUERY_URL, async ({ request }) => {
+        const payload = (await request.json()) as { start_cursor?: string };
+        cursors.push(payload.start_cursor);
+        return payload.start_cursor === undefined
+          ? HttpResponse.json(meetingList([meetingPage()], 'cursor-meetings-2'))
+          : HttpResponse.json(
+              meetingList([meetingPage({ id: 'dd44ee55-ff66-4a07-8b18-223344556677' })], null),
+            );
+      }),
+    );
+    const result = await queryMeetingsEditedSince(connector(), {
+      dataSourceId: MEETINGS_DATA_SOURCE_ID,
+      since: '2026-09-01T00:00:00.000Z',
+    });
+    expect(cursors).toEqual([undefined, 'cursor-meetings-2']);
+    expect(result.meetings.map((meeting) => meeting.id)).toEqual([
+      MEETING_PAGE_ID,
+      'dd44ee55-ff66-4a07-8b18-223344556677',
+    ]);
+  });
+
+  it('stops a meetings query that never converges', async () => {
+    let pages = 0;
+    server.use(
+      http.post(MEETINGS_QUERY_URL, () => {
+        pages += 1;
+        return HttpResponse.json(meetingList([], `cursor-${pages}`));
+      }),
+    );
+    const error = (await queryMeetingsEditedSince(connector(), {
+      dataSourceId: MEETINGS_DATA_SOURCE_ID,
+      since: '2026-09-01T00:00:00.000Z',
+    }).catch((caught: unknown) => caught)) as ConnectorError;
+    expect(pages).toBe(MAX_QUERY_PAGES);
+    expect(error.message).toContain('queryMeetingsEditedSince');
+  });
+});
+
+describe('getPageText', () => {
+  it('joins the text of paragraphs, headings, list items, to-dos and quotes', async () => {
+    server.use(
+      http.get(BLOCKS_URL, () =>
+        HttpResponse.json(
+          blockList([
+            textBlock('b1', 'heading_2', 'Decisions'),
+            textBlock('b2', 'paragraph', 'The pilot starts in October.'),
+            textBlock('b3', 'bulleted_list_item', 'Confirm the scope'),
+            textBlock('b4', 'numbered_list_item', 'Send the summary'),
+            textBlock('b5', 'to_do', 'Book the follow-up'),
+            textBlock('b6', 'quote', 'We are happy to proceed.'),
+          ]),
+        ),
+      ),
+    );
+    expect(await getPageText(connector(), MEETING_PAGE_ID)).toBe(
+      [
+        'Decisions',
+        'The pilot starts in October.',
+        'Confirm the scope',
+        'Send the summary',
+        'Book the follow-up',
+        'We are happy to proceed.',
+      ].join('\n'),
+    );
+  });
+
+  it('skips a block type it cannot read rather than failing the read', async () => {
+    server.use(
+      http.get(BLOCKS_URL, () =>
+        HttpResponse.json(
+          blockList([
+            { object: 'block', id: 'b1', type: 'meeting_notes_ai_summary', has_children: false },
+            { object: 'block', id: 'b2', type: 'image', image: { type: 'external' } },
+            { object: 'block', id: 'b3', type: 'divider', divider: {} },
+            textBlock('b4', 'paragraph', 'The only readable line.'),
+            { object: 'block', id: 'b5', type: 'paragraph', paragraph: { colour: 'default' } },
+          ]),
+        ),
+      ),
+    );
+    expect(await getPageText(connector(), MEETING_PAGE_ID)).toBe('The only readable line.');
+  });
+
+  it('pages through the children and stops once maxBlocks is reached', async () => {
+    const sizes: (string | null)[] = [];
+    server.use(
+      http.get(BLOCKS_URL, ({ request }) => {
+        const url = new URL(request.url);
+        sizes.push(url.searchParams.get('page_size'));
+        return url.searchParams.get('start_cursor') === null
+          ? HttpResponse.json(blockList([textBlock('b1', 'paragraph', 'First')], 'cursor-blocks-2'))
+          : HttpResponse.json(blockList([textBlock('b2', 'paragraph', 'Second')]));
+      }),
+    );
+    expect(await getPageText(connector(), MEETING_PAGE_ID, { maxBlocks: 2 })).toBe('First\nSecond');
+    expect(sizes).toEqual(['2', '1']);
   });
 });

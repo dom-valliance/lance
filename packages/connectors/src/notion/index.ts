@@ -19,20 +19,36 @@ export type {
 
 export {
   getDataSourceSchema,
+  getPageText,
   getTask,
   getUser,
   listUsers,
   MAX_QUERY_PAGES,
+  PAGE_TEXT_MAX_BLOCKS,
+  queryMeetingsEditedSince,
   queryTasksEditedSince,
   QUERY_PAGE_SIZE,
 } from './reads.js';
-export type { QueryTasksArgs, QueryTasksResult } from './reads.js';
+export type {
+  GetPageTextOptions,
+  QueryMeetingsArgs,
+  QueryMeetingsResult,
+  QueryTasksArgs,
+  QueryTasksResult,
+} from './reads.js';
 
 export {
+  blockPlainText,
   fromNotionDataSource,
+  fromNotionMeetingPage,
   fromNotionPage,
   fromNotionUser,
+  MEETING_PROPERTY_NAMES,
+  notionBlockListSchema,
+  notionBlockSchema,
   notionDataSourceSchema,
+  notionMeetingPageSchema,
+  notionMeetingQueryResponseSchema,
   notionPageSchema,
   notionQueryResponseSchema,
   notionUserSchema,
@@ -40,10 +56,14 @@ export {
   TASK_PROPERTY_NAMES,
   TASK_STATUSES,
   TASK_SUB_TYPES,
+  TEXT_BLOCK_TYPES,
 } from './types.js';
 export type {
   DataSourceProperty,
   DataSourceSchema,
+  MeetingRecord,
+  NotionBlock,
+  NotionMeetingPage,
   NotionPage,
   NotionUserSummary,
   TaskPriority,

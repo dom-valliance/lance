@@ -2,15 +2,20 @@ import type { CallContext } from '../core/connector.js';
 import { ConnectorError } from '../core/errors.js';
 import { notionSendAccess, type NotionConnector } from './client.js';
 import {
+  blockPlainText,
   fromNotionDataSource,
+  fromNotionMeetingPage,
   fromNotionPage,
   fromNotionUser,
+  notionBlockListSchema,
   notionDataSourceSchema,
+  notionMeetingQueryResponseSchema,
   notionPageSchema,
   notionQueryResponseSchema,
   notionUserListSchema,
   notionUserSchema,
   type DataSourceSchema,
+  type MeetingRecord,
   type NotionUserSummary,
   type TaskRecord,
 } from './types.js';
@@ -45,24 +50,37 @@ export interface QueryTasksArgs {
   cursor?: string;
 }
 
+/** The Meetings data source (`notion.meetingsDataSourceId`), on the same terms. */
+export type QueryMeetingsArgs = QueryTasksArgs;
+
 export interface QueryTasksResult {
   readonly tasks: readonly TaskRecord[];
   /** The last `next_cursor` Notion sent; `null` once the window is exhausted. */
   readonly cursor: string | null;
 }
 
-interface QueryPageResult {
-  readonly tasks: readonly TaskRecord[];
+export interface QueryMeetingsResult {
+  readonly meetings: readonly MeetingRecord[];
+  readonly cursor: string | null;
+}
+
+interface QueryPageResult<T> {
+  readonly records: readonly T[];
   readonly nextCursor: string | null;
   readonly hasMore: boolean;
 }
 
-async function queryOnePage(
+/** Turns one raw query response into records and the paging state. */
+type ReadQueryPage<T> = (raw: unknown) => QueryPageResult<T>;
+
+async function queryOnePage<T>(
   notion: NotionConnector,
+  operation: string,
   args: QueryTasksArgs,
   cursor: string | null,
+  readPage: ReadQueryPage<T>,
   context: CallContext,
-): Promise<QueryPageResult> {
+): Promise<QueryPageResult<T>> {
   const body = {
     filter: { timestamp: 'last_edited_time', last_edited_time: { after: args.since } },
     sorts: [{ timestamp: 'last_edited_time', direction: 'ascending' }],
@@ -70,44 +88,97 @@ async function queryOnePage(
     ...(cursor === null ? {} : { start_cursor: cursor }),
   };
   const raw = await notion.connector.read(
-    'queryTasksEditedSince',
+    operation,
     { ...context, request: { dataSourceId: args.dataSourceId, since: args.since, cursor } },
     () =>
-      notionSendAccess(notion)(
-        'queryTasksEditedSince',
-        `/data_sources/${args.dataSourceId}/query`,
-        { method: 'POST', body },
-      ),
+      notionSendAccess(notion)(operation, `/data_sources/${args.dataSourceId}/query`, {
+        method: 'POST',
+        body,
+      }),
   );
-  const response = notionQueryResponseSchema.parse(raw);
-  return {
-    tasks: response.results.map(fromNotionPage),
-    nextCursor: response.next_cursor,
-    hasMore: response.has_more,
-  };
+  return readPage(raw);
 }
 
 /**
- * Every task edited after `since`, oldest edit first, following `next_cursor`
- * to the end of the window. Each page is its own rate-limited call.
+ * Every page of a data source edited after `since`, oldest edit first,
+ * following `next_cursor` to the end of the window. Each page is its own
+ * rate-limited call.
  */
+async function queryEditedSince<T>(
+  notion: NotionConnector,
+  operation: string,
+  args: QueryTasksArgs,
+  readPage: ReadQueryPage<T>,
+  context: CallContext,
+): Promise<{ records: T[]; cursor: string | null }> {
+  const records: T[] = [];
+  let cursor: string | null = args.cursor ?? null;
+  for (let page = 1; page <= MAX_QUERY_PAGES; page += 1) {
+    const result: QueryPageResult<T> = await queryOnePage(
+      notion,
+      operation,
+      args,
+      cursor,
+      readPage,
+      context,
+    );
+    records.push(...result.records);
+    cursor = result.nextCursor;
+    if (!result.hasMore || cursor === null) return { records, cursor };
+  }
+  throw pagingDidNotFinish(
+    operation,
+    'Narrow the window by moving the watcher cursor forward, then resume from the cursor the last run returned.',
+  );
+}
+
+/** Every task edited after `since`, oldest edit first. */
 export async function queryTasksEditedSince(
   notion: NotionConnector,
   args: QueryTasksArgs,
   context: CallContext = {},
 ): Promise<QueryTasksResult> {
-  const tasks: TaskRecord[] = [];
-  let cursor: string | null = args.cursor ?? null;
-  for (let page = 1; page <= MAX_QUERY_PAGES; page += 1) {
-    const result: QueryPageResult = await queryOnePage(notion, args, cursor, context);
-    tasks.push(...result.tasks);
-    cursor = result.nextCursor;
-    if (!result.hasMore || cursor === null) return { tasks, cursor };
-  }
-  throw pagingDidNotFinish(
+  const result = await queryEditedSince(
+    notion,
     'queryTasksEditedSince',
-    'Narrow the window by moving the watcher cursor forward, then resume from the cursor the last run returned.',
+    args,
+    (raw) => {
+      const response = notionQueryResponseSchema.parse(raw);
+      return {
+        records: response.results.map(fromNotionPage),
+        nextCursor: response.next_cursor,
+        hasMore: response.has_more,
+      };
+    },
+    context,
   );
+  return { tasks: result.records, cursor: result.cursor };
+}
+
+/**
+ * Every meeting edited after `since`, oldest edit first. Lance reads the
+ * Meetings DB and never writes it, so there is no counterpart in `writes.ts`.
+ */
+export async function queryMeetingsEditedSince(
+  notion: NotionConnector,
+  args: QueryMeetingsArgs,
+  context: CallContext = {},
+): Promise<QueryMeetingsResult> {
+  const result = await queryEditedSince(
+    notion,
+    'queryMeetingsEditedSince',
+    args,
+    (raw) => {
+      const response = notionMeetingQueryResponseSchema.parse(raw);
+      return {
+        records: response.results.map(fromNotionMeetingPage),
+        nextCursor: response.next_cursor,
+        hasMore: response.has_more,
+      };
+    },
+    context,
+  );
+  return { meetings: result.records, cursor: result.cursor };
 }
 
 /** One task page, normalised. */
@@ -120,6 +191,64 @@ export async function getTask(
     notion.send('getTask', `/pages/${pageId}`),
   );
   return fromNotionPage(notionPageSchema.parse(raw));
+}
+
+/**
+ * The ceiling on the blocks one `getPageText` call reads when the caller
+ * names none. Meeting notes run to a few dozen blocks; this leaves room for
+ * a long one without letting a runaway page cost five calls.
+ */
+export const PAGE_TEXT_MAX_BLOCKS = 300;
+
+export interface GetPageTextOptions {
+  /** Stops after this many top-level blocks. Defaults to `PAGE_TEXT_MAX_BLOCKS`. */
+  maxBlocks?: number;
+}
+
+/**
+ * The readable text of a page's own blocks, joined by newlines: paragraphs,
+ * headings, bulleted and numbered list items, to-dos and quotes. Child
+ * blocks of those blocks are not followed.
+ *
+ * Every other block type is skipped rather than refused, because Notion's
+ * Meeting Notes AI blocks may come back with no readable rich text at all,
+ * and a meeting whose notes Lance cannot read is still a meeting worth
+ * observing.
+ */
+export async function getPageText(
+  notion: NotionConnector,
+  pageId: string,
+  options: GetPageTextOptions = {},
+  context: CallContext = {},
+): Promise<string> {
+  const maxBlocks = options.maxBlocks ?? PAGE_TEXT_MAX_BLOCKS;
+  if (maxBlocks <= 0) return '';
+  const lines: string[] = [];
+  let read = 0;
+  let cursor: string | null = null;
+  for (let page = 1; page <= MAX_QUERY_PAGES; page += 1) {
+    const query: Record<string, string> = {
+      page_size: String(Math.max(1, Math.min(QUERY_PAGE_SIZE, maxBlocks - read))),
+    };
+    if (cursor !== null) query.start_cursor = cursor;
+    const raw = await notion.connector.read(
+      'getPageText',
+      { ...context, request: { pageId, cursor } },
+      () => notion.send('getPageText', `/blocks/${pageId}/children`, { query }),
+    );
+    const response = notionBlockListSchema.parse(raw);
+    for (const block of response.results) {
+      const text = blockPlainText(block);
+      if (text !== null) lines.push(text);
+    }
+    read += response.results.length;
+    cursor = response.next_cursor;
+    if (!response.has_more || cursor === null || read >= maxBlocks) return lines.join('\n');
+  }
+  throw pagingDidNotFinish(
+    'getPageText',
+    'Lower maxBlocks, or read the page in Notion: its blocks are paging without converging.',
+  );
 }
 
 /**
