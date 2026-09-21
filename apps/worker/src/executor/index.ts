@@ -35,15 +35,16 @@ export type ExecuteOutcome =
 
 /**
  * Executes one approved proposal. Deterministic code, no model in the loop
- * (CLAUDE.md non-negotiable 2). Phase 0 delivers the gate and the ledger
- * trail; policy re-evaluation and the target hash check arrive in Phase 1
- * alongside the first connector write.
+ * (CLAUDE.md non-negotiable 2). The gate is asked twice, before and after
+ * the claim, and refuses while paused or in any mode other than live, so a
+ * proposal approved in dry run is held rather than written. Policy is
+ * re-evaluated and the target re-checked inside `write.perform`.
  */
 export async function executeProposal(
   deps: ExecutorDeps,
   job: ExecuteJob,
 ): Promise<ExecuteOutcome> {
-  const verdict = await deps.gate.check();
+  const verdict = await deps.gate.checkWrite();
   const rows = await deps.db
     .select()
     .from(proposals)
@@ -90,7 +91,7 @@ export async function executeProposal(
 
   // The gate is checked again after the claim so a pause that landed in the
   // meantime stops the write and the proposal goes back to held.
-  const recheck = await deps.gate.check();
+  const recheck = await deps.gate.checkWrite();
   if (!recheck.runnable) {
     await deps.db
       .update(proposals)

@@ -67,6 +67,7 @@ function dispatch(
       writers: w,
       loadRules: () => Promise.resolve(rules),
       verifyTarget: () => Promise.resolve(verdict),
+      loadLabels: () => Promise.resolve(['Newsletters']),
       loadProposal: (id) => Promise.resolve(id === p.id ? p : null),
       now: () => '2026-09-21T10:00:00.000Z',
     }),
@@ -104,14 +105,14 @@ describe('connector dispatch', () => {
     expect(outcome.compensation).toMatchObject({ actionClass: 'move_mail', backTo: 'inbox' });
   });
 
-  it('uses the edited payload when Dom edited the proposal', async () => {
+  it('merges an edit over the proposed payload so recipients survive an edited body', async () => {
     const p = proposal({
       actionClass: 'draft_email',
       counterpartyClass: 'client',
       status: 'edited',
       policyDecision: 'propose',
       payload: { subject: 'Re: SOW', bodyText: 'Original', to: ['a@example.com'] },
-      editedPayload: { subject: 'Re: SOW', bodyText: 'Edited by Dom', to: ['a@example.com'] },
+      editedPayload: { bodyText: 'Edited by Dom' },
     });
     const { write, w } = dispatch(p);
     await write.perform(p.id);
@@ -120,6 +121,35 @@ describe('connector dispatch', () => {
       bodyText: 'Edited by Dom',
       to: ['a@example.com'],
     });
+  });
+
+  it('keeps the task input when Dom edits a create_task proposal', async () => {
+    const p = proposal({
+      actionClass: 'create_task',
+      counterpartyClass: 'self',
+      targetSystem: 'notion',
+      targetRecordId: null,
+      status: 'edited',
+      policyDecision: 'propose',
+      payload: { dataSourceId: 'ds', input: { title: 'Send SOW', assigneeIds: ['dom'] } },
+      editedPayload: { delegateName: 'Alice' },
+    });
+    const { write, w } = dispatch(p);
+    await write.perform(p.id);
+    expect(w.notion.createTask).toHaveBeenCalledWith({ title: 'Send SOW', assigneeIds: ['dom'] });
+  });
+
+  it('re-checks a move against the destination the edit names', async () => {
+    const p = proposal({
+      actionClass: 'move_mail',
+      status: 'edited',
+      policyDecision: 'auto',
+      payload: { destinationFolderName: 'AI-Filed', sourceFolderId: 'inbox' },
+      editedPayload: { destinationFolderName: 'Clients' },
+    });
+    const { write, w } = dispatch(p);
+    await write.perform(p.id);
+    expect(w.graph.resolveFolderId).toHaveBeenCalledWith('Clients');
   });
 
   it('creates a reply draft when the payload names a message to reply to', async () => {

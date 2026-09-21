@@ -132,6 +132,22 @@ describe('createProposal', () => {
     expect(executed).not.toContain(outcome.proposalId);
   });
 
+  it('runs the critic on a proposed draft and carries its notes on the pending proposal', async () => {
+    const outcome = await handler()(
+      draft({
+        actionClass: 'draft_email',
+        counterpartyClass: 'client',
+        payload: { subject: 'Re: SOW', bodyText: 'Thanks \u2014 sending it today.', to: [] },
+        preview: 'Reply about the SOW',
+      }),
+      { ...context, correlationId: '01ARZ3NDEKTSV4RRFFQ69G5FB2' },
+    );
+    expect(outcome.status).toBe('pending');
+    expect(outcome.note).toContain('Critic notes: Voice:');
+    const rows = await db.select().from(proposals).where(eq(proposals.id, outcome.proposalId));
+    expect(rows[0]?.decisionNote).toContain('Voice');
+  });
+
   it('holds everything and posts nothing in dry run mode', async () => {
     await control.setMode('dry_run', { actor: 'user:dom' });
     const before = posted.length;

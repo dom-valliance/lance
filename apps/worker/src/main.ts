@@ -17,14 +17,15 @@ import {
   type NotionConnector,
   type SlackSurface,
 } from '@lance/connectors';
-import { createDb, proposals, type Db } from '@lance/db';
+import { createDb, observations, proposals, type Db } from '@lance/db';
 import { expireProposals, LedgerWriter, SystemControl, toProposal } from '@lance/ledger';
-import { getConfig, nowIso, readSecret, type Config } from '@lance/shared';
+import { getConfig, nowIso, readSecret, type Config, type ProvenanceRef } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { raiseAlert } from './alerts/raise.js';
 import { critique } from './critic/index.js';
+import { createDraftReviewer } from './critic/review.js';
 import { createProposalHandler } from './executor/createProposal.js';
 import { createConnectorWrite, type ExecutionWriters } from './executor/dispatch.js';
 import { graphExecutionWriters, notionExecutionWriters } from './executor/writers.js';
@@ -46,6 +47,33 @@ import { hashRecord } from '@lance/shared';
 
 const WORKER_VERSION = '0.1.0';
 const EXPIRY_QUEUE = 'expire-proposals';
+/** How long a triage job waits before it is looked at again while paused. */
+const TRIAGE_RETRY_WHILE_PAUSED_S = 60;
+
+/** The recorded payload of each observation a provenance list points at, for the critic and the executor. */
+async function loadSourceRecords(
+  db: Db,
+  provenance: readonly ProvenanceRef[],
+): Promise<Record<string, unknown>[]> {
+  const records: Record<string, unknown>[] = [];
+  for (const ref of provenance) {
+    const rows = await db
+      .select({ payload: observations.payload })
+      .from(observations)
+      .where(
+        and(
+          eq(observations.sourceSystem, ref.system),
+          eq(observations.sourceRecordId, ref.recordId),
+        ),
+      )
+      .limit(1);
+    const payload = rows[0]?.payload;
+    if (typeof payload === 'object' && payload !== null) {
+      records.push(payload as Record<string, unknown>);
+    }
+  }
+  return records;
+}
 
 const env = (name: string): string | undefined => {
   const value = process.env[name];
@@ -216,13 +244,30 @@ async function main(): Promise<void> {
     label: () => Promise.resolve([]),
   });
 
+  const reviewDraft =
+    agent === null
+      ? null
+      : createDraftReviewer({
+          agent,
+          model: config.models.critic,
+          displayName: config.agentDisplayName,
+        });
   const createProposal = createProposalHandler({
     db,
     config,
     control,
     loadRules: () => loadActiveRules(db),
-    critique: (draft) =>
-      critique(draft, { permittedNotionProperties: config.notion.permittedTaskProperties }),
+    critique: async (draft, context, ruleId) => {
+      const rules = await loadActiveRules(db);
+      return critique(draft, {
+        permittedNotionProperties: config.notion.permittedTaskProperties,
+        authorisedBy: rules.find((rule) => rule.id === ruleId) ?? null,
+        sourceRecords: await loadSourceRecords(db, draft.provenance),
+        ...(reviewDraft === null
+          ? {}
+          : { reviewDraft: (reviewed) => reviewDraft(reviewed, context.correlationId) }),
+      });
+    },
     slack,
     enqueueExecute: async (proposalId) => {
       await boss.send(QUEUES.execute, { proposalId });
@@ -238,25 +283,48 @@ async function main(): Promise<void> {
     loadRules: () => loadActiveRules(db),
     verifyTarget: async (proposal) => {
       // Spec 7.5 step 2: re-fetch the target and compare the same content hash
-      // the watcher recorded. Only Graph messages are checked in v1.
+      // the watcher recorded. Only Graph messages are checked in v1; a
+      // proposal on anything else has no target to verify.
       if (graph === null || proposal.targetSystem !== 'graph' || proposal.targetRecordId === null)
         return 'unknown';
       const ref = proposal.provenance.find(
         (entry) => entry.system === 'graph' && entry.recordId === proposal.targetRecordId,
       );
       if (ref === undefined) return 'unknown';
+      // The watcher hashed the record with the folder kind it was polled
+      // from, so the re-fetched message is normalised under the same kind,
+      // read back from the recorded observation rather than guessed from
+      // Graph's folder id.
+      const recorded = await loadSourceRecords(db, [ref]);
+      const folder = recorded[0]?.['folder'];
+      const partition = folder === 'inbox' || folder === 'sentitems' ? folder : null;
+      if (partition === null) return 'changed';
       try {
         const message = await graph.reads.getMessage(proposal.targetRecordId);
-        const partition =
-          typeof message.parentFolderId === 'string' ? message.parentFolderId : 'inbox';
         const observation = await verifier.normalise(
           { id: message.id, observedAt: nowIso(), raw: message },
           partition,
         );
         return hashRecord(observation.record) === ref.hash ? 'unchanged' : 'changed';
-      } catch {
-        return 'unknown';
+      } catch (error) {
+        // A target that cannot be fetched or read is not one to write to:
+        // the executor holds the proposal and the card says why.
+        console.warn(
+          { err: error, proposalId: proposal.id },
+          'target could not be re-fetched before execution',
+        );
+        return 'changed';
       }
+    },
+    loadLabels: async (proposal) => {
+      const labels = new Set<string>();
+      for (const record of await loadSourceRecords(db, proposal.provenance)) {
+        const recorded = record['labels'];
+        if (Array.isArray(recorded)) {
+          for (const label of recorded) if (typeof label === 'string') labels.add(label);
+        }
+      }
+      return [...labels];
     },
     loadProposal: async (id) => {
       const rows = await db.select().from(proposals).where(eq(proposals.id, id)).limit(1);
@@ -275,7 +343,12 @@ async function main(): Promise<void> {
   if (agent !== null) {
     await boss.work<TriageJob>(QUEUES.triage, async (jobs) => {
       for (const job of jobs) {
-        if (!(await gate.check()).runnable) return;
+        if (!(await gate.check()).runnable) {
+          // Paused: the job is put back for later rather than dropped, so a
+          // pause during a busy tick loses no triage (non-negotiable 6).
+          await boss.send(QUEUES.triage, job.data, { startAfter: TRIAGE_RETRY_WHILE_PAUSED_S });
+          continue;
+        }
         await runTriage({ db, config, agent, createProposal }, job.data);
       }
     });

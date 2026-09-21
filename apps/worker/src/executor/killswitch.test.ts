@@ -68,6 +68,7 @@ beforeAll(async () => {
   db = createDb({ connectionString, password: 'postgres' });
   await seed(db);
   control = new SystemControl(db);
+  await control.setMode('live', { actor: 'user:dom' });
   boss = createBoss(db);
   await startBoss(boss);
   perform.mockImplementation((proposalId) =>
@@ -85,6 +86,18 @@ afterAll(async () => {
 });
 
 describe('kill switch', () => {
+  it('holds an approved proposal and performs no write while the mode is dry run', async () => {
+    await control.setMode('dry_run', { actor: 'user:dom' });
+    try {
+      const id = await insertApprovedProposal('approved during dry run');
+      await boss.send(QUEUES.execute, { proposalId: id });
+      expect(await waitForStatus(id, ['held', 'executed'])).toBe('held');
+      expect(perform).not.toHaveBeenCalled();
+    } finally {
+      await control.setMode('live', { actor: 'user:dom' });
+    }
+  }, 30000);
+
   it('holds a queued execution and performs no write while paused', async () => {
     const id = await insertApprovedProposal();
     await control.pause({ reason: 'drill', actor: 'user:dom' });

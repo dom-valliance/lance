@@ -41,6 +41,8 @@ export interface DispatchDeps {
   loadRules: () => Promise<PolicyRule[]>;
   /** Re-fetches the target and compares its content hash with the provenance (spec 7.5 step 2). */
   verifyTarget: (proposal: Proposal) => Promise<TargetVerdict>;
+  /** The classifier labels on the proposal's source records, for label-gated rules. */
+  loadLabels: (proposal: Proposal) => Promise<string[]>;
   loadProposal: (proposalId: string) => Promise<Proposal | null>;
   now?: () => string;
 }
@@ -82,6 +84,21 @@ function need<T>(value: T | null | undefined, what: string): T {
   return value;
 }
 
+/**
+ * What a rule's `targetAnyOf` is compared with at execution: the folder a
+ * move lands in, named as the proposer named it. Other classes have no
+ * target condition in the seed rules.
+ */
+function executionTarget(
+  actionClass: ActionClass,
+  payload: Record<string, unknown>,
+): string | null {
+  if (actionClass === 'move_mail') {
+    return str(payload, 'destinationFolderName') ?? str(payload, 'destinationFolderId');
+  }
+  return null;
+}
+
 const UNSUPPORTED: ReadonlySet<ActionClass> = new Set([
   'apply_tag',
   'create_tag',
@@ -110,6 +127,15 @@ export function createConnectorWrite(deps: DispatchDeps): ConnectorWrite {
           `Proposal ${proposalId} does not exist.`,
         );
 
+      // Dom's edit overrides the fields it names and leaves the rest as
+      // proposed: the modal and the web form only carry the editable
+      // strings, so a replacement would drop recipients and task input.
+      const payload: Record<string, unknown> = {
+        ...proposal.payload,
+        ...(proposal.editedPayload ?? {}),
+      };
+      const target = executionTarget(proposal.actionClass, payload);
+      const labels = await deps.loadLabels(proposal);
       const decision = evaluate(
         {
           actionClass: proposal.actionClass,
@@ -118,6 +144,8 @@ export function createConnectorWrite(deps: DispatchDeps): ConnectorWrite {
           at: now(),
           stage: 'execution',
           criticPassed: proposal.policyDecision === 'auto' ? true : undefined,
+          ...(labels.length === 0 ? {} : { labels }),
+          ...(target === null ? {} : { target }),
         },
         await deps.loadRules(),
       );
@@ -142,7 +170,6 @@ export function createConnectorWrite(deps: DispatchDeps): ConnectorWrite {
         );
       }
 
-      const payload = proposal.editedPayload ?? proposal.payload;
       switch (proposal.actionClass) {
         case 'apply_category': {
           const graph = need(deps.writers.graph, 'Graph connector');

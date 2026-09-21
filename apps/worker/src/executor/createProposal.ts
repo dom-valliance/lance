@@ -31,7 +31,12 @@ export interface CreateProposalDeps {
   config: Pick<Config, 'agentDisplayName' | 'timeZone' | 'proposals'>;
   control: Pick<SystemControl, 'read'>;
   loadRules: () => Promise<PolicyRule[]>;
-  critique: (draft: ProposalDraft) => Promise<CriticVerdict>;
+  /** The critic (spec 7.4), given the draft, its context and the rule policy matched. */
+  critique: (
+    draft: ProposalDraft,
+    context: ProposalContext,
+    ruleId: string | null,
+  ) => Promise<CriticVerdict>;
   /** Null when Slack is not configured (tests, local runs): cards are skipped, everything else proceeds. */
   slack: Pick<SlackSurface, 'post' | 'channelId'> | null;
   enqueueExecute: (proposalId: string) => Promise<void>;
@@ -85,27 +90,35 @@ export function createProposalHandler(
 
     let status: ProposalStatus;
     let decidedBy: string | null = null;
-    let decisionNote: string | null = null;
+    let decisionNote: string | null;
     let critic: CriticVerdict | null = null;
 
     if (evaluation.decision === 'forbid') {
       status = 'rejected';
       decidedBy = POLICY_ACTOR;
       decisionNote = 'Forbidden by policy.';
-    } else if (evaluation.decision === 'auto') {
-      critic = await deps.critique(draft);
-      if (critic.passed) {
+    } else {
+      // The critic reads every proposal that could reach Dom or the
+      // executor (spec 7.4), so a draft's voice and provenance checks run
+      // whether policy said auto or propose. It can only hold, never approve.
+      critic = await deps.critique(draft, context, evaluation.ruleId);
+      if (evaluation.decision === 'auto' && critic.passed) {
         status = dryRun ? 'held' : 'approved';
         decidedBy = POLICY_ACTOR;
         decisionNote = dryRun ? 'Auto by policy; held in dry run.' : 'Auto by policy.';
-      } else {
+      } else if (evaluation.decision === 'auto') {
         status = dryRun ? 'held' : 'pending';
         decisionNote = `Critic held this for review: ${critic.notes.join(' ')}`;
-      }
-    } else {
-      status = dryRun ? 'held' : 'pending';
-      if (evaluation.unmetConditions.length > 0) {
-        decisionNote = `Proposed because conditions were unmet: ${evaluation.unmetConditions.join(', ')}.`;
+      } else {
+        status = dryRun ? 'held' : 'pending';
+        const notes: string[] = [];
+        if (evaluation.unmetConditions.length > 0) {
+          notes.push(
+            `Proposed because conditions were unmet: ${evaluation.unmetConditions.join(', ')}.`,
+          );
+        }
+        if (!critic.passed) notes.push(`Critic notes: ${critic.notes.join(' ')}`);
+        decisionNote = notes.length === 0 ? null : notes.join(' ');
       }
     }
 
