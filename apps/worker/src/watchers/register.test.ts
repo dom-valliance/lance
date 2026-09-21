@@ -6,7 +6,7 @@ import type { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createBoss, startBoss } from '../scheduler/boss.js';
 import { PauseGate } from '../scheduler/gate.js';
-import { registerWatcher, watcherQueue, type TriageJob } from './runner.js';
+import { registerWatcher, watcherQueue } from './runner.js';
 import type { Watcher } from './types.js';
 
 /**
