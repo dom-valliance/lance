@@ -125,3 +125,10 @@
 **Correction**: Dom asked what happens next and whether more had to be built.
 **Rule**: A control (mode, kill switch, flag) is only done when the path Dom uses to work it exists (Slack command, admin route or page) and the code that must obey it reads it. Grep for the reader before calling a config value done; a value with no reader is a gap, not a feature. The going-live sequence in the deploy runbook is the checklist.
 **Applies to**: apps/api/src/slack, apps/api/src/routes/admin.ts, apps/worker/src/executor
+
+### [2026-09-21] Say what a deployment contains from the log, never from memory
+
+**Context**: I built and deployed main at 0978615 and told Dom it carried the shared role fix and the inline error handling. Those were on `fix/pgboss-shared-role`, which had not been merged; the merged branch was the mode switch. Dom found out when the runbook step named a script that did not exist on main.
+**Correction**: Dom: "There is no scripts/psql-admin.sh".
+**Rule**: Before building or deploying, run `git log main..<branch>` for every branch handed over that day and list, in the message to Dom, exactly which commits the tag contains and which are still unmerged. A deployment report names the SHA and what is in it; it never assumes a branch was merged because a merge happened.
+**Applies to**: global
