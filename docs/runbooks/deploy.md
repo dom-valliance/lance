@@ -141,12 +141,16 @@ If the CLI reports a forbidden error, grant yourself `Key Vault Secrets Officer`
 
 `az acr build` runs the build in Azure, so nothing local needs Docker.
 
+The image tag is the short git SHA of the commit being deployed. Capture it once so steps 5 and 6 use the same value:
+
 ```
 ACR=<registry name from the outputs>
+TAG=$(git rev-parse --short HEAD)
+echo "$TAG"
 
-az acr build --registry $ACR --image lance-web:$(git rev-parse --short HEAD)    --file apps/web/Dockerfile .
-az acr build --registry $ACR --image lance-api:$(git rev-parse --short HEAD)    --file apps/api/Dockerfile .
-az acr build --registry $ACR --image lance-worker:$(git rev-parse --short HEAD) --file apps/worker/Dockerfile .
+az acr build --registry $ACR --image lance-web:$TAG    --file apps/web/Dockerfile .
+az acr build --registry $ACR --image lance-api:$TAG    --file apps/api/Dockerfile .
+az acr build --registry $ACR --image lance-worker:$TAG --file apps/worker/Dockerfile .
 ```
 
 The build context is the repo root because the Dockerfiles copy the pnpm workspace. Confirm the tags landed:
@@ -161,7 +165,7 @@ az acr repository show-tags --name $ACR --repository lance-web -o tsv
 
    ```
    param useBootstrapImage = false
-   param containerImageTag = '<the short SHA used in step 5>'
+   param containerImageTag = '<the value of $TAG from step 5>'
    ```
 
 2. Re-run the what-if, then deploy with the same command as step 3. The three apps get new revisions that pull from the registry with their own identities and resolve the Key Vault references. The ingress target ports move from 80 to 3000 for web and 3001 for api.
