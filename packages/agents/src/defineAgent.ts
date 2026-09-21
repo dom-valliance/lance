@@ -1,5 +1,4 @@
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
-import type { BetaRunnableTool } from '@anthropic-ai/sdk/lib/tools/BetaRunnableTool';
 import type {
   BetaContentBlock,
   BetaMessageParam,
@@ -13,7 +12,7 @@ import {
 import { ATTR_AGENT, ATTR_CORRELATION_ID, currentTraceIds, withSpan } from '@lance/telemetry';
 import type { z } from 'zod';
 import { BudgetExceededError, checkDailyBudget, type SpendReader } from './budget.js';
-import type { BetaMessage, ModelRunner } from './client.js';
+import type { BetaMessage, BetaToolRunnerParams, ModelRunner } from './client.js';
 import { addUsage, estimateCostUsd, ZERO_USAGE, type TokenUsage } from './cost.js';
 import type { RunRecorder } from './runs.js';
 
@@ -23,7 +22,8 @@ export interface AgentDefinition<TOutput> {
   model: ModelConfig;
   /** Stable text, cached with cache_control (spec 13). Put anything volatile in the prompt, not here. */
   system: string;
-  tools: BetaRunnableTool<never>[];
+  /** The SDK's own tool list type; each entry comes from betaZodTool. */
+  tools: BetaToolRunnerParams['tools'];
   outputSchema: z.ZodType<TOutput>;
   maxTokens?: number;
   maxIterations?: number;
