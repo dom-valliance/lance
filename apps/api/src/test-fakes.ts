@@ -317,6 +317,8 @@ export interface FakeDeps {
   feed: Feed;
   events: FeedEvent[];
   status: FakeStatusSource;
+  /** Proposal ids handed to `enqueueExecute`, in order. */
+  enqueued: string[];
 }
 
 export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
@@ -330,6 +332,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
   const feed = createFeed();
   const events: FeedEvent[] = [];
   feed.subscribe((event) => events.push(event));
+  const enqueued: string[] = [];
 
   const deps: ApiDeps = {
     config: overrides.config ?? testConfig(),
@@ -338,6 +341,10 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     writer: overrides.writer ?? writer,
     proposals,
     decide: (request) => decider.decide(request),
+    enqueueExecute: (proposalId) => {
+      enqueued.push(proposalId);
+      return Promise.resolve();
+    },
     status: overrides.status ?? status,
     auth: overrides.auth ?? fakeVerifier('good-token'),
     slack: {
@@ -356,5 +363,17 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     ...(overrides.now === undefined ? {} : { now: overrides.now }),
   };
 
-  return { deps, control, ledger, writer, proposals, decider, slack, feed, events, status };
+  return {
+    deps,
+    control,
+    ledger,
+    writer,
+    proposals,
+    decider,
+    slack,
+    feed,
+    events,
+    status,
+    enqueued,
+  };
 };

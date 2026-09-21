@@ -85,6 +85,12 @@ export interface ApiDeps {
   proposals: ProposalStoreLike;
   /** `applyDecision` bound to everything it needs; the one way a proposal changes state. */
   decide: (request: DecisionRequest) => Promise<DecisionResult>;
+  /**
+   * Puts an approved proposal on the execute queue. A resume releases held
+   * proposals back to approved, and each one is re-queued through this so
+   * "released" means the executor will pick it up.
+   */
+  enqueueExecute: (proposalId: string) => Promise<void>;
   status: StatusSource;
   auth: TokenVerifier;
   slack: SlackDeps;
@@ -112,3 +118,18 @@ export interface ApiDeps {
 
 /** The ledger actor for everything Dom triggers, in Slack or in the api. */
 export const DOM_ACTOR = 'user:dom';
+
+/**
+ * Resumes and re-queues every released proposal (spec 4.3). Both the Slack
+ * command and the admin route go through here so neither can release a
+ * proposal that nothing then executes.
+ */
+export async function resumeAndRequeue(
+  deps: Pick<ApiDeps, 'control' | 'enqueueExecute'>,
+): Promise<ResumeResult> {
+  const result = await deps.control.resume({ actor: DOM_ACTOR });
+  for (const proposalId of result.releasedProposalIds) {
+    await deps.enqueueExecute(proposalId);
+  }
+  return result;
+}

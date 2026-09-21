@@ -77,6 +77,7 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
       get: (id) => getProposal(options.db, id),
     },
     decide: (request) => applyDecision(decideDeps, request),
+    enqueueExecute: (proposalId) => executeQueue.enqueueExecute(proposalId),
     status: createDbStatusSource(options.db, control, {
       usdToGbp: options.config.cost.usdToGbp,
       timeZone: options.config.timeZone,

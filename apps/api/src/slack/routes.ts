@@ -1,7 +1,7 @@
 import { nowIso } from '@lance/shared';
 import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { DOM_ACTOR, type ApiDeps } from '../deps.js';
+import { DOM_ACTOR, type ApiDeps, resumeAndRequeue } from '../deps.js';
 import { renderStatus } from '../status.js';
 import { handleInteraction } from './interactions.js';
 import { verifySlackSignature } from './verify.js';
@@ -109,7 +109,7 @@ const handlePause = async (
 };
 
 const handleResume = async (deps: ApiDeps, displayName: string): Promise<SlackReply> => {
-  const result = await deps.control.resume({ actor: DOM_ACTOR });
+  const result = await resumeAndRequeue(deps);
 
   const opening = result.changed
     ? `${displayName} has resumed.`
