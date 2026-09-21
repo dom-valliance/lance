@@ -55,3 +55,10 @@
 **Correction**: Dom pasted the psql timeout.
 **Rule**: Any runbook step run from outside Azure must have its network path (firewall rule, private endpoint, or a jump host) declared in the template, fed from an environment variable at deploy time when the value is personal or changes, and removed by redeploying without it. Read the template's own comments for "by hand" and treat each one as a gap to close.
 **Applies to**: infra/
+
+### [2026-09-21] Azure Flexible Server differs from the local image in ways only a real run shows
+
+**Context**: The migration job failed on Azure with "access to library age is not allowed" because migration 0000 ran LOAD 'age'; Azure preloads restricted libraries through shared_preload_libraries and forbids LOAD. The pgaadauth_* functions also live only in the postgres maintenance database, not in lance. Both passed locally and in the container suites.
+**Correction**: Found from the failed job log and Dom's psql error.
+**Rule**: Before the first migration against a managed Postgres, list every statement that touches server internals (LOAD, extensions, roles, ownership, search_path) and check each against the provider's documented restrictions; set preload parameters in the template and note that static parameters need a restart. Runbook steps that use provider admin functions say which database to connect to.
+**Applies to**: infra/, packages/db/drizzle/
