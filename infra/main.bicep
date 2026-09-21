@@ -52,6 +52,12 @@ param allowedUpn string
 @description('The one Slack user id that may run /lance status, pause and resume. Not a secret.')
 param slackAllowedUserId string
 
+@description('Lets the executor write to Microsoft Graph. Off until the dry-run week is over (spec 6.3).')
+param graphWritesEnabled bool = false
+
+@description('Lets the executor create tasks in the Notion All Tasks database. Off until the dry-run week is over (spec 6.3).')
+param notionWritesEnabled bool = false
+
 // Six characters of subscription-and-group entropy for the three globally unique names
 // (Key Vault, container registry, Postgres server).
 var uniqueSuffix = take(uniqueString(subscription().subscriptionId, resourceGroupName), 6)
@@ -154,6 +160,8 @@ module containerApps 'modules/containerapps.bicep' = {
     useBootstrapImage: useBootstrapImage
     allowedUpn: allowedUpn
     slackAllowedUserId: slackAllowedUserId
+    graphWritesEnabled: graphWritesEnabled
+    notionWritesEnabled: notionWritesEnabled
   }
   // The apps resolve Key Vault references and pull from the registry with their
   // identities. Both role assignments are created inside those modules, and the
