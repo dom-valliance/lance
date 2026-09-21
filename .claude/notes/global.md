@@ -27,3 +27,10 @@
 **Correction**: Dom's one observation; the rest were latent failures he would have hit in sequence.
 **Rule**: Before handing over a runbook, run each step that names a file or command: build every image it references and start it far enough to fail only on the missing dependency, run every command in a throwaway container, and trace what each step consumes back to the step that produces it. A value a later step reuses is captured once in a named variable and echoed, never left inside a substitution. Subagent-written infra and runbooks get the same treatment before the phase closes; a validated template is not a validated deployment.
 **Applies to**: global
+
+### [2026-09-21] Build every image the way Azure builds it, not just some of them
+
+**Context**: `az acr build` for the web image failed on the root `prepare` script (`git config` in a container with no git), uploaded 413 MiB because there was no `.dockerignore`, and the web Dockerfile had never been built at all. The day before I had built the api and worker images and stopped there.
+**Correction**: Dom pasted the failing build log.
+**Rule**: "Exercise every runbook step" means every image, not a sample. Root lifecycle scripts (`prepare`, `postinstall`) must tolerate a container with no git and no repository. Every repo with a Dockerfile gets a root `.dockerignore` before the first remote build. A local `docker build` is the minimum; when the remote builder differs (ACR packs the context itself), check the context size it reports too.
+**Applies to**: global

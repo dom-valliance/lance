@@ -96,7 +96,7 @@ Promoted here when the same lesson appears more than twice in `.claude/notes/`.
 - Never force `tool_choice` on current models; name the tool in the prompt and use `strict: true`.
 - GitHub is Dom's. Plain git only: branches and commits. Never install or use the `gh` CLI, never open PRs. Hand over branch names and commit ranges. ADR 0007.
 - Runbooks run in dependency order. State up front which runbook must run first, never consume a resource (Key Vault, hostname) before the step that creates it, say which template creates each Azure resource, and fill identifiers (tenant, client, UPN, object id, Slack user id) yourself from the CLI rather than asking Dom.
-- Exercise a runbook before handing it over: build every image it names, run every command in a throwaway container, and capture any value a later step reuses in a named variable that is echoed. A validated Bicep template is not a validated deployment.
+- Exercise a runbook before handing it over: build every image it names (all of them, not a sample), run every command in a throwaway container, and capture any value a later step reuses in a named variable that is echoed. A validated Bicep template is not a validated deployment. Lifecycle scripts must tolerate a container without git; the root `.dockerignore` keeps node_modules out of every build context.
 
 ## Memory
 
