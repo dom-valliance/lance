@@ -1,0 +1,17 @@
+{
+  "id": "t10-saltmarsh-retrospective",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Martina Sacco",
+      "email": "martina.sacco@saltmarsh.example.test"
+    }
+  ],
+  "text": "# Saltmarsh Energy: phase one retrospective\n\n**Date:** Thursday 1 October 2026\n\n###### 00:00 - 00:26\n**Martina Sacco**\n\nLooking back, the data quality work took twice as long as we planned.\n\n###### 00:26 - 00:52\n**Dom Selvon**\n\nIt did. We sent the revised plan in July and the team absorbed it well after that.\n\n###### 00:52 - 01:14\n**Martina Sacco**\n\nYour engineers were good about flagging it early. That saved us.\n\n###### 01:14 - 01:30\n**Dom Selvon**\n\nGlad it landed. Phase one is closed as far as we are concerned.\n",
+  "expected": [],
+  "notes": "Entirely retrospective. Past tense statements must not be read as commitments."
+}

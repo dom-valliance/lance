@@ -1,0 +1,36 @@
+{
+  "id": "t01-harlow-brook-sow-kickoff",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Priya Nandra",
+      "email": "priya.nandra@harlowbrook.example.test"
+    }
+  ],
+  "text": "# Harlow Brook Insurance: scope kickoff\n\n**Date:** Monday 21 September 2026\n\n###### 00:00 - 00:14\n**Dom Selvon**\n\nThanks for making time, Priya. I would like to close out the scope today so we can start on 5 October.\n\n###### 00:14 - 00:39\n**Priya Nandra**\n\nAgreed. The board asked for a fixed price, so the scope needs to be tight.\n\n###### 00:39 - 01:02\n**Dom Selvon**\n\nUnderstood. I will send you the statement of work by Friday 25 September with the fixed price and the assumptions listed.\n\n###### 01:02 - 01:24\n**Priya Nandra**\n\nGood. I will get you access to the claims data warehouse by Wednesday so your team can size the work.\n\n###### 01:24 - 01:36\n**Dom Selvon**\n\nThat works. Anything else blocking us?\n\n###### 01:36 - 01:50\n**Priya Nandra**\n\nNothing from my side.\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Priya Nandra the statement of work with the fixed price and assumptions",
+      "counterpartyName": "Priya Nandra",
+      "counterpartyEmail": "priya.nandra@harlowbrook.example.test",
+      "dueAt": "2026-09-25",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send you the statement of work by Friday 25 September with the fixed price and the assumptions listed."
+    },
+    {
+      "direction": "inbound",
+      "description": "Priya Nandra to give Dom access to the claims data warehouse",
+      "counterpartyName": "Priya Nandra",
+      "counterpartyEmail": "priya.nandra@harlowbrook.example.test",
+      "dueAt": "2026-09-23",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will get you access to the claims data warehouse by Wednesday so your team can size the work."
+    }
+  ],
+  "notes": "Easy. One commitment in each direction with explicit weekday dates."
+}

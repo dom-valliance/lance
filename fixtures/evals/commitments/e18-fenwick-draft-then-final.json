@@ -1,0 +1,36 @@
+{
+  "id": "e18-fenwick-draft-then-final",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Felix Arundel",
+      "email": "felix.arundel@fenwicklabs.example.test"
+    }
+  ],
+  "text": "Subject: Evaluation report\nDate: Thursday 22 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Felix Arundel <felix.arundel@fenwicklabs.example.test>\n\nFelix,\n\nPlan for the evaluation report. I will send the draft on Monday 26 October and the final version on Monday 2 November after your comments.\n\nIf that is too tight, say so now rather than later.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Felix Arundel the draft evaluation report",
+      "counterpartyName": "Felix Arundel",
+      "counterpartyEmail": "felix.arundel@fenwicklabs.example.test",
+      "dueAt": "2026-10-26",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the draft on Monday 26 October and the final version on Monday 2 November after your comments."
+    },
+    {
+      "direction": "outbound",
+      "description": "Send Felix Arundel the final evaluation report",
+      "counterpartyName": "Felix Arundel",
+      "counterpartyEmail": "felix.arundel@fenwicklabs.example.test",
+      "dueAt": "2026-11-02",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the draft on Monday 26 October and the final version on Monday 2 November after your comments."
+    }
+  ],
+  "notes": "Two outbound commitments, one sentence, two explicit dates. Similarity alone will not separate them, so due date scoring matters."
+}

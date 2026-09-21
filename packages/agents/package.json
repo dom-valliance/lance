@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc --noEmit -p tsconfig.json",
+    "eval:commitments": "tsx src/evals/commitments/cli.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.1.0",
-    "@types/node": "26.6.2"
+    "@types/node": "26.6.2",
+    "tsx": "4.23.13"
   }
 }

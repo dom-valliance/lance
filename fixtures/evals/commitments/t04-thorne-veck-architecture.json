@@ -1,0 +1,36 @@
+{
+  "id": "t04-thorne-veck-architecture",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Marcus Oyelaran",
+      "email": "marcus.oyelaran@thorneveck.example.test"
+    }
+  ],
+  "text": "# Thorne and Veck: architecture walkthrough\n\n**Date:** Thursday 24 September 2026\n\n###### 00:00 - 00:20\n**Marcus Oyelaran**\n\nOur infosec team will not look at this without a written architecture.\n\n###### 00:20 - 00:52\n**Dom Selvon**\n\nThat is fair. I will send the architecture note today and Marcus will come back to us with the security questionnaire by Tuesday.\n\n###### 00:52 - 01:05\n**Marcus Oyelaran**\n\nYes, Tuesday works. I will have it from the team by then.\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Marcus Oyelaran the architecture note",
+      "counterpartyName": "Marcus Oyelaran",
+      "counterpartyEmail": "marcus.oyelaran@thorneveck.example.test",
+      "dueAt": "2026-09-24",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the architecture note today and Marcus will come back to us with the security questionnaire by Tuesday."
+    },
+    {
+      "direction": "inbound",
+      "description": "Marcus Oyelaran to return the completed security questionnaire",
+      "counterpartyName": "Marcus Oyelaran",
+      "counterpartyEmail": "marcus.oyelaran@thorneveck.example.test",
+      "dueAt": "2026-09-29",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the architecture note today and Marcus will come back to us with the security questionnaire by Tuesday."
+    }
+  ],
+  "notes": "Two commitments in one sentence, one in each direction, sharing an evidence quote."
+}

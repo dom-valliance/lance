@@ -1,0 +1,27 @@
+{
+  "id": "t08-pellow-introduction",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Delphine Roux",
+      "email": "delphine.roux@pellowventures.example.test"
+    }
+  ],
+  "text": "# Pellow Ventures: portfolio catch-up\n\n**Date:** Tuesday 29 September 2026\n\n###### 00:00 - 00:20\n**Delphine Roux**\n\nCould you send the fund deck to my partner in Paris?\n\n###### 00:20 - 00:41\n**Dom Selvon**\n\nLet me check what we are allowed to share. It is not our document, so I cannot promise anything.\n\n###### 00:41 - 01:06\n**Delphine Roux**\n\nUnderstood. Separately, I will introduce you to Felix Arundel at Fenwick Labs by the end of the week.\n\n###### 01:06 - 01:18\n**Dom Selvon**\n\nThat would be genuinely useful, thank you.\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Delphine Roux to introduce Dom to Felix Arundel at Fenwick Labs",
+      "counterpartyName": "Delphine Roux",
+      "counterpartyEmail": "delphine.roux@pellowventures.example.test",
+      "dueAt": "2026-10-02",
+      "dueConfidence": 0.5,
+      "evidenceQuote": "I will introduce you to Felix Arundel at Fenwick Labs by the end of the week."
+    }
+  ],
+  "notes": "A request declined with a hedge must not become an outbound commitment."
+}

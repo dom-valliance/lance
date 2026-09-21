@@ -1,0 +1,17 @@
+{
+  "id": "e15-northgate-meeting-confirmation",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Tobias Renn",
+      "email": "tobias.renn@northgaterail.example.test"
+    }
+  ],
+  "text": "Subject: Confirming Thursday\nDate: Monday 19 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Tobias Renn <tobias.renn@northgaterail.example.test>\n\nTobias,\n\nConfirming Thursday at ten in your Leeds office. I have the visitor details and I know where to sign in.\n\nSee you then.\n\nDom\n",
+  "expected": [],
+  "notes": "Logistics only. Attending a booked meeting is not a commitment for this eval."
+}

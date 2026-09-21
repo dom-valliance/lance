@@ -1,0 +1,36 @@
+{
+  "id": "t13-kestrel-both-directions",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Callum Reeve",
+      "email": "callum.reeve@kestrelanalytics.example.test"
+    }
+  ],
+  "text": "# Kestrel Analytics: integration planning\n\n**Date:** Tuesday 6 October 2026\n\n###### 00:00 - 00:21\n**Dom Selvon**\n\nTo test the integration we need a sandbox tenant and a service account.\n\n###### 00:21 - 00:44\n**Callum Reeve**\n\nI will raise the sandbox tenant with our platform team and confirm by Thursday.\n\n###### 00:44 - 01:09\n**Dom Selvon**\n\nThank you. I will send you the list of scopes we need on the service account tomorrow.\n\n###### 01:09 - 01:22\n**Callum Reeve**\n\nKeep it to the minimum and it will go through faster.\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Callum Reeve to raise the sandbox tenant with the platform team and confirm",
+      "counterpartyName": "Callum Reeve",
+      "counterpartyEmail": "callum.reeve@kestrelanalytics.example.test",
+      "dueAt": "2026-10-08",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will raise the sandbox tenant with our platform team and confirm by Thursday."
+    },
+    {
+      "direction": "outbound",
+      "description": "Send Callum Reeve the list of scopes needed on the service account",
+      "counterpartyName": "Callum Reeve",
+      "counterpartyEmail": "callum.reeve@kestrelanalytics.example.test",
+      "dueAt": "2026-10-07",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send you the list of scopes we need on the service account tomorrow."
+    }
+  ],
+  "notes": "Same counterparty in both directions, so direction is the only discriminator."
+}

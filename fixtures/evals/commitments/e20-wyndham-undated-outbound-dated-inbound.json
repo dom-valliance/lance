@@ -1,0 +1,36 @@
+{
+  "id": "e20-wyndham-undated-outbound-dated-inbound",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Gus Holloway",
+      "email": "gus.holloway@wyndhamretail.example.test"
+    }
+  ],
+  "text": "Subject: Returns data\nDate: Monday 26 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Gus Holloway <gus.holloway@wyndhamretail.example.test>\n\nGus,\n\nThank you for the extract. I will write up what the returns data tells us about the peak weeks, though I cannot give you a date until I have looked at the volumes.\n\nYou said you would send the store level breakdown by 30 October, which I will fold in.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Write up what the returns data shows about the peak weeks",
+      "counterpartyName": "Gus Holloway",
+      "counterpartyEmail": "gus.holloway@wyndhamretail.example.test",
+      "dueAt": null,
+      "dueConfidence": 0,
+      "evidenceQuote": "I will write up what the returns data tells us about the peak weeks, though I cannot give you a date until I have looked at the volumes."
+    },
+    {
+      "direction": "inbound",
+      "description": "Gus Holloway to send the store level breakdown",
+      "counterpartyName": "Gus Holloway",
+      "counterpartyEmail": "gus.holloway@wyndhamretail.example.test",
+      "dueAt": "2026-10-30",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "You said you would send the store level breakdown by 30 October, which I will fold in."
+    }
+  ],
+  "notes": "Undated outbound alongside a dated inbound."
+}

@@ -1,0 +1,27 @@
+{
+  "id": "t12-fenwick-board-paper",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Felix Arundel",
+      "email": "felix.arundel@fenwicklabs.example.test"
+    }
+  ],
+  "text": "# Fenwick Labs: board paper preparation\n\n**Date:** Monday 5 October 2026\n\n###### 00:00 - 00:19\n**Felix Arundel**\n\nThe board meets on the 14th and I need something defensible in the pack.\n\n###### 00:19 - 00:47\n**Dom Selvon**\n\nI will get you the two page summary and the cost model before the board meets on the 14th.\n\n###### 00:47 - 01:02\n**Felix Arundel**\n\nPerfect. I will not need anything else from you before then.\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Felix Arundel the two page summary and the cost model for the board pack",
+      "counterpartyName": "Felix Arundel",
+      "counterpartyEmail": "felix.arundel@fenwicklabs.example.test",
+      "dueAt": "2026-10-14",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will get you the two page summary and the cost model before the board meets on the 14th."
+    }
+  ],
+  "notes": "Date given as a bare day of month."
+}

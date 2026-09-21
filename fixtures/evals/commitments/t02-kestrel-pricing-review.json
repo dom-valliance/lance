@@ -1,0 +1,27 @@
+{
+  "id": "t02-kestrel-pricing-review",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Callum Reeve",
+      "email": "callum.reeve@kestrelanalytics.example.test"
+    }
+  ],
+  "text": "# Kestrel Analytics: pricing review\n\n**Date:** Tuesday 22 September 2026\n\n###### 00:00 - 00:21\n**Callum Reeve**\n\nThe day rate is the sticking point. Procurement will not sign anything above the framework ceiling.\n\n###### 00:21 - 00:44\n**Dom Selvon**\n\nThen let us restructure it. I will send a revised pricing sheet by the end of the month with a blended rate.\n\n###### 00:44 - 01:09\n**Callum Reeve**\n\nWe could look at a retainer next year, but nothing is decided and I would not plan around it.\n\n###### 01:09 - 01:22\n**Dom Selvon**\n\nNoted. I will keep it out of the numbers for now.\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Callum Reeve a revised pricing sheet with a blended rate",
+      "counterpartyName": "Callum Reeve",
+      "counterpartyEmail": "callum.reeve@kestrelanalytics.example.test",
+      "dueAt": "2026-09-30",
+      "dueConfidence": 0.5,
+      "evidenceQuote": "I will send a revised pricing sheet by the end of the month with a blended rate."
+    }
+  ],
+  "notes": "The retainer line is an idea, not a commitment, and must not be extracted."
+}

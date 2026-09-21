@@ -1,0 +1,27 @@
+{
+  "id": "t07-calder-options-summary",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Ravi Khatri",
+      "email": "ravi.khatri@calderhealth.example.test"
+    }
+  ],
+  "text": "# Calder Health Trust: options discussion\n\n**Date:** Monday 28 September 2026\n\n###### 00:00 - 00:22\n**Ravi Khatri**\n\nThe trust board will want to see more than one route through this.\n\n###### 00:22 - 00:49\n**Dom Selvon**\n\nThen I will pull together a summary of the options for the trust board, with the cost envelope for each.\n\n###### 00:49 - 01:04\n**Ravi Khatri**\n\nNo rush on it. The board does not sit again for a while.\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Pull together a summary of the options with a cost envelope for the trust board",
+      "counterpartyName": "Ravi Khatri",
+      "counterpartyEmail": "ravi.khatri@calderhealth.example.test",
+      "dueAt": null,
+      "dueConfidence": 0,
+      "evidenceQuote": "I will pull together a summary of the options for the trust board, with the cost envelope for each."
+    }
+  ],
+  "notes": "A real commitment with no date at all. dueAt must be null."
+}

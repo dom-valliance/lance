@@ -1,0 +1,17 @@
+{
+  "id": "e12-pellow-questions-only",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Delphine Roux",
+      "email": "delphine.roux@pellowventures.example.test"
+    }
+  ],
+  "text": "Subject: Two questions before we speak\nDate: Tuesday 13 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Delphine Roux <delphine.roux@pellowventures.example.test>\n\nDelphine,\n\nBefore Thursday, two questions. Does the portfolio company own its own model weights, or are they licensed? And is the data residency requirement contractual or a preference?\n\nNo need to write back if it is easier to cover them on the call.\n\nBest,\nDom\n",
+  "expected": [],
+  "notes": "Questions only, with an explicit release from replying."
+}

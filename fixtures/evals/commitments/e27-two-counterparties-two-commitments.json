@@ -1,0 +1,40 @@
+{
+  "id": "e27-two-counterparties-two-commitments",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Imogen Fairlie",
+      "email": "imogen.fairlie@wyndhamretail.example.test"
+    },
+    {
+      "name": "Jack Merrow",
+      "email": "jack.merrow@bramleyfoods.example.test"
+    }
+  ],
+  "text": "Subject: Shared benchmarking note\nDate: Thursday 5 November 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Imogen Fairlie <imogen.fairlie@wyndhamretail.example.test>, Jack Merrow <jack.merrow@bramleyfoods.example.test>\n\nImogen, Jack,\n\nBoth of you asked for the same thing, so here is one note covering it.\n\nImogen, I will send you the Wyndham specific figures by 12 November. Jack, I will send you the Bramley comparison by 13 November.\n\nNeither set identifies the other, so there is nothing to worry about on confidentiality.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Imogen Fairlie the Wyndham specific benchmarking figures",
+      "counterpartyName": "Imogen Fairlie",
+      "counterpartyEmail": "imogen.fairlie@wyndhamretail.example.test",
+      "dueAt": "2026-11-12",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "Imogen, I will send you the Wyndham specific figures by 12 November."
+    },
+    {
+      "direction": "outbound",
+      "description": "Send Jack Merrow the Bramley benchmarking comparison",
+      "counterpartyName": "Jack Merrow",
+      "counterpartyEmail": "jack.merrow@bramleyfoods.example.test",
+      "dueAt": "2026-11-13",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "Jack, I will send you the Bramley comparison by 13 November."
+    }
+  ],
+  "notes": "Two counterparties on one mail, so counterparty matching is the discriminator."
+}

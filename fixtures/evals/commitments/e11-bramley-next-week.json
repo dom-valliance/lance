@@ -1,0 +1,27 @@
+{
+  "id": "e11-bramley-next-week",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Jack Merrow",
+      "email": "jack.merrow@bramleyfoods.example.test"
+    }
+  ],
+  "text": "Subject: Onboarding pack\nDate: Wednesday 7 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Jack Merrow <jack.merrow@bramleyfoods.example.test>\n\nJack,\n\nGood news on the contract clearing risk.\n\nI will send the onboarding pack next week, including the access request forms your IT team asked for.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Jack Merrow the onboarding pack including access request forms",
+      "counterpartyName": "Jack Merrow",
+      "counterpartyEmail": "jack.merrow@bramleyfoods.example.test",
+      "dueAt": "2026-10-16",
+      "dueConfidence": 0.5,
+      "evidenceQuote": "I will send the onboarding pack next week, including the access request forms your IT team asked for."
+    }
+  ],
+  "notes": "Next week resolved to the Friday of the following week."
+}
