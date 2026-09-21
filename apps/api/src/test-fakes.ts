@@ -1,5 +1,5 @@
 import type { SlackSurface } from '@lance/connectors';
-import type { SystemState } from '@lance/db';
+import type { Commitment, SystemState } from '@lance/db';
 import type {
   DecisionResult,
   LedgerEventRow,
@@ -21,10 +21,15 @@ import type {
   ApiDeps,
   LedgerReaderLike,
   LedgerWriterLike,
+  OntologyLike,
+  OntologyNodeLike,
   ProposalStoreLike,
   SystemControlLike,
   TokenVerifier,
 } from './deps.js';
+import type { CommitmentQuery, CommitmentStoreLike } from './commitments/store.js';
+import type { TaskQuery, TaskStoreLike } from './tasks/store.js';
+import { toTaskView, type ObservationRecord } from './tasks/view.js';
 import { UnauthorisedError } from './errors.js';
 import { createFeed, type Feed, type FeedEvent } from './events.js';
 import type { DecisionRequest } from './proposals/decide.js';
@@ -199,6 +204,117 @@ export class FakeProposalStore implements ProposalStoreLike {
   }
 }
 
+export const TEST_COMMITMENT_ID = '01K5S9V6QW3SWCCPVB0N0E302A';
+export const TEST_PERSON_ID = 'per-ann';
+
+export const fakeCommitment = (overrides: Partial<Commitment> = {}): Commitment => ({
+  id: TEST_COMMITMENT_ID,
+  direction: 'inbound',
+  // The recorder puts the other party in both columns for an inbound
+  // commitment: they own it, and they are the counterparty.
+  ownerPersonId: TEST_PERSON_ID,
+  counterpartyPersonId: TEST_PERSON_ID,
+  description: 'Send the signed order form',
+  dueAt: new Date('2026-09-18T17:00:00.000Z'),
+  dueConfidence: 0.8,
+  evidenceQuote: 'I will get the order form over to you by Friday',
+  sourceRefs: [
+    { system: 'graph', recordId: 'AAMk2', hash: 'h2', observedAt: '2026-09-14T09:00:00.000Z' },
+  ],
+  status: 'open',
+  chaseCount: 0,
+  nextChaseAt: new Date('2026-09-20T17:00:00.000Z'),
+  createdAt: new Date('2026-09-14T09:00:00.000Z'),
+  updatedAt: new Date('2026-09-14T09:00:00.000Z'),
+  ...overrides,
+});
+
+/** The commitments table without a database: filters, cursors and one status write. */
+export class FakeCommitmentStore implements CommitmentStoreLike {
+  rows: Commitment[] = [fakeCommitment()];
+  readonly queries: CommitmentQuery[] = [];
+
+  list(query: CommitmentQuery): Promise<Commitment[]> {
+    this.queries.push(query);
+    const matched = this.rows
+      .filter((row) => query.direction === undefined || row.direction === query.direction)
+      .filter((row) => query.status === undefined || row.status === query.status)
+      .filter((row) => query.cursor === undefined || row.id < query.cursor)
+      .sort((left, right) => (left.id < right.id ? 1 : -1));
+    return Promise.resolve(matched.slice(0, query.limit));
+  }
+
+  get(id: string): Promise<Commitment | null> {
+    return Promise.resolve(this.rows.find((row) => row.id === id) ?? null);
+  }
+
+  setStatus(input: {
+    id: string;
+    from: Commitment['status'][];
+    to: Commitment['status'];
+    at: Date;
+  }): Promise<Commitment | null> {
+    const index = this.rows.findIndex(
+      (row) => row.id === input.id && input.from.includes(row.status),
+    );
+    if (index === -1) return Promise.resolve(null);
+    const updated = { ...this.rows[index]!, status: input.to, updatedAt: input.at };
+    this.rows[index] = updated;
+    return Promise.resolve(updated);
+  }
+}
+
+export const fakeNotionTaskObservation = (
+  overrides: Partial<ObservationRecord> = {},
+): ObservationRecord => ({
+  id: '01K5S9V6QW3SWCCPVB0N0E303A',
+  ts: new Date('2026-09-20T08:00:00.000Z'),
+  sourceSystem: 'notion',
+  sourceRecordId: '20257534-6e48-81fe-b4b5-000b69ecace7',
+  payload: {
+    kind: 'task',
+    id: '20257534-6e48-81fe-b4b5-000b69ecace7',
+    url: 'https://www.notion.so/20257534',
+    title: 'Draft the pilot scope',
+    status: 'In Progress',
+    assigneeIds: ['1fdd872b-594c-8146-b22f-00028f1f5a41'],
+    due: '2026-09-25',
+  },
+  ...overrides,
+});
+
+/** The observations table's task rows without a database. */
+export class FakeTaskStore implements TaskStoreLike {
+  rows: ObservationRecord[] = [fakeNotionTaskObservation()];
+  readonly queries: TaskQuery[] = [];
+
+  list(query: TaskQuery): Promise<ObservationRecord[]> {
+    this.queries.push(query);
+    const options = { domNotionUserId: '1fdd872b-594c-8146-b22f-00028f1f5a41' };
+    const matched = this.rows
+      .filter((row) => query.source === undefined || row.sourceSystem === query.source)
+      .filter((row) => {
+        if (query.status === undefined) return true;
+        const view = toTaskView(row, options);
+        return view !== null && view.done === (query.status === 'done');
+      })
+      .filter((row) => query.cursor === undefined || row.id < query.cursor)
+      .sort((left, right) => (left.id < right.id ? 1 : -1));
+    return Promise.resolve(matched.slice(0, query.limit));
+  }
+}
+
+/** Person nodes keyed by id; an id it does not hold reads as a missing node. */
+export class FakeOntology implements OntologyLike {
+  readonly nodes = new Map<string, OntologyNodeLike>([
+    [TEST_PERSON_ID, { properties: { display_name: 'Ann Example', emails: ['ann@client.test'] } }],
+  ]);
+
+  getNode(id: string): Promise<OntologyNodeLike | null> {
+    return Promise.resolve(this.nodes.get(id) ?? null);
+  }
+}
+
 /** Records every decision the routes ask for, without a state machine behind it. */
 export class FakeDecider {
   readonly requests: DecisionRequest[] = [];
@@ -330,8 +446,13 @@ export interface FakeDeps {
   feed: Feed;
   events: FeedEvent[];
   status: FakeStatusSource;
+  commitments: FakeCommitmentStore;
+  tasks: FakeTaskStore;
+  ontology: FakeOntology;
   /** Proposal ids handed to `enqueueExecute`, in order. */
   enqueued: string[];
+  /** Commitment ids handed to `enqueueChase`, in order. */
+  chased: string[];
 }
 
 export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
@@ -346,6 +467,10 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
   const events: FeedEvent[] = [];
   feed.subscribe((event) => events.push(event));
   const enqueued: string[] = [];
+  const chased: string[] = [];
+  const commitments = new FakeCommitmentStore();
+  const tasks = new FakeTaskStore();
+  const ontology = new FakeOntology();
 
   const deps: ApiDeps = {
     config: overrides.config ?? testConfig(),
@@ -357,6 +482,13 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     enqueueExecute: (proposalId) => {
       enqueued.push(proposalId);
       return Promise.resolve();
+    },
+    commitments,
+    tasks,
+    ontology,
+    enqueueChase: (commitmentId) => {
+      chased.push(commitmentId);
+      return Promise.resolve(`job-${String(chased.length)}`);
     },
     status: overrides.status ?? status,
     auth: overrides.auth ?? fakeVerifier('good-token'),
@@ -387,6 +519,10 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     feed,
     events,
     status,
+    commitments,
+    tasks,
+    ontology,
     enqueued,
+    chased,
   };
 };

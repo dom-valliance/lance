@@ -38,9 +38,10 @@ import { registerExecutor } from './executor/index.js';
 import { reflectProposal } from './executor/reflect.js';
 import { postDryRunDigest } from './digest/dryRunDigest.js';
 import { ensureSeedRules, loadActiveRules } from './policy/rules.js';
+import { runChase } from './chase/run.js';
 import { createBoss, startBoss } from './scheduler/boss.js';
 import { PauseGate } from './scheduler/gate.js';
-import { QUEUES } from './scheduler/queues.js';
+import { QUEUES, type ChaseJob } from './scheduler/queues.js';
 import { runTriage } from './triage/run.js';
 import { createJamieWatcher } from './watchers/jamie/index.js';
 import { createNotionWatcher, notionWatcherReads } from './watchers/notion/index.js';
@@ -401,6 +402,28 @@ async function main(): Promise<void> {
           },
           job.data,
         );
+      }
+    });
+  }
+  if (agent !== null) {
+    await boss.work<ChaseJob>(QUEUES.chase, async (jobs) => {
+      for (const job of jobs) {
+        if (!(await gate.check()).runnable) {
+          // Paused: the chase goes back on the queue rather than being
+          // dropped, exactly as a triage job does.
+          await boss.send(QUEUES.chase, job.data, { startAfter: TRIAGE_RETRY_WHILE_PAUSED_S });
+          continue;
+        }
+        const result = await runChase(
+          { db, config, agent, ontology, createProposal },
+          { commitmentId: job.data.commitmentId },
+        );
+        if (result.status === 'refused') {
+          console.warn(
+            { commitmentId: job.data.commitmentId, reason: result.reason },
+            'chase refused',
+          );
+        }
       }
     });
   }

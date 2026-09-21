@@ -220,6 +220,9 @@ importers:
       '@lance/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
+      '@lance/ontology':
+        specifier: workspace:*
+        version: link:../../packages/ontology
       '@lance/shared':
         specifier: workspace:*
         version: link:../../packages/shared
