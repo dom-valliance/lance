@@ -71,13 +71,12 @@ resource migrateJob 'Microsoft.App/jobs@2025-01-01' = {
         {
           name: 'migrate'
           image: useBootstrapImage ? bootstrapImage : '${registryLoginServer}/lance-worker:${containerImageTag}'
+          // The runtime image has no pnpm; tsx is installed with the db package.
+          // Seed is idempotent (ON CONFLICT DO NOTHING), so the job runs both.
           command: [
-            'pnpm'
-          ]
-          args: [
-            '--filter'
-            '@lance/db'
-            'migrate'
+            'sh'
+            '-c'
+            'cd /app/packages/db && ./node_modules/.bin/tsx src/migrate.ts && ./node_modules/.bin/tsx src/seed.ts'
           ]
           resources: {
             cpu: json('0.5')
