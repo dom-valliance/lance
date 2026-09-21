@@ -132,3 +132,10 @@
 **Correction**: Dom: "errors should not be passed in as query string params".
 **Rule**: A server action answers `useActionState` with its failure and the form renders it from React state. No redirect carries a message, an error or anything user-facing in the query string.
 **Applies to**: apps/web
+
+### [2026-09-21] The admin firewall rule is one address and goes stale with the network
+
+**Context**: psql to the dev server timed out for Dom and for me. The `AllowAdminClient` rule still held the morning's public IP; the address had changed during the day.
+**Correction**: Dom pasted the timeout.
+**Rule**: A psql timeout against Flexible Server is checked first against the current public IP and the `AllowAdminClient` rule. The fix is `export LANCE_ADMIN_CLIENT_IP=$(curl -s https://api.ipify.org)` and a redeploy, never a hand-edited rule. The runbook says to take the value from `curl` every time.
+**Applies to**: docs/runbooks/deploy.md, infra/modules/postgres.bicep

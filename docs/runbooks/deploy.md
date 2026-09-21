@@ -193,7 +193,7 @@ az acr repository show-tags --name $ACR --repository lance-web -o tsv
 
 Run this once per environment, as the Entra administrator from step 2, before the migration job. The identity names come from the `identityNames` deployment output and are exactly `id-lance-web-dev`, `id-lance-api-dev`, `id-lance-worker-dev` and `id-lance-migrate-dev`.
 
-1. Open the firewall to your machine. The server accepts Azure services only, so a psql connection from outside times out. Export your public IP and redeploy; the template adds a single-address rule. Unset the variable and redeploy later to remove it:
+1. Open the firewall to your machine. The server accepts Azure services only, so a psql connection from outside times out. Export your public IP and redeploy; the template adds a single-address rule. Unset the variable and redeploy later to remove it. The rule is one address: when your network changes, psql times out again, and the fix is the same export and redeploy, so set the variable from `curl` in the shell you deploy from every time rather than keeping an old value:
 
    ```
    export LANCE_ADMIN_CLIENT_IP=$(curl -s https://api.ipify.org)
