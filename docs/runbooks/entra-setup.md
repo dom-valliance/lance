@@ -35,7 +35,10 @@ Platform: Web. Add:
 - `https://<web-hostname>/api/auth/callback/microsoft-entra-id` for sign-in to the web UI. The hostname is printed by `deploy.md` step 3, so this can be added after the first deploy.
 - `http://localhost:3000/api/auth/callback/microsoft-entra-id` for local development of the web UI. Add this now.
 
-The api's delegated Graph consent flow (`/auth/graph/connect` and `/auth/graph/callback`, on port 3001 locally) is built in Phase 1 with the Graph connector. Its redirect URIs are added then; nothing in Phase 0 uses them.
+The api's delegated Graph consent flow exists from Phase 1. Add its callback too:
+
+- `https://<api-hostname>/auth/graph/callback`, for dev `https://ca-lance-api-dev.graygrass-c682ce2c.uksouth.azurecontainerapps.io/auth/graph/callback`.
+- `http://localhost:3001/auth/graph/callback` for local development of the api.
 
 Enable ID tokens under Implicit grant and hybrid flows. Leave access tokens unticked.
 
@@ -77,4 +80,4 @@ Nothing to do by hand. The Azure Database for PostgreSQL Flexible Server is the 
 
 ## 7. First delegated consent
 
-Phase 1. Once the api's Graph routes exist, open `https://<api-hostname>/auth/graph/connect` as Dom and consent once. The api stores the refresh token in Key Vault as `graph-refresh-token` and records a `state_changed` ledger event.
+The connect route is behind Entra bearer authentication, so it is started from the web app's Settings page (a Connect Microsoft 365 button that carries Dom's token), not by typing the URL into a browser. Consent once as Dom. The api exchanges the code, stores the refresh token in Key Vault as `graph-refresh-token`, records a `state_changed` ledger event with `change: graph_connected`, and every later refresh rotates the stored token. `/lance status` then shows the Graph connector as connected. If the button is not built yet, the temporary route is `curl -H "Authorization: Bearer <id token>" -i https://<api-hostname>/auth/graph/connect` and following the Location header in a browser.
