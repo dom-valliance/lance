@@ -104,3 +104,9 @@
 **Correction**: Dom pasted the `az acr build` log.
 **Rule**: A Dockerfile that enumerates sources is coupled to every `workspace:*` dependency and every cross-app type import; when either changes, update the Dockerfile and build the image locally before the phase is called done. Image builds are part of every phase's verification, not only the deploy runbook, and CI builds all three Dockerfiles on every pull request so the gap cannot recur silently.
 **Applies to**: apps/*/Dockerfile, .github/workflows/ci.yml
+### [2026-09-21] Run the worker's boot path against real pg-boss before deploying
+
+**Context**: The first Phase 1 worker start in Azure crashed: pg-boss rejects a colon in a queue name or schedule key, and the watcher queues were named `watcher:<name>`. Every unit test passed because none registered a watcher with pg-boss; only `main.ts` did, and `main.ts` had never run with Graph configured.
+**Correction**: Dom reported that nothing new appeared after the deploy; the worker log showed the assertion.
+**Rule**: Every registration `main.ts` performs (queues, schedules, workers) has a test that performs it against real pg-boss in a container. When a boot path only runs with credentials that are absent locally, stub the credentials and run it anyway. After a deploy, read each container's console log, not only its revision state.
+**Applies to**: apps/worker/src/main.ts, apps/worker/src/watchers/

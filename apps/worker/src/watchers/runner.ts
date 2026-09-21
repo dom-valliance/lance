@@ -203,8 +203,12 @@ export async function runWatcher(
   return { watcher: watcher.name, status: 'ran', partitions: summaries };
 }
 
+/**
+ * pg-boss allows only letters, digits, underscores, hyphens, periods and
+ * slashes in a queue name or schedule key, so the separator is a hyphen.
+ */
 export function watcherQueue(watcher: Pick<Watcher, 'name'>): string {
-  return `watcher:${watcher.name}`;
+  return `watcher-${watcher.name}`;
 }
 
 /** Registers the watcher's queue, schedules and handler with pg-boss. */
@@ -221,7 +225,7 @@ export async function registerWatcher(
       queue,
       cron,
       { schedule: index },
-      { tz: timeZone, key: `${queue}:${index}` },
+      { tz: timeZone, key: `${queue}-${String(index)}` },
     );
   }
   await boss.work(queue, async () => {
