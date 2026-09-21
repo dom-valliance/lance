@@ -90,3 +90,10 @@
 **Correction**: Dom pasted the HTML reply.
 **Rule**: When a runbook has a placeholder that could be filled with the wrong one of two similar values, print the exact command that produces the right value directly above it and say which value is wrong. Verify a third-party integration end to end from the third party's side (send the real command) before declaring the surface ready, and record the fix path for an app already created with the wrong value.
 **Applies to**: docs/runbooks/
+
+### [2026-09-21] The first CI run must be exercised with the tools CI uses
+
+**Context**: The first GitHub Actions run failed twice. The workflow calls the standalone `bicep` CLI, which takes the file positionally, but every local check had used `az bicep build --file`, a wrapper with different arguments. And `next.config.ts`, outside the `src` globs, had no Node globals, so a `URL` call I added after the last full lint failed only in CI.
+**Correction**: Dom pasted the CI log.
+**Rule**: Before the first push, run the exact commands in the workflow with the exact binaries it installs (the standalone CLI, not the `az` wrapper), and run the full root lint after every edit, not the package filter. A file that ESLint parses without a matching config block is a gap; every `.ts` file gets the same globals.
+**Applies to**: .github/, eslint.config.js
