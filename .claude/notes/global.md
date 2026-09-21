@@ -83,3 +83,10 @@
 **Correction**: Found in the worker log after the first successful migration.
 **Rule**: For any library that manages its own schema at runtime (pg-boss, drizzle, OTel exporters), read what it executes on start and grant exactly that in a migration. Run the integration suites as the roles the platform will use, not as the superuser.
 **Applies to**: packages/db/, apps/worker/
+
+### [2026-09-21] Two public hostnames invite the wrong one in a manifest
+
+**Context**: `/lance status` in Slack returned the web app's sign-in page. The Slack app had been created with the web hostname in the slash command URL; the manifest placeholder said `<api-hostname>` but nothing made the two hostnames hard to confuse.
+**Correction**: Dom pasted the HTML reply.
+**Rule**: When a runbook has a placeholder that could be filled with the wrong one of two similar values, print the exact command that produces the right value directly above it and say which value is wrong. Verify a third-party integration end to end from the third party's side (send the real command) before declaring the surface ready, and record the fix path for an app already created with the wrong value.
+**Applies to**: docs/runbooks/
