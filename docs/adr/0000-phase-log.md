@@ -66,3 +66,23 @@ Opened 2026-09-21 on branch `feat/phase-2-meetings`, with Dom's go-ahead, while 
 | Eval F1 for commitment extraction above 0.8 on the golden set | `pnpm --filter @lance/agents eval:commitments:live` over the 50 synthetic records in `fixtures/evals/commitments` with `claude-sonnet-5`: F1 0.857, precision 85.7%, recall 85.7%, due date accuracy 87.5% over 48 matched pairs (56 expected, 56 extracted, 48 true positives). First run scored 0.533 before the scorer stopped counting people's names in descriptions and the prompt refused group counterparties and third-party promises. | 2026-09-21 |
 | A real meeting produces a debrief card with at least one approved Notion task within one hour of transcript arrival | pending | |
 
+### Phase 2 review, 2026-09-21
+
+An independent Opus 5 review of the branch returned ten findings. Fixed before hand-over:
+
+| Finding | Fix |
+|---|---|
+| A same-name sighting with no identifier created a new Person node and a SAME_AS candidate on every meeting | A candidate-grade match with no email or system id reuses the known node unless rule 3 bars it |
+| Commitments from one correlation id were stamped with the first candidate's provenance | Candidates are grouped by source record and recorded with that record's provenance |
+| Rebuild skipped a mutation whose payload was missing and reported success | Rebuild throws naming the event; the graph cannot be rebuilt from a ledger that retention has trimmed |
+| A graph mutation and its ledger event were not atomic | Both run in one transaction, as do a chase's row update and its event |
+| A meeting with a future start dragged the Jamie poll window forward | The cursor is clamped to now before the overlap is applied |
+| A chase was marked chased even when policy forbade the draft | A forbidden draft leaves the commitment untouched and records the refusal |
+| Commitment resolutions were attributed to a constant actor | The router passes the actor derived from the verified UPN |
+| A chase request left no ledger trace until the worker ran | The api appends a `commitment_chase_requested` event at enqueue |
+| `LIMIT $limit` in the ontology search | The bound is checked and inlined |
+
+Accepted with a decision to make in Phase 5: evidence quotes copied into the triage `resolved` event outlive the transcript they came from (ledger two years, transcripts 180 days). Retention will either null the quote fields in ledger payloads at the transcript window or the window will be set on purpose; recorded here so the retention job (WP5.1) carries it.
+
+Also settled in Phase 2: the mail-derived commitment path and the transcript path share one extractor and one golden set; Jamie exposes `tasks.update` and Lance does not use it (ADR 0005 addendum).
+
