@@ -11,8 +11,23 @@ export const MIGRATIONS_FOLDER = fileURLToPath(new URL('../drizzle', import.meta
  */
 export const runMigrations = async (options: CreateDbOptions = {}): Promise<void> => {
   const db = createDb(options);
+  // A query error inside the migration transaction can otherwise surface only
+  // as a bare "Connection terminated unexpectedly" from the checked-out client.
+  // Print the first real message so the job log names the failing statement.
+  db.$client.on('connect', (client) => {
+    client.on('error', (error: Error) => {
+      console.error(`Postgres client error during migration: ${error.message}`);
+    });
+  });
   try {
     await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+  } catch (error) {
+    const cause =
+      error instanceof Error && error.cause instanceof Error ? error.cause.message : null;
+    console.error(
+      `Migration failed: ${error instanceof Error ? error.message : String(error)}${cause ? ` (cause: ${cause})` : ''}`,
+    );
+    throw error;
   } finally {
     await db.$client.end();
   }

@@ -39,6 +39,11 @@ BEGIN
 END
 $$;
 --> statement-breakpoint
+-- Reassigning ownership to lance_migrator (migration 0002) requires that role
+-- to hold CREATE on the schema. A superuser bypasses the check; the Azure
+-- migrate identity does not.
+GRANT USAGE, CREATE ON SCHEMA public TO lance_migrator;
+--> statement-breakpoint
 -- The role running the migrations reassigns ownership to lance_migrator in a
 -- later migration, which needs membership of that role. A superuser has it
 -- implicitly; on Azure the migrate identity is an Entra admin principal
