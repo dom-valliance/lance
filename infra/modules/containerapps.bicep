@@ -104,6 +104,11 @@ var apiSecretBindings = [
 
 var workerSecretBindings = [
   {
+    // Proposal cards, execution updates and the dry-run digest (ADR 0012).
+    secretName: 'slack-bot-token'
+    envName: 'SLACK_BOT_TOKEN'
+  }
+  {
     secretName: 'entra-tenant-id'
     envName: 'ENTRA_TENANT_ID'
   }
