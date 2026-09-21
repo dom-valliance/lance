@@ -44,7 +44,7 @@ read -s SIGN && az keyvault secret set --vault-name $KV --name slack-signing-sec
 
 ## 5. Verify
 
-After `deploy.md` step 6 has flipped the apps off the bootstrap image, run `/lance status` in the channel. The api verifies the Slack signature, checks the user id against `SLACK_ALLOWED_USER_ID`, and answers with an ephemeral message. The first command appears in the ledger as nothing (status is a read); `/lance pause drill` followed by `/lance resume` writes two `state_changed` events, which closes the Phase 0 acceptance criterion.
+After `deploy.md` step 6 has flipped the apps off the bootstrap image, run `/lance status` in the channel. The api verifies the Slack signature, checks the user id against `SLACK_ALLOWED_USER_ID`, and answers with an ephemeral message. Status writes nothing to the ledger. `/lance pause drill` followed by `/lance resume` writes two `state_changed` events, which closes the Phase 0 acceptance criterion.
 
 If Slack shows a timeout, the api is not reachable on its external ingress; check `az containerapp logs show -g rg-lance-dev -n ca-lance-api-dev`.
 
