@@ -1,7 +1,7 @@
 import type { CreateProposalHandler, CreateProposalOutcome, ProposalDraft } from '@lance/agents';
 import { renderProposalCard, type SlackSurface } from '@lance/connectors';
 import { policyDecisions, proposals, type Db } from '@lance/db';
-import { LedgerWriter, type SystemControl } from '@lance/ledger';
+import { LedgerWriter, toProposal, type SystemControl } from '@lance/ledger';
 import { evaluate } from '@lance/policy';
 import {
   REVERSIBILITY_BY_ACTION_CLASS,
@@ -9,7 +9,6 @@ import {
   nowIso,
   type Config,
   type PolicyRule,
-  type Proposal,
   type ProposalStatus,
 } from '@lance/shared';
 import { eq } from 'drizzle-orm';
@@ -40,34 +39,6 @@ export interface CreateProposalDeps {
 }
 
 export const POLICY_ACTOR = 'system:policy';
-
-/** Maps a proposals row to the shared Proposal shape the renderers take. */
-export function toProposal(row: typeof proposals.$inferSelect): Proposal {
-  return {
-    id: row.id,
-    correlationId: row.correlationId,
-    actionClass: row.actionClass,
-    counterpartyClass: row.counterpartyClass,
-    targetSystem: row.targetSystem,
-    targetRecordId: row.targetRecordId,
-    reversibility: row.reversibility,
-    payload: row.payload as Record<string, unknown>,
-    preview: row.preview,
-    rationale: row.rationale,
-    provenance: row.provenance as Proposal['provenance'],
-    policyDecision: row.policyDecision,
-    policyRuleId: row.policyRuleId,
-    status: row.status,
-    decidedBy: row.decidedBy,
-    decidedAt: row.decidedAt === null ? null : row.decidedAt.toISOString(),
-    decisionNote: row.decisionNote,
-    editedPayload: row.editedPayload as Record<string, unknown> | null,
-    slackChannel: row.slackChannel,
-    slackTs: row.slackTs,
-    expiresAt: row.expiresAt.toISOString(),
-    executionEventId: row.executionEventId,
-  };
-}
 
 /**
  * The one path from a model's wish to a proposal (spec 7.2, 7.5): policy is

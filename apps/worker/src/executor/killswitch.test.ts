@@ -73,7 +73,7 @@ beforeAll(async () => {
   perform.mockImplementation((proposalId) =>
     proposalId.includes(FAILING_PROPOSAL_MARKER)
       ? Promise.reject(new Error('connector exploded'))
-      : Promise.resolve({ targetRecordId: 'AAMk-message-1' }),
+      : Promise.resolve({ targetRecordId: 'AAMk-message-1', url: null, compensation: null }),
   );
   await registerExecutor(boss, { db, gate: new PauseGate(control), write: { perform } });
 }, 120000);

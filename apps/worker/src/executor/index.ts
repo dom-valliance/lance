@@ -9,9 +9,16 @@ import { QUEUES, type ExecuteJob } from '../scheduler/queues.js';
 export const EXECUTOR = 'executor';
 export const EXECUTOR_ACTOR = 'agent:executor@0.1.0';
 
+export interface WriteOutcome {
+  targetRecordId: string | null;
+  url: string | null;
+  /** For compensatable actions: what an undo would do (spec 7.5 step 5). */
+  compensation: Record<string, unknown> | null;
+}
+
 export interface ConnectorWrite {
-  /** The single connector write for one proposal (spec 7.5 step 3). Phase 1 supplies it. */
-  perform(proposalId: string): Promise<{ targetRecordId: string | null }>;
+  /** The single connector write for one proposal (spec 7.5 step 3). */
+  perform(proposalId: string): Promise<WriteOutcome>;
 }
 
 export interface ExecutorDeps {
@@ -106,28 +113,52 @@ export async function executeProposal(
       sourceSystem: proposal.targetSystem,
       sourceRecordId: result.targetRecordId,
       correlationId: proposal.correlationId,
-      payload: { proposalId: proposal.id, actionClass: proposal.actionClass },
+      payload: { proposalId: proposal.id, actionClass: proposal.actionClass, url: result.url },
     });
     await deps.db
       .update(proposals)
-      .set({ status: 'executed', executionEventId: event.id, updatedAt: new Date(nowIso()) })
+      .set({
+        status: 'executed',
+        executionEventId: event.id,
+        compensationPayload: result.compensation,
+        updatedAt: new Date(nowIso()),
+      })
       .where(eq(proposals.id, proposal.id));
     return { status: 'executed', eventId: event.id };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const reason =
+      error instanceof Error && 'reason' in error && typeof error.reason === 'string'
+        ? error.reason
+        : null;
+    // A changed target is a hold, not a failure (spec 7.5 step 2): the card is updated and nothing is written.
+    const held = reason === 'target_changed' || reason === 'forbidden_at_execution';
     const event = await ledger.append({
       ts: nowIso(),
       actor: EXECUTOR_ACTOR,
       kind: 'failed',
       sourceSystem: proposal.targetSystem,
       correlationId: proposal.correlationId,
-      payload: { proposalId: proposal.id, actionClass: proposal.actionClass, error: message },
+      payload: {
+        proposalId: proposal.id,
+        actionClass: proposal.actionClass,
+        error: message,
+        reason,
+        held,
+      },
     });
     await deps.db
       .update(proposals)
-      .set({ status: 'failed', executionEventId: event.id, updatedAt: new Date(nowIso()) })
+      .set({
+        status: held ? 'held' : 'failed',
+        decisionNote: held ? message : undefined,
+        executionEventId: held ? undefined : event.id,
+        updatedAt: new Date(nowIso()),
+      })
       .where(eq(proposals.id, proposal.id));
-    return { status: 'failed', eventId: event.id, error: message };
+    return held
+      ? { status: 'held', reason: message }
+      : { status: 'failed', eventId: event.id, error: message };
   }
 }
 
