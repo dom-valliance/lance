@@ -246,13 +246,21 @@ GRANT lance_app TO "id-lance-api-dev";
 GRANT lance_app TO "id-lance-worker-dev";
 ```
 
-The role names are case sensitive and the identity names must stay in double quotes. `lance_retention` arrives with the retention jobs in Phase 5 (ADR 0011); its identity and grant are added then. Quit psql.
+The role names are case sensitive and the identity names must stay in double quotes. `lance_retention` arrives with the retention jobs in Phase 5 (ADR 0011); its identity and grant are added then.
+
+The three apps connect with `PG_ROLE=lance_app` (set by the template), so every session acts as the shared role and anything created at runtime, pg-boss's queue tables above all, is owned by `lance_app` rather than by whichever identity made it. An environment deployed before `PG_ROLE` existed has pg-boss tables owned by the worker identity, which the api cannot read; repair it once, from the same psql session but connected to the `lance` database:
+
+```sql
+REASSIGN OWNED BY "id-lance-worker-dev" TO lance_app;
+```
+
+Quit psql.
 
 ## 10. Verify
 
 1. Open `https://<web hostname>` and sign in as Dom. Any other UPN is refused.
 2. Run `/lance status` in `dom-claude-agent`. The api answers with an ephemeral message and the ledger records a `state_changed` event.
-3. Open `https://<api hostname>/auth/graph/connect` as Dom and consent. The api writes the real `graph-refresh-token` over the placeholder from step 4.
+3. In the web app, open Settings and press Connect Microsoft 365, then consent as Dom. The api writes the real `graph-refresh-token` over the placeholder from step 4.
 4. Confirm `LANCE_MODE` is still `dry_run`. Lance proposes and does not execute until Dom changes it deliberately.
 
 ## Notes

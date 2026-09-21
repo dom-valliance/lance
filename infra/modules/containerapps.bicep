@@ -314,6 +314,13 @@ resource containerApps 'Microsoft.App/containerApps@2025-01-01' = [
                   value: app.identity.name
                 }
                 {
+                  // Every session acts as the shared application role, so tables
+                  // pg-boss creates at runtime are owned by lance_app and readable
+                  // by the api and the worker alike, whichever created them.
+                  name: 'PG_ROLE'
+                  value: 'lance_app'
+                }
+                {
                   name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
                   value: applicationInsightsConnectionString
                 }

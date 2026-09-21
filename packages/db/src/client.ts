@@ -109,10 +109,29 @@ const connectionFromEnv = (options: CreateDbOptions): pg.PoolConfig => {
 };
 
 /**
+ * `PG_ROLE` makes every session act as that role from the first statement,
+ * so anything a process creates at runtime (pg-boss's tables above all) is
+ * owned by the shared `lance_app` role rather than by the one Container
+ * App identity that happened to create it. Without this the api cannot
+ * read the queue tables the worker made, and the other way round.
+ */
+const applyRole = (config: pg.PoolConfig): void => {
+  const role = process.env.PG_ROLE;
+  if (role === undefined || role === '') return;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(role)) {
+    throw new Error(
+      `PG_ROLE must be a plain role name (letters, digits, underscores); got "${role}".`,
+    );
+  }
+  config.options = `-c role=${role}`;
+};
+
+/**
  * Build a Drizzle instance over a `pg.Pool`. Close it with `db.$client.end()`.
  */
 export const createDb = (options: CreateDbOptions = {}): Db => {
   const config = connectionFromEnv(options);
+  applyRole(config);
   if (options.max !== undefined) {
     config.max = options.max;
   }
