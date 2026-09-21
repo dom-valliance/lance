@@ -1,0 +1,32 @@
+{
+  "object": "list",
+  "results": [
+    {
+      "object": "user",
+      "id": "1fdd872b-594c-8146-b22f-00028f1f5a41",
+      "name": "Sample Owner",
+      "avatar_url": null,
+      "type": "person",
+      "person": { "email": "owner@example.test" }
+    },
+    {
+      "object": "user",
+      "id": "3b7c1d90-2f44-4a11-9c02-7d5e8a1b6c40",
+      "name": "Robin Ash",
+      "avatar_url": null,
+      "type": "person",
+      "person": { "email": "robin.ash@example.test" }
+    },
+    {
+      "object": "user",
+      "id": "9f2e6d41-5a77-4b88-9c99-1d2e3f405162",
+      "name": "Lance",
+      "avatar_url": null,
+      "type": "bot",
+      "bot": { "owner": { "type": "workspace", "workspace": true } }
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false,
+  "type": "user"
+}

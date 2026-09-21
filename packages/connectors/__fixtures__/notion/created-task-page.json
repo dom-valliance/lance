@@ -1,0 +1,69 @@
+{
+  "object": "page",
+  "id": "cc33dd44-ee55-4ff6-8001-122334455667",
+  "url": "https://www.notion.so/Send-the-revised-scope-cc33dd44ee554ff68001122334455667",
+  "created_time": "2026-09-19T12:00:00.000Z",
+  "last_edited_time": "2026-09-19T12:00:00.000Z",
+  "in_trash": false,
+  "parent": {
+    "type": "data_source_id",
+    "data_source_id": "20257534-6e48-81fe-b4b5-000b69ecace6"
+  },
+  "properties": {
+    "Title": {
+      "id": "title",
+      "type": "title",
+      "title": [
+        {
+          "type": "text",
+          "text": { "content": "Send the revised scope (Robin Ash)", "link": null },
+          "plain_text": "Send the revised scope (Robin Ash)",
+          "href": null
+        }
+      ]
+    },
+    "Status": {
+      "id": "Z%3ClH",
+      "type": "status",
+      "status": {
+        "id": "1a2b3c4d-5e6f-4071-8283-94a5b6c7d8e9",
+        "name": "Not Started",
+        "color": "default"
+      }
+    },
+    "Assignee": {
+      "id": "%7BLUX",
+      "type": "people",
+      "people": [
+        {
+          "object": "user",
+          "id": "1fdd872b-594c-8146-b22f-00028f1f5a41",
+          "name": "Sample Owner",
+          "avatar_url": null,
+          "type": "person",
+          "person": { "email": "owner@example.test" }
+        }
+      ]
+    },
+    "Contributors": { "id": "Ktq%3A", "type": "people", "people": [] },
+    "Due": {
+      "id": "M%3BBw",
+      "type": "date",
+      "date": { "start": "2026-09-26", "end": null, "time_zone": null }
+    },
+    "Priority": {
+      "id": "Yc%3FJ",
+      "type": "select",
+      "select": { "id": "m1", "name": "Medium", "color": "yellow" }
+    },
+    "Project": { "id": "hgMz", "type": "relation", "relation": [], "has_more": false },
+    "Type": { "id": "pQr1", "type": "relation", "relation": [], "has_more": false },
+    "Sub-type": {
+      "id": "QyRn",
+      "type": "multi_select",
+      "multi_select": [{ "id": "s3", "name": "Client Task", "color": "blue" }]
+    },
+    "Description": { "id": "HbZT", "type": "rich_text", "rich_text": [] },
+    "Notes": { "id": "Nt5k", "type": "rich_text", "rich_text": [] }
+  }
+}

@@ -303,12 +303,21 @@ importers:
 
   apps/worker:
     dependencies:
+      '@lance/agents':
+        specifier: workspace:*
+        version: link:../../packages/agents
+      '@lance/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors
       '@lance/db':
         specifier: workspace:*
         version: link:../../packages/db
       '@lance/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
+      '@lance/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
       '@lance/shared':
         specifier: workspace:*
         version: link:../../packages/shared

@@ -1,0 +1,8 @@
+{
+  "object": "user",
+  "id": "3b7c1d90-2f44-4a11-9c02-7d5e8a1b6c40",
+  "name": "Robin Ash",
+  "avatar_url": null,
+  "type": "person",
+  "person": { "email": "robin.ash@example.test" }
+}

@@ -1,0 +1,7 @@
+{
+  "object": "error",
+  "status": 400,
+  "code": "validation_error",
+  "message": "body failed validation: body.properties.Status.status.name should be a valid option.",
+  "request_id": "66666666-7777-4888-8999-aaaaaaaaaaaa"
+}
