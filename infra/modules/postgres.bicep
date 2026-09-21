@@ -129,6 +129,9 @@ resource sharedPreloadLibraries 'Microsoft.DBforPostgreSQL/flexibleServers/confi
   ]
 }
 
+// Every child resource below depends on the one before it. Flexible Server
+// processes one management operation at a time and answers a second with
+// ServerIsBusy, so ARM must never start two of these in parallel.
 resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {
   parent: postgresServer
   name: databaseName
@@ -137,7 +140,7 @@ resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-0
     collation: 'en_US.utf8'
   }
   dependsOn: [
-    azureExtensions
+    sharedPreloadLibraries
   ]
 }
 
@@ -179,7 +182,8 @@ resource logConnections 'Microsoft.DBforPostgreSQL/flexibleServers/configuration
     source: 'user-override'
   }
   dependsOn: [
-    sharedPreloadLibraries
+    allowAzureServices
+    allowAdminClient
   ]
 }
 
