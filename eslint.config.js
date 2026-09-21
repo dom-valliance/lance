@@ -92,6 +92,11 @@ export default tseslint.config(
   },
   {
     files: ['**/*.{ts,tsx,mts,cts}'],
+    // Config files outside src (next.config.ts, playwright.config.ts) are not
+    // type-checked but still run under Node, so they get its globals here.
+    languageOptions: {
+      globals: { ...globals.node },
+    },
     plugins: { 'import-x': importX },
     settings: {
       'import-x/resolver-next': [

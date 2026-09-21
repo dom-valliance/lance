@@ -132,10 +132,10 @@ jobs:
           bicep --version
 
       - name: Build the Bicep template
-        run: bicep build --file infra/main.bicep
+        run: bicep build infra/main.bicep
 
       - name: Lint the Bicep template
-        run: bicep lint --file infra/main.bicep
+        run: bicep lint infra/main.bicep
 
       - name: Log in to Azure with OIDC
         if: env.AZURE_CLIENT_ID != ''
