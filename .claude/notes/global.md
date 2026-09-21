@@ -76,3 +76,10 @@
 **Correction**: Found by probing after Dom's job failures; no user instruction.
 **Rule**: Run at least one integration test of the migrations as a non-superuser member of lance_migrator so ownership and grant checks are exercised. When a managed platform reports only a dropped connection, bisect the actual statements against it before theorising about the transport. The migrator now prints the underlying query error.
 **Applies to**: packages/db/
+
+### [2026-09-21] Libraries that self-install need privileges the runtime role may lack
+
+**Context**: The worker failed to start on Azure with "permission denied for database lance": pg-boss runs CREATE SCHEMA IF NOT EXISTS on every start, and Postgres checks CREATE on the database before it checks whether the schema exists. Locally the worker test runs as the superuser.
+**Correction**: Found in the worker log after the first successful migration.
+**Rule**: For any library that manages its own schema at runtime (pg-boss, drizzle, OTel exporters), read what it executes on start and grant exactly that in a migration. Run the integration suites as the roles the platform will use, not as the superuser.
+**Applies to**: packages/db/, apps/worker/
