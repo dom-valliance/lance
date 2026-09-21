@@ -46,6 +46,9 @@ param useBootstrapImage bool = true
 @description('The single UPN allowed to sign in to the web app in v1. Spec 4.1.')
 param allowedUpn string
 
+@description('The one Slack user id that may run /lance status, pause and resume. Not a secret.')
+param slackAllowedUserId string
+
 // Six characters of subscription-and-group entropy for the three globally unique names
 // (Key Vault, container registry, Postgres server).
 var uniqueSuffix = take(uniqueString(subscription().subscriptionId, resourceGroupName), 6)
@@ -138,6 +141,7 @@ module containerApps 'modules/containerapps.bicep' = {
     containerImageTag: containerImageTag
     useBootstrapImage: useBootstrapImage
     allowedUpn: allowedUpn
+    slackAllowedUserId: slackAllowedUserId
   }
   // The apps resolve Key Vault references and pull from the registry with their
   // identities. Both role assignments are created inside those modules, and the

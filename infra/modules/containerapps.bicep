@@ -39,6 +39,9 @@ param useBootstrapImage bool
 @description('The single UPN allowed to sign in. Not a secret; the same value is also held in Key Vault as allowed-upn for components that read it from there.')
 param allowedUpn string
 
+@description('The Slack user id allowed to work the kill switch from Slack. Not a secret.')
+param slackAllowedUserId string
+
 @description('Database name on the Postgres server.')
 param databaseName string = 'lance'
 
@@ -267,6 +270,10 @@ resource containerApps 'Microsoft.App/containerApps@2025-01-01' = [
                 {
                   name: 'ALLOWED_UPN'
                   value: allowedUpn
+                }
+                {
+                  name: 'SLACK_ALLOWED_USER_ID'
+                  value: slackAllowedUserId
                 }
                 {
                   name: 'PG_HOST'

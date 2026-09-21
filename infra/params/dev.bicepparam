@@ -19,3 +19,5 @@ param useBootstrapImage = true
 param containerImageTag = 'bootstrap'
 
 param allowedUpn = 'dom@valliance.ai'
+// Dom's Slack user id in the Valliance workspace. Not a secret.
+param slackAllowedUserId = 'U0BN7JN7BAN'

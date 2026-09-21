@@ -35,10 +35,6 @@
     }
   },
   "settings": {
-    "event_subscriptions": {
-      "request_url": "https://<api-hostname>/slack/events",
-      "bot_events": ["message.channels", "message.groups", "reaction_added"]
-    },
     "interactivity": {
       "is_enabled": true,
       "request_url": "https://<api-hostname>/slack/interactions"
