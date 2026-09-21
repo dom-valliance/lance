@@ -1,11 +1,22 @@
+import { createSlackSurface, type SlackSurface } from '@lance/connectors';
 import { KeyVaultTokenStore } from '@lance/connectors/graph';
 import { createDb, type Db } from '@lance/db';
-import { LedgerReader, LedgerWriter, SystemControl } from '@lance/ledger';
+import {
+  decideProposal,
+  getProposal,
+  listProposals,
+  LedgerReader,
+  LedgerWriter,
+  SystemControl,
+} from '@lance/ledger';
 import { getConfig, readSecret, type Config } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { pathToFileURL } from 'node:url';
 import { createEntraVerifier } from './auth/entra.js';
 import type { ApiDeps, GraphConsentDeps, SlackDeps, TokenVerifier } from './deps.js';
+import { createFeed } from './events.js';
+import { createExecuteQueue, type ExecuteQueue } from './executeQueue.js';
+import { applyDecision, type DecideDeps } from './proposals/decide.js';
 import { buildServer } from './server.js';
 import { createDbStatusSource } from './status.js';
 
@@ -26,25 +37,71 @@ export interface RuntimeOptions {
   ingestSecret: string;
   /** Omitted by a process that does not run the Graph consent flow. */
   graph?: GraphConsentDeps;
+  /** Null, the default, when no bot token is configured: cards are skipped. */
+  slackSurface?: SlackSurface | null;
+  /** Defaults to pg-boss over the same pool; passed in so `main` can stop it. */
+  executeQueue?: ExecuteQueue;
 }
 
-/** Assembles the real `SystemControl`, `LedgerReader`, `LedgerWriter` and status source over `db`. */
+/**
+ * Assembles the real `SystemControl`, `LedgerReader`, `LedgerWriter`,
+ * proposal reads, decision service and status source over `db`.
+ */
 export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
   const control = new SystemControl(options.db);
+  const feed = createFeed();
+  const executeQueue = options.executeQueue ?? createExecuteQueue(options.db);
+  const slackSurface = options.slackSurface ?? null;
+
+  const decideDeps: DecideDeps = {
+    decide: (input) => decideProposal(options.db, input),
+    getProposal: (id) => getProposal(options.db, id),
+    enqueueExecute: (proposalId) => executeQueue.enqueueExecute(proposalId),
+    slack: slackSurface,
+    notify: (event) => {
+      feed.notify(event);
+    },
+    config: options.config,
+    onSlackFailure: (error, proposalId) => {
+      console.warn({ err: error, proposalId }, 'Could not redraw the Slack card after a decision');
+    },
+  };
+
   return {
     config: options.config,
     control,
     ledger: new LedgerReader(options.db),
     writer: new LedgerWriter(options.db),
+    proposals: {
+      list: (filter) => listProposals(options.db, filter),
+      get: (id) => getProposal(options.db, id),
+    },
+    decide: (request) => applyDecision(decideDeps, request),
     status: createDbStatusSource(options.db, control, {
       usdToGbp: options.config.cost.usdToGbp,
       timeZone: options.config.timeZone,
     }),
     auth: options.auth,
     slack: options.slack,
+    slackSurface,
+    notify: (event) => {
+      feed.notify(event);
+    },
+    subscribe: (listener) => feed.subscribe(listener),
     ingestSecret: options.ingestSecret,
     ...(options.graph === undefined ? {} : { graph: options.graph }),
   };
+};
+
+/**
+ * Lance's own Slack channel (ADR 0012), or null when no bot token is set.
+ * A local api then still answers every route; only the card update and the
+ * modals are unavailable, and both say so.
+ */
+const slackSurfaceFromEnv = (channelId: string): SlackSurface | null => {
+  const token = process.env['SLACK_BOT_TOKEN'];
+  if (token === undefined || token === '') return null;
+  return createSlackSurface({ token: readSecret('SLACK_BOT_TOKEN'), channelId });
 };
 
 /**
@@ -80,6 +137,7 @@ export const main = async (): Promise<void> => {
     environment: config.nodeEnv,
   });
   const db = createDb();
+  const executeQueue = createExecuteQueue(db);
 
   const tenantId = requiredEnv('ENTRA_TENANT_ID');
   const clientId = requiredEnv('ENTRA_CLIENT_ID');
@@ -87,6 +145,8 @@ export const main = async (): Promise<void> => {
   const deps = createApiDeps({
     config,
     db,
+    executeQueue,
+    slackSurface: slackSurfaceFromEnv(config.slack.channelId),
     auth: createEntraVerifier({
       tenantId,
       clientId,
@@ -112,6 +172,7 @@ export const main = async (): Promise<void> => {
     server.log.info({ signal }, 'Shutting down the api');
     void server
       .close()
+      .then(() => executeQueue.stop())
       .then(() => db.$client.end())
       .then(() => telemetry.shutdown())
       .then(() => process.exit(0));

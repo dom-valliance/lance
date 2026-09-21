@@ -1,12 +1,17 @@
+import type { SlackSurface } from '@lance/connectors';
 import type { SystemState } from '@lance/db';
 import type {
   AppendResult,
+  DecisionResult,
   LedgerEventRow,
   LedgerQuery,
   PauseResult,
+  ProposalFilter,
   ResumeResult,
 } from '@lance/ledger';
-import type { Config, LedgerEventInputCandidate } from '@lance/shared';
+import type { Config, LedgerEventInputCandidate, Proposal } from '@lance/shared';
+import type { FeedEvent, FeedListener } from './events.js';
+import type { DecisionRequest } from './proposals/decide.js';
 import type { StatusSource } from './status.js';
 
 /**
@@ -25,6 +30,12 @@ export interface SystemControlLike {
 export interface LedgerReaderLike {
   query(filter?: LedgerQuery): Promise<LedgerEventRow[]>;
   byCorrelation(correlationId: string): Promise<LedgerEventRow[]>;
+}
+
+/** The read side of `proposals`, over the database or over a fake. */
+export interface ProposalStoreLike {
+  list(filter?: ProposalFilter): Promise<Proposal[]>;
+  get(id: string): Promise<Proposal | null>;
 }
 
 export interface LedgerWriterLike {
@@ -71,9 +82,22 @@ export interface ApiDeps {
   control: SystemControlLike;
   ledger: LedgerReaderLike;
   writer: LedgerWriterLike;
+  proposals: ProposalStoreLike;
+  /** `applyDecision` bound to everything it needs; the one way a proposal changes state. */
+  decide: (request: DecisionRequest) => Promise<DecisionResult>;
   status: StatusSource;
   auth: TokenVerifier;
   slack: SlackDeps;
+  /**
+   * How Lance speaks in its own channel (ADR 0012). Null when
+   * `SLACK_BOT_TOKEN` is absent, so a local run answers interactions
+   * without a token instead of failing at construction.
+   */
+  slackSurface: SlackSurface | null;
+  /** Fans a live update out to every client connected to `GET /events`. */
+  notify: (event: FeedEvent) => void;
+  /** Registers one such client. Returns the function that removes it. */
+  subscribe: (listener: FeedListener) => () => void;
   /** Shared secret for `POST /ingest/agent-log` (spec 7.1, agent-logs). */
   ingestSecret: string;
   /**

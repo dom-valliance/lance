@@ -1,3 +1,4 @@
+import { ACTION, CALLBACK } from '@lance/connectors';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../server.js';
@@ -12,6 +13,7 @@ import { slackSignature } from './verify.js';
 
 const FORM = 'application/x-www-form-urlencoded';
 const JSON_TYPE = 'application/json';
+const PROPOSAL_ID = '01K5S9V6QW3SWCCPVB0N0E301A';
 
 interface PostOptions {
   timestamp?: string;
@@ -249,15 +251,73 @@ describe('/slack/events', () => {
 });
 
 describe('/slack/interactions', () => {
-  it('acknowledges a block action with 200', async () => {
-    const payload = JSON.stringify({
+  const interaction = (payload: unknown): string =>
+    new URLSearchParams({ payload: JSON.stringify(payload) }).toString();
+
+  it('applies an approve from Dom and answers with an empty 200', async () => {
+    const body = interaction({
       type: 'block_actions',
-      actions: [{ action_id: 'proposal_approve' }],
+      user: { id: TEST_SLACK_USER_ID },
+      trigger_id: 'T-1',
+      actions: [{ action_id: ACTION.proposalApprove, value: PROPOSAL_ID }],
     });
-    const body = new URLSearchParams({ payload }).toString();
+
     const response = await post('/slack/interactions', body, FORM);
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true });
+    expect(response.body).toBe('');
+    expect(harness.decider.requests).toEqual([
+      { proposalId: PROPOSAL_ID, action: 'approve', actor: 'user:dom' },
+    ]);
+  });
+
+  it('refuses a block action from a Slack user other than Dom', async () => {
+    const body = interaction({
+      type: 'block_actions',
+      user: { id: 'U0STRANGER' },
+      actions: [{ action_id: ACTION.proposalApprove, value: PROPOSAL_ID }],
+    });
+
+    const response = await post('/slack/interactions', body, FORM);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ text: string }>().text).toContain('not authorised');
+    expect(harness.decider.requests).toHaveLength(0);
+  });
+
+  it('clears the modal after a reject submission', async () => {
+    const body = interaction({
+      type: 'view_submission',
+      user: { id: TEST_SLACK_USER_ID },
+      view: {
+        callback_id: CALLBACK.proposalReject,
+        private_metadata: PROPOSAL_ID,
+        state: {
+          values: {
+            reason_code: {
+              reason_code: { type: 'static_select', selected_option: { value: 'not_now' } },
+            },
+          },
+        },
+      },
+    });
+
+    const response = await post('/slack/interactions', body, FORM);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ response_action: 'clear' });
+  });
+
+  it('refuses an unsigned interaction before it reaches the handler', async () => {
+    const body = interaction({
+      type: 'block_actions',
+      user: { id: TEST_SLACK_USER_ID },
+      actions: [{ action_id: ACTION.proposalApprove, value: PROPOSAL_ID }],
+    });
+
+    const response = await post('/slack/interactions', body, FORM, { signature: 'v0=deadbeef' });
+
+    expect(response.statusCode).toBe(401);
+    expect(harness.decider.requests).toHaveLength(0);
   });
 });

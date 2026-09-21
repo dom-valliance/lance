@@ -25,3 +25,20 @@ test('the providers endpoint lists microsoft-entra-id', async ({ request }) => {
   const body = await response.json();
   expect(Object.keys(body)).toContain('microsoft-entra-id');
 });
+
+test('visiting /proposals unauthenticated redirects to the Auth.js sign-in page', async ({
+  page,
+}) => {
+  await page.goto('/proposals');
+
+  await expect(page).toHaveURL(/\/api\/auth\/signin/);
+  await expect(
+    page.getByRole('button', { name: /sign in with microsoft entra id/i }),
+  ).toBeVisible();
+});
+
+test('visiting /ledger unauthenticated redirects to the Auth.js sign-in page', async ({ page }) => {
+  await page.goto('/ledger');
+
+  await expect(page).toHaveURL(/\/api\/auth\/signin/);
+});

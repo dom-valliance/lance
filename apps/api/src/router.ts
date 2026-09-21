@@ -1,6 +1,15 @@
-import type { LedgerQuery } from '@lance/ledger';
-import { LedgerKindSchema, SourceSystemSchema, UlidSchema } from '@lance/shared';
+import type { LedgerQuery, ProposalAction, ProposalFilter } from '@lance/ledger';
+import {
+  ActionClassSchema,
+  CounterpartyClassSchema,
+  LedgerKindSchema,
+  ProposalStatusSchema,
+  SourceSystemSchema,
+  SystemSchema,
+  UlidSchema,
+} from '@lance/shared';
 import { z } from 'zod';
+import { actorFromUpn } from './actor.js';
 import { procedure, router } from './trpc.js';
 
 /**
@@ -42,15 +51,93 @@ export const toLedgerQuery = (input: LedgerQueryInput): LedgerQuery => {
   return query;
 };
 
+/** Mirrors `ProposalFilter` from `@lance/ledger`. */
+export const ProposalFilterInputSchema = z
+  .object({
+    status: ProposalStatusSchema.optional(),
+    actionClass: ActionClassSchema.optional(),
+    counterpartyClass: CounterpartyClassSchema.optional(),
+    targetSystem: SystemSchema.optional(),
+    limit: z.int().positive().max(200).optional(),
+    cursor: UlidSchema.optional(),
+  })
+  .default({});
+export type ProposalFilterInput = z.infer<typeof ProposalFilterInputSchema>;
+
+export const toProposalFilter = (input: ProposalFilterInput): ProposalFilter => {
+  const filter: ProposalFilter = {};
+  if (input.status !== undefined) filter.status = input.status;
+  if (input.actionClass !== undefined) filter.actionClass = input.actionClass;
+  if (input.counterpartyClass !== undefined) filter.counterpartyClass = input.counterpartyClass;
+  if (input.targetSystem !== undefined) filter.targetSystem = input.targetSystem;
+  if (input.limit !== undefined) filter.limit = input.limit;
+  if (input.cursor !== undefined) filter.cursor = input.cursor;
+  return filter;
+};
+
+/**
+ * Every value of `ProposalAction`. `satisfies` makes this a compile error
+ * the day the ledger's state machine gains an action this router has not
+ * been taught, rather than a runtime rejection of a valid decision.
+ */
+const PROPOSAL_ACTIONS = {
+  approve: 'approve',
+  edit: 'edit',
+  reject: 'reject',
+  snooze: 'snooze',
+  expire: 'expire',
+  hold: 'hold',
+} as const satisfies Record<ProposalAction, ProposalAction>;
+
+export const ProposalActionSchema = z.enum(PROPOSAL_ACTIONS);
+
+/**
+ * The decision input. `actor` is deliberately absent: it is derived from
+ * the verified UPN inside the procedure, so a client cannot decide as
+ * somebody else.
+ */
+export const DecideInputSchema = z.object({
+  proposalId: UlidSchema,
+  action: ProposalActionSchema,
+  note: z.string().min(1).optional(),
+  reasonCode: z.string().min(1).optional(),
+  editedPayload: z.record(z.string(), z.unknown()).optional(),
+  snoozeHours: z.int().positive().max(168).optional(),
+});
+export type DecideInput = z.infer<typeof DecideInputSchema>;
+
 export const appRouter = router({
   systemState: router({
     get: procedure.query(({ ctx }) => ctx.deps.control.read()),
+  }),
+  proposals: router({
+    list: procedure
+      .input(ProposalFilterInputSchema)
+      .query(({ ctx, input }) => ctx.deps.proposals.list(toProposalFilter(input))),
+    get: procedure
+      .input(z.object({ proposalId: UlidSchema }))
+      .query(({ ctx, input }) => ctx.deps.proposals.get(input.proposalId)),
+    decide: procedure.input(DecideInputSchema).mutation(({ ctx, input }) =>
+      ctx.deps.decide({
+        proposalId: input.proposalId,
+        action: input.action,
+        actor: actorFromUpn(ctx.upn),
+        ...(input.note === undefined ? {} : { note: input.note }),
+        ...(input.reasonCode === undefined ? {} : { reasonCode: input.reasonCode }),
+        ...(input.editedPayload === undefined ? {} : { editedPayload: input.editedPayload }),
+        ...(input.snoozeHours === undefined ? {} : { snoozeHours: input.snoozeHours }),
+      }),
+    ),
   }),
   ledger: router({
     query: procedure
       .input(LedgerQueryInputSchema)
       .query(({ ctx, input }) => ctx.deps.ledger.query(toLedgerQuery(input))),
     byCorrelation: procedure
+      .input(z.object({ correlationId: UlidSchema }))
+      .query(({ ctx, input }) => ctx.deps.ledger.byCorrelation(input.correlationId)),
+    /** One correlation id's trail, oldest first: the same read, named for what the UI shows. */
+    correlation: procedure
       .input(z.object({ correlationId: UlidSchema }))
       .query(({ ctx, input }) => ctx.deps.ledger.byCorrelation(input.correlationId)),
   }),

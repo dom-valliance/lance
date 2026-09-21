@@ -238,6 +238,9 @@ importers:
       jose:
         specifier: 6.2.12
         version: 6.2.12
+      pg-boss:
+        specifier: ^12.33.0
+        version: 12.33.2
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -254,6 +257,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@trpc/client':
+        specifier: 11.19.0
+        version: 11.19.0(@trpc/server@11.19.0(typescript@6.0.3))(typescript@6.0.3)
       class-variance-authority:
         specifier: 0.7.1
         version: 0.7.1
@@ -285,6 +291,9 @@ importers:
         specifier: 1.4.0
         version: 1.4.0
     devDependencies:
+      '@lance/api':
+        specifier: workspace:*
+        version: link:../api
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0
@@ -2953,6 +2962,13 @@ packages:
 
   '@testcontainers/postgresql@12.1.0':
     resolution: {integrity: sha512-Pjf2VSVNirEPfz36nidyrVAnZvc2YhajOznY4VgyEsvfTd5qiMNOuPq96drREvxAUtXl5SFLX7vXj7sSq4aTcA==}
+
+  '@trpc/client@11.19.0':
+    resolution: {integrity: sha512-0MKkPq6MejsKB5Opca1Rl22KVIaqo2+A1EiXyZ8EGUsl9TLrPdpGn+Usux20TZKFwnSC2+wI/WilqNJaP4ODfw==}
+    hasBin: true
+    peerDependencies:
+      '@trpc/server': 11.19.0
+      typescript: '>=5.7.2'
 
   '@trpc/server@11.19.0':
     resolution: {integrity: sha512-7C1goiDurz82yFKtZUbEzjXd0Rg/jyisaIZQhdvus+1l7E6mwcEYZXjZ1US/HF8kOyz1LERL8UN3bcboJtjcyQ==}
@@ -8435,6 +8451,11 @@ snapshots:
       - bare-buffer
       - react-native-b4a
       - supports-color
+
+  '@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@6.0.3))(typescript@6.0.3)':
+    dependencies:
+      '@trpc/server': 11.19.0(typescript@6.0.3)
+      typescript: 6.0.3
 
   '@trpc/server@11.19.0(typescript@6.0.3)':
     dependencies:

@@ -1,15 +1,32 @@
+import type { SlackSurface } from '@lance/connectors';
 import type { SystemState } from '@lance/db';
-import type { LedgerEventRow, LedgerQuery, PauseResult, ResumeResult } from '@lance/ledger';
-import { loadConfig, newUlid, type Config, type LedgerEventInputCandidate } from '@lance/shared';
+import type {
+  DecisionResult,
+  LedgerEventRow,
+  LedgerQuery,
+  PauseResult,
+  ProposalFilter,
+  ResumeResult,
+} from '@lance/ledger';
+import {
+  loadConfig,
+  newUlid,
+  type Config,
+  type LedgerEventInputCandidate,
+  type Proposal,
+} from '@lance/shared';
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWTVerifyGetKey } from 'jose';
 import type {
   ApiDeps,
   LedgerReaderLike,
   LedgerWriterLike,
+  ProposalStoreLike,
   SystemControlLike,
   TokenVerifier,
 } from './deps.js';
 import { UnauthorisedError } from './errors.js';
+import { createFeed, type Feed, type FeedEvent } from './events.js';
+import type { DecisionRequest } from './proposals/decide.js';
 import type { StatusSnapshot, StatusSource } from './status.js';
 
 /**
@@ -127,6 +144,98 @@ export class FakeLedgerWriter implements LedgerWriterLike {
   }
 }
 
+export const fakeProposal = (overrides: Partial<Proposal> = {}): Proposal => ({
+  id: '01K5S9V6QW3SWCCPVB0N0E301A',
+  correlationId: '01K5S9V6QW3SWCCPVB0N0E301B',
+  actionClass: 'draft_email',
+  counterpartyClass: 'client',
+  targetSystem: 'graph',
+  targetRecordId: 'AAMk1',
+  reversibility: 'compensatable',
+  payload: { subject: 'Re: the pilot', bodyText: 'Thanks, Tuesday works.' },
+  preview: 'Reply to "the pilot"',
+  rationale: 'They asked for a date and Tuesday is free.',
+  provenance: [
+    { system: 'graph', recordId: 'AAMk1', hash: 'h1', observedAt: '2026-09-20T09:00:00.000Z' },
+  ],
+  policyDecision: 'propose',
+  policyRuleId: null,
+  status: 'pending',
+  decidedBy: null,
+  decidedAt: null,
+  decisionNote: null,
+  editedPayload: null,
+  slackChannel: null,
+  slackTs: null,
+  expiresAt: '2026-09-22T09:00:00.000Z',
+  executionEventId: null,
+  ...overrides,
+});
+
+export class FakeProposalStore implements ProposalStoreLike {
+  rows: Proposal[] = [fakeProposal()];
+  readonly filters: (ProposalFilter | undefined)[] = [];
+
+  list(filter?: ProposalFilter): Promise<Proposal[]> {
+    this.filters.push(filter);
+    return Promise.resolve(this.rows);
+  }
+
+  get(id: string): Promise<Proposal | null> {
+    return Promise.resolve(this.rows.find((row) => row.id === id) ?? null);
+  }
+}
+
+/** Records every decision the routes ask for, without a state machine behind it. */
+export class FakeDecider {
+  readonly requests: DecisionRequest[] = [];
+  result: DecisionResult = {
+    proposalId: '01K5S9V6QW3SWCCPVB0N0E301A',
+    from: 'pending',
+    to: 'approved',
+    execute: true,
+    eventId: '01K5S9V6QW3SWCCPVB0N0E301C',
+  };
+  /** Set to make the next decision fail, as a refused transition would. */
+  failWith: Error | null = null;
+
+  decide(request: DecisionRequest): Promise<DecisionResult> {
+    this.requests.push(request);
+    if (this.failWith !== null) return Promise.reject(this.failWith);
+    return Promise.resolve({ ...this.result, proposalId: request.proposalId });
+  }
+}
+
+export interface FakeSlackSurface {
+  surface: SlackSurface;
+  updates: { ts: string; text: string }[];
+  views: { triggerId: string; view: unknown }[];
+}
+
+/** The Slack surface with every call recorded and nothing sent. */
+export const fakeSlackSurface = (channelId = 'C0BU7P278N5'): FakeSlackSurface => {
+  const updates: { ts: string; text: string }[] = [];
+  const views: { triggerId: string; view: unknown }[] = [];
+  const surface: SlackSurface = {
+    channelId,
+    connector: {} as SlackSurface['connector'],
+    post: (input) => {
+      void input;
+      return Promise.resolve({ channel: channelId, ts: '1758351600.000100' });
+    },
+    update: (input) => {
+      updates.push({ ts: input.ts, text: input.text });
+      return Promise.resolve({ channel: channelId, ts: input.ts });
+    },
+    ephemeral: () => Promise.resolve({ messageTs: '1758351600.000200' }),
+    openView: (input) => {
+      views.push(input);
+      return Promise.resolve({ viewId: 'V1' });
+    },
+  };
+  return { surface, updates, views };
+};
+
 export class FakeStatusSource implements StatusSource {
   current: StatusSnapshot = fakeSnapshot();
 
@@ -192,6 +301,8 @@ export interface FakeDepsOverrides {
   status?: StatusSource;
   auth?: TokenVerifier;
   allowedSlackUserId?: string | null;
+  /** Omit the Slack surface, as a process with no bot token has. */
+  withoutSlackSurface?: boolean;
   now?: () => string;
 }
 
@@ -200,6 +311,11 @@ export interface FakeDeps {
   control: FakeSystemControl;
   ledger: FakeLedgerReader;
   writer: FakeLedgerWriter;
+  proposals: FakeProposalStore;
+  decider: FakeDecider;
+  slack: FakeSlackSurface;
+  feed: Feed;
+  events: FeedEvent[];
   status: FakeStatusSource;
 }
 
@@ -207,13 +323,21 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
   const control = new FakeSystemControl();
   const ledger = new FakeLedgerReader();
   const writer = new FakeLedgerWriter();
+  const proposals = new FakeProposalStore();
+  const decider = new FakeDecider();
+  const slack = fakeSlackSurface();
   const status = new FakeStatusSource();
+  const feed = createFeed();
+  const events: FeedEvent[] = [];
+  feed.subscribe((event) => events.push(event));
 
   const deps: ApiDeps = {
     config: overrides.config ?? testConfig(),
     control: overrides.control ?? control,
     ledger: overrides.ledger ?? ledger,
     writer: overrides.writer ?? writer,
+    proposals,
+    decide: (request) => decider.decide(request),
     status: overrides.status ?? status,
     auth: overrides.auth ?? fakeVerifier('good-token'),
     slack: {
@@ -223,9 +347,14 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
           ? TEST_SLACK_USER_ID
           : overrides.allowedSlackUserId,
     },
+    slackSurface: overrides.withoutSlackSurface === true ? null : slack.surface,
+    notify: (event) => {
+      feed.notify(event);
+    },
+    subscribe: (listener) => feed.subscribe(listener),
     ingestSecret: TEST_INGEST_SECRET,
     ...(overrides.now === undefined ? {} : { now: overrides.now }),
   };
 
-  return { deps, control, ledger, writer, status };
+  return { deps, control, ledger, writer, proposals, decider, slack, feed, events, status };
 };

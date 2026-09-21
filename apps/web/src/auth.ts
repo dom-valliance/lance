@@ -2,6 +2,25 @@ import NextAuth from 'next-auth';
 import MicrosoftEntraID from 'next-auth/providers/microsoft-entra-id';
 import { isAllowedUpn } from './auth/allowlist';
 
+/**
+ * The Entra id token is kept in the Auth.js JWT and exposed on the session
+ * for server-side code only (see lib/trpc.ts). `apps/api` verifies the same
+ * token, so the web app forwards it rather than minting a second credential.
+ *
+ * Only `Session` is augmented. `JWT` lives in `@auth/core/jwt`, which
+ * `next-auth/jwt` re-exports without redeclaring, so augmenting it here
+ * would not reach the interface; the JWT already carries an index
+ * signature of `unknown`, so the claim is read back with a type check.
+ */
+declare module 'next-auth' {
+  interface Session {
+    idToken?: string;
+  }
+}
+
+/** Where the Entra id token is kept in the Auth.js JWT. */
+const ID_TOKEN_CLAIM = 'idToken';
+
 // process.env values are `string | undefined`; falling back to an empty
 // string keeps this typed as `string` (required by exactOptionalPropertyTypes)
 // without asserting the value is actually present. A missing value produces
@@ -24,6 +43,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
+    // The account is present only on the sign-in call; on every later call
+    // the token already carries what that one stored.
+    jwt({ token, account }) {
+      if (typeof account?.id_token === 'string') {
+        token[ID_TOKEN_CLAIM] = account.id_token;
+      }
+      return token;
+    },
+    // Server components read `session.idToken`. Auth.js does not send the
+    // session object to the browser wholesale; the client-side `useSession`
+    // payload is built from the `session` callback too, so nothing here may
+    // be added to it that a page does not already trust the server with.
+    session({ session, token }) {
+      const idToken = token[ID_TOKEN_CLAIM];
+      if (typeof idToken === 'string') {
+        session.idToken = idToken;
+      }
+      return session;
+    },
     signIn({ profile, user }) {
       const allowedUpn = process.env['ALLOWED_UPN'];
       if (!allowedUpn) {
