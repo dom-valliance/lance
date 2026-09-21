@@ -242,9 +242,6 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
     devDependencies:
-      '@slack/types':
-        specifier: 3.1.0
-        version: 3.1.0
       '@testcontainers/postgresql':
         specifier: 12.1.0
         version: 12.1.0
@@ -393,6 +390,9 @@ importers:
       '@opentelemetry/sdk-trace-base':
         specifier: 2.11.0
         version: 2.11.0(@opentelemetry/api@1.9.1)
+      '@slack/types':
+        specifier: 3.1.0
+        version: 3.1.0
       '@types/node':
         specifier: 26.6.2
         version: 26.6.2

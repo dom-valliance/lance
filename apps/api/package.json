@@ -16,15 +16,16 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@lance/connectors": "workspace:*",
     "@lance/db": "workspace:*",
     "@lance/ledger": "workspace:*",
     "@lance/shared": "workspace:*",
+    "@lance/telemetry": "workspace:*",
     "@trpc/server": "11.19.0",
     "drizzle-orm": "0.45.2",
     "fastify": "5.12.5",
     "jose": "6.2.12",
-    "zod": "4.6.5",
-    "@lance/telemetry": "workspace:*"
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.1.0",

@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./graph": "./src/graph/index.ts",
     "./writes": "./src/writes/index.ts"
   },
   "scripts": {
@@ -14,6 +15,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@azure/identity": "4.13.3",
+    "@azure/keyvault-secrets": "4.11.2",
     "@lance/shared": "workspace:*",
     "@lance/telemetry": "workspace:*",
     "@opentelemetry/api": "1.9.1",
@@ -23,6 +26,7 @@
     "@opentelemetry/context-async-hooks": "2.11.0",
     "@opentelemetry/sdk-trace-base": "2.11.0",
     "@types/node": "26.6.2",
-    "msw": "^2.0.0"
+    "msw": "^2.0.0",
+    "@slack/types": "3.1.0"
   }
 }
