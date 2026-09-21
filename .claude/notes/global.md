@@ -48,3 +48,10 @@
 **Correction**: Found while checking Dom's step 6 output.
 **Rule**: A Running revision proves the process started, nothing more. After every deploy, request each public endpoint and read the full response, redirect targets included, and compare against what a user would do next (sign in, run a command). Framework env that only matters in production (AUTH_URL, secrets the framework reads implicitly) belongs in the Bicep bindings from the first draft; check the framework's production checklist when writing the template.
 **Applies to**: global
+
+### [2026-09-21] A runbook step that connects from Dom's machine needs the network path templated
+
+**Context**: Deploy step 7 asked Dom to run psql against the Flexible Server from his Mac. The template's firewall admits Azure services only, so the connection timed out. The Bicep comment even said "Dom adds his own client IP by hand", which contradicts the rule recorded earlier the same day.
+**Correction**: Dom pasted the psql timeout.
+**Rule**: Any runbook step run from outside Azure must have its network path (firewall rule, private endpoint, or a jump host) declared in the template, fed from an environment variable at deploy time when the value is personal or changes, and removed by redeploying without it. Read the template's own comments for "by hand" and treat each one as a gap to close.
+**Applies to**: infra/
