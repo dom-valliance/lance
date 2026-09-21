@@ -1,4 +1,4 @@
-import { nowIso } from '@lance/shared';
+import { nowIso, SystemModeSchema } from '@lance/shared';
 import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { DOM_ACTOR, type ApiDeps, resumeAndRequeue } from '../deps.js';
@@ -80,7 +80,39 @@ const laterPhase = (command: string, nothing: string): string =>
   `The ${command} command arrives in a later phase. ${nothing}`;
 
 const usage = (): string =>
-  'Usage: /lance status | pause [reason] | resume | brief | task <text> | chase <commitment id>';
+  'Usage: /lance status | pause [reason] | resume | mode [live|dry_run] | brief | task <text> | chase <commitment id>';
+
+/**
+ * `/lance mode` alone reports the mode; `/lance mode live` or `dry_run`
+ * switches it. Proposals held in dry run stay held until a pause and
+ * resume, so the reply says so rather than re-queuing behind Dom's back.
+ */
+const handleMode = async (
+  deps: ApiDeps,
+  rest: string,
+  displayName: string,
+): Promise<SlackReply> => {
+  const wanted = rest.trim().toLowerCase();
+  if (wanted === '') {
+    const state = await deps.control.read();
+    return ephemeral(`${displayName} is in ${state.mode} mode.`);
+  }
+  const parsed = SystemModeSchema.safeParse(wanted);
+  if (!parsed.success) {
+    return ephemeral(
+      `"${rest.trim()}" is not a mode. Use /lance mode live or /lance mode dry_run.`,
+    );
+  }
+  const result = await deps.control.setMode(parsed.data, { actor: DOM_ACTOR });
+  const opening = result.changed
+    ? `${displayName} is now in ${parsed.data} mode.`
+    : `${displayName} was already in ${parsed.data} mode.`;
+  const next =
+    parsed.data === 'live'
+      ? 'Proposals held in dry run stay held: run /lance pause then /lance resume to queue them for execution.'
+      : 'Writes are held from now on; nothing already executed is undone.';
+  return ephemeral(`${opening} ${next}`);
+};
 
 const handleStatus = async (deps: ApiDeps): Promise<SlackReply> => {
   const snapshot = await deps.status.snapshot();
@@ -195,6 +227,10 @@ export const slackRoutes =
             : ephemeral(
                 `You are not authorised to resume ${displayName} from Slack. Ask Dom, or use the kill switch in Settings.`,
               );
+        case 'mode':
+          return mayControl(deps, parsed.data.user_id)
+            ? handleMode(deps, rest, displayName)
+            : ephemeral(`Only Dom may change or read the mode of ${displayName} from Slack.`);
         case 'brief':
           return ephemeral(laterPhase('brief', 'No brief has been generated.'));
         case 'task':

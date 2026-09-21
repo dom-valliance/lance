@@ -255,6 +255,15 @@ The role names are case sensitive and the identity names must stay in double quo
 3. Open `https://<api hostname>/auth/graph/connect` as Dom and consent. The api writes the real `graph-refresh-token` over the placeholder from step 4.
 4. Confirm `LANCE_MODE` is still `dry_run`. Lance proposes and does not execute until Dom changes it deliberately.
 
+## 11. Going live
+
+Lance starts in dry run: proposals are created and held, nothing is written externally, and a digest goes to Slack at 17:00 on weekdays. Two independent gates keep it that way, and both are opened deliberately.
+
+1. Wait out the dry-run window. Every watcher holds its proposals for its first `WATCHERS_DRY_RUN_DAYS_FOR_NEW_WATCHER` working days (default five) from its first run, whatever the mode. `/lance status` shows each watcher's `__started_at`.
+2. Turn the write flags on. In `infra/params/<env>.bicepparam` set `graphWritesEnabled` and `notionWritesEnabled` to `true` and redeploy. Until then the executor holds every approved proposal with the reason `writes_disabled`.
+3. Switch the mode: `/lance mode live` in Slack, or `POST /admin/mode` with `{"mode": "live"}`. The ledger records a `state_changed` event.
+4. Release what was held: `/lance pause` then `/lance resume`. Resume re-queues every held proposal, and from now on the executor performs approved writes. To stop, `/lance pause` at any time or `/lance mode dry_run`.
+
 ## Notes
 
 - Prod uses `infra/params/prod.bicepparam`, which never deploys on the bootstrap image. Push the images to the prod registry and set `containerImageTag` before the first prod deploy.

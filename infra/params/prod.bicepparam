@@ -23,3 +23,8 @@ param containerImageTag = 'latest'
 param allowedUpn = 'dom@valliance.ai'
 // Dom's Slack user id in the Valliance workspace. Not a secret.
 param slackAllowedUserId = 'U0BN7JN7BAN'
+
+// The executor's write flags. Both stay false for the dry-run week; flip them to
+// true and redeploy on the day Lance goes live (docs/runbooks/deploy.md, going live).
+param graphWritesEnabled = false
+param notionWritesEnabled = false

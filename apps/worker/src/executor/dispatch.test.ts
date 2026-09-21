@@ -56,14 +56,18 @@ function writers(): ExecutionWriters & {
   };
 }
 
+const ALL_WRITES_ON = { graphWrites: true, notionWrites: true };
+
 function dispatch(
   p: Proposal,
   w = writers(),
   verdict: 'unchanged' | 'changed' | 'unknown' = 'unchanged',
+  featureFlags = ALL_WRITES_ON,
 ) {
   return {
     write: createConnectorWrite({
       db: {} as never,
+      featureFlags,
       writers: w,
       loadRules: () => Promise.resolve(rules),
       verifyTarget: () => Promise.resolve(verdict),
@@ -184,6 +188,19 @@ describe('connector dispatch', () => {
       url: 'https://notion.so/page-1',
       compensation: { pageId: 'page-1', status: 'Cancelled' },
     });
+  });
+
+  it('holds the proposal and touches no connector while the system write flag is off', async () => {
+    const p = proposal();
+    const { write, w } = dispatch(p, writers(), 'unchanged', {
+      graphWrites: false,
+      notionWrites: true,
+    });
+    const error = (await write.perform(p.id).catch((e: unknown) => e)) as ExecutionRefusedError;
+    expect(error).toBeInstanceOf(ExecutionRefusedError);
+    expect(error.reason).toBe('writes_disabled');
+    expect(error.message).toContain('FF_GRAPH_WRITES');
+    expect(w.graph.applyCategories).not.toHaveBeenCalled();
   });
 
   it('refuses when the target changed since the proposal', async () => {

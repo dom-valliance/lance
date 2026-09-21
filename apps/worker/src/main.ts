@@ -276,6 +276,7 @@ async function main(): Promise<void> {
 
   const write = createConnectorWrite({
     db,
+    featureFlags: config.featureFlags,
     writers: {
       ...(graph === null ? {} : { graph: graph.writers }),
       ...(notion === null ? {} : { notion: notion.writers }),

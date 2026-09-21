@@ -14,6 +14,7 @@ import {
   type Config,
   type LedgerEventInputCandidate,
   type Proposal,
+  type SystemMode,
 } from '@lance/shared';
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWTVerifyGetKey } from 'jose';
 import type {
@@ -107,6 +108,18 @@ export class FakeSystemControl implements SystemControlLike {
       heldProposalIds: ['01K5S9V6QW3SWCCPVB0N0E301A'],
       eventId: '01K5S9V6QW3SWCCPVB0N0E30E1',
     });
+  }
+
+  readonly modeCalls: { mode: SystemMode; actor: string }[] = [];
+
+  setMode(
+    mode: SystemMode,
+    options: { actor: string },
+  ): Promise<{ changed: boolean; eventId: string }> {
+    this.modeCalls.push({ mode, actor: options.actor });
+    const changed = this.state.mode !== mode;
+    this.state = { ...this.state, mode };
+    return Promise.resolve({ changed, eventId: '01K5S9V6QW3SWCCPVB0N0E30E3' });
   }
 
   resume(options: { actor: string }): Promise<ResumeResult> {

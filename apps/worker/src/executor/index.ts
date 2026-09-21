@@ -132,8 +132,13 @@ export async function executeProposal(
       error instanceof Error && 'reason' in error && typeof error.reason === 'string'
         ? error.reason
         : null;
-    // A changed target is a hold, not a failure (spec 7.5 step 2): the card is updated and nothing is written.
-    const held = reason === 'target_changed' || reason === 'forbidden_at_execution';
+    // A changed target, a policy that now forbids, or a write flag that is
+    // off is a hold, not a failure (spec 7.5 step 2): the card is updated
+    // and nothing is written.
+    const held =
+      reason === 'target_changed' ||
+      reason === 'forbidden_at_execution' ||
+      reason === 'writes_disabled';
     const event = await ledger.append({
       ts: nowIso(),
       actor: EXECUTOR_ACTOR,
