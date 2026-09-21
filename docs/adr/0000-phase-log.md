@@ -56,3 +56,13 @@ Accepted as is, with the reason:
 
 - Refresh token rotation has no cross-process lock. The worker runs one replica (`maxReplicas: 1` in `infra/modules/containerapps.bicep`) and the api never refreshes, so no second rotation can race it. A Postgres advisory lock is the Phase 5 item if the worker ever scales.
 - The mail backfill cannot be narrowed to 14 days: the Graph message delta endpoint takes no filter. The first poll is bounded by `MAX_DELTA_PAGES` and idempotent.
+
+## Phase 2. Jamie and Notion, commitments, debrief
+
+Opened 2026-09-21 on branch `feat/phase-2-meetings`, with Dom's go-ahead, while Phase 1 runs its dry-run week in dev. Two Phase 1 criteria stay open until that week delivers them: twenty live approvals and retiring the inbox agent's posting. Phase 2 does not wait on them because both are usage evidence, not code.
+
+| Criterion | Evidence | Date |
+|---|---|---|
+| Eval F1 for commitment extraction above 0.8 on the golden set | pending | |
+| A real meeting produces a debrief card with at least one approved Notion task within one hour of transcript arrival | pending | |
+
