@@ -1,0 +1,21 @@
+# Build context for every Dockerfile is the repository root. Keep it to source
+# and manifests; installs happen inside the image.
+**/node_modules
+.git
+.githooks
+**/.next
+**/.turbo
+**/dist
+**/coverage
+**/test-results
+**/playwright-report
+fixtures/evals
+docs
+infra
+.github
+**/.env
+**/.env.*
+!**/.env.example
+*.log
+.DS_Store
+Ian-Assistant_Spec_v1.md

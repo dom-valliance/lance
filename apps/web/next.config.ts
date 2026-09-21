@@ -11,8 +11,13 @@
  *
  * @type {import('next').NextConfig}
  */
+import { fileURLToPath } from 'node:url';
+
 const nextConfig = {
   output: 'standalone',
+  // The app lives in a pnpm workspace, so the standalone trace must start at
+  // the repository root or hoisted dependencies are left out of the bundle.
+  outputFileTracingRoot: fileURLToPath(new URL('../../', import.meta.url)),
 };
 
 export default nextConfig;

@@ -13,7 +13,7 @@
     "test": "turbo run test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepare": "git config core.hooksPath .githooks"
+    "prepare": "sh -c 'command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || exit 0'"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.2",

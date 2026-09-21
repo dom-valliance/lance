@@ -10,11 +10,7 @@
 # nothing but start-up time. Revisit when the packages emit JavaScript.
 
 FROM node:22-alpine AS deps
-# The root `prepare` script points core.hooksPath at .githooks, so pnpm
-# needs git and a repository to point at. Both are build-stage only: the
-# throwaway repository is deleted after install and the runtime image below
-# carries neither.
-RUN apk add --no-cache git && corepack enable
+RUN corepack enable
 WORKDIR /app
 
 # Manifests first, so a source-only change reuses the install layer.
@@ -30,7 +26,7 @@ COPY packages/ontology/package.json packages/ontology/
 COPY packages/policy/package.json packages/policy/
 COPY packages/shared/package.json packages/shared/
 COPY packages/telemetry/package.json packages/telemetry/
-RUN git init -q . && pnpm install --frozen-lockfile --filter @lance/api... && rm -rf .git
+RUN pnpm install --frozen-lockfile --filter @lance/api...
 
 # Only the source the api actually loads. Nothing else is copied, so the
 # image carries no fixtures, no tests from other packages and no .env.

@@ -1,44 +1,47 @@
-# Multi-stage build for @lance/web. Build context is the repository root
-# (docker build -f apps/web/Dockerfile .): pnpm workspaces need the root
-# lockfile and workspace manifest, and @lance/web has no cross-package
-# dependencies on packages/* to prune around.
+# Build context is the repository root (docker build -f apps/web/Dockerfile .):
+# pnpm workspaces need the root lockfile and workspace manifest even though
+# @lance/web depends on no packages/* package.
 
-FROM node:22-alpine AS base
+FROM node:22-alpine AS deps
 RUN corepack enable
-
-# ---- deps: install the full workspace, matched to the committed lockfile ----
-FROM base AS deps
 WORKDIR /repo
+
+# Manifests first, so a source-only change reuses the install layer. Every
+# workspace manifest is listed because the lockfile covers the whole workspace.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/web/package.json apps/web/package.json
-COPY apps/api/package.json apps/api/package.json
-COPY apps/worker/package.json apps/worker/package.json
-COPY packages ./packages
-RUN pnpm install --frozen-lockfile
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY apps/worker/package.json apps/worker/
+COPY packages/agents/package.json packages/agents/
+COPY packages/connectors/package.json packages/connectors/
+COPY packages/db/package.json packages/db/
+COPY packages/ledger/package.json packages/ledger/
+COPY packages/ontology/package.json packages/ontology/
+COPY packages/policy/package.json packages/policy/
+COPY packages/shared/package.json packages/shared/
+COPY packages/telemetry/package.json packages/telemetry/
+RUN pnpm install --frozen-lockfile --filter @lance/web...
 
-# ---- builder: produce the standalone Next.js server bundle ----
-FROM base AS builder
-WORKDIR /repo
-COPY --from=deps /repo/node_modules ./node_modules
-COPY . .
+# Build the standalone Next.js server. Only the web app's own files are
+# copied; next.config.ts roots the file trace at /repo.
+FROM deps AS builder
+COPY tsconfig.base.json ./
+COPY apps/web ./apps/web
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm --filter @lance/web build
 
-# ---- runner: minimal, non-root runtime image ----
-FROM node:22-alpine AS runner
+FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 
-RUN addgroup --system --gid 1001 nodejs \
-  && adduser --system --uid 1001 web
+# `output: 'standalone'` traces only what the server needs, so the runtime
+# image never carries the workspace node_modules.
+COPY --from=builder --chown=node:node /repo/apps/web/.next/standalone ./
+COPY --from=builder --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=node:node /repo/apps/web/public ./apps/web/public
 
-# `output: 'standalone'` (next.config.ts) traces only the dependencies the
-# running server needs, so the runtime image never gets a copy of the full
-# workspace node_modules.
-COPY --from=builder --chown=web:nodejs /repo/apps/web/.next/standalone ./
-COPY --from=builder --chown=web:nodejs /repo/apps/web/.next/static ./apps/web/.next/static
-COPY --from=builder --chown=web:nodejs /repo/apps/web/public ./apps/web/public
-
-USER web
+USER node
 EXPOSE 3000
 CMD ["node", "apps/web/server.js"]
