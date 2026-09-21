@@ -1,5 +1,6 @@
 import { checkVoice, type ProvenanceRef } from '@lance/shared';
 import type { ProposalDraft } from '@lance/agents';
+import { TASK_PROPERTY_NAMES } from '@lance/connectors';
 
 export interface CriticVerdict {
   passed: boolean;
@@ -13,7 +14,9 @@ export interface CriticOptions {
   reviewDraft?: (draft: ProposalDraft) => Promise<string[]>;
 }
 
-const NOTION_PATCH_KEYS = ['properties', 'patch'] as const;
+/** Where a Notion draft keeps its property values: createTask input or updateTask patch. */
+const NOTION_PATCH_KEYS = ['input', 'patch'] as const;
+const PROPERTY_NAME_BY_KEY: Record<string, string> = TASK_PROPERTY_NAMES;
 
 function targetInProvenance(draft: ProposalDraft): boolean {
   if (draft.targetRecordId === null) return true;
@@ -60,7 +63,8 @@ export async function critique(
     for (const key of NOTION_PATCH_KEYS) {
       const patch = draft.payload[key];
       if (typeof patch === 'object' && patch !== null) {
-        for (const property of Object.keys(patch)) {
+        for (const key of Object.keys(patch)) {
+          const property = PROPERTY_NAME_BY_KEY[key] ?? key;
           if (!options.permittedNotionProperties.includes(property)) {
             notes.push(`Notion property "${property}" is not one Lance may write (ADR 0009).`);
           }

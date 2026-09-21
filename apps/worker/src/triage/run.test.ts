@@ -1,0 +1,239 @@
+import { MemoryRunRecorder, ScriptedRunner, textMessage } from '@lance/agents/testing';
+import type { ProposalDraft } from '@lance/agents';
+import { alerts, createDb, runMigrations, seed, type Db } from '@lance/db';
+import { startPostgresContainer } from '@lance/db/testing';
+import { LedgerReader, LedgerWriter } from '@lance/ledger';
+import { hashRecord, idempotencyKey, loadConfig, stableUlid } from '@lance/shared';
+import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { runTriage, taskDraft, workingDaysBetween } from './run.js';
+
+let container: StartedPostgreSqlContainer;
+let db: Db;
+const correlationId = stableUlid('graph:conv-1');
+const created: Array<{ draft: ProposalDraft; context: unknown }> = [];
+
+const config = loadConfig({
+  NODE_ENV: 'test',
+  DATABASE_URL: 'postgres://postgres:postgres@localhost:5432/lance',
+});
+
+const agentConfig = {
+  prices: {
+    'claude-sonnet-5': {
+      inputPerMTok: 2,
+      outputPerMTok: 10,
+      cacheReadPerMTok: 0.2,
+      cacheWritePerMTok: 2.5,
+    },
+  },
+  cost: { dailyCeilingGbp: 15, usdToGbp: 0.78 },
+};
+
+async function observe(recordId: string, record: Record<string, unknown>): Promise<string> {
+  const hash = hashRecord(record);
+  const result = await new LedgerWriter(db).append({
+    ts: '2026-09-21T08:00:00.000Z',
+    actor: 'agent:watcher-graph-mail@0.1.0',
+    kind: 'observed',
+    sourceSystem: 'graph',
+    sourceRecordId: recordId,
+    sourceRecordHash: hash,
+    idempotencyKey: idempotencyKey('graph', recordId, hash),
+    correlationId,
+    payload: {
+      ...record,
+      labels: ['Deals'],
+      summary: 'A client asks for a revised SOW',
+      watcher: 'graph-mail',
+    },
+  });
+  return result.id;
+}
+
+beforeAll(async () => {
+  container = await startPostgresContainer();
+  const connectionString = container.getConnectionUri();
+  await runMigrations({ connectionString });
+  db = createDb({ connectionString, password: 'postgres' });
+  await seed(db);
+}, 120000);
+
+afterAll(async () => {
+  await db.$client.end();
+  await container.stop();
+});
+
+describe('workingDaysBetween', () => {
+  it('counts weekdays only', () => {
+    expect(
+      workingDaysBetween(new Date('2026-09-18T09:00:00Z'), new Date('2026-09-21T09:00:00Z')),
+    ).toBe(1);
+    expect(
+      workingDaysBetween(new Date('2026-09-14T09:00:00Z'), new Date('2026-09-21T09:00:00Z')),
+    ).toBe(5);
+  });
+});
+
+describe('taskDraft', () => {
+  it('puts a delegate in brackets in the title and keeps Dom as assignee', () => {
+    const draft = taskDraft(
+      {
+        title: 'Send revised SOW',
+        description: null,
+        dueDate: '2026-09-25',
+        assigneeName: 'Alice Smith',
+        priority: 'High',
+        evidenceQuote: 'please send the revised SOW by Friday',
+        recordId: 'm1',
+      },
+      [{ system: 'graph', recordId: 'm1', hash: 'h', observedAt: '2026-09-21T08:00:00.000Z' }],
+      config.notion,
+    );
+    expect(draft.actionClass).toBe('create_task');
+    expect(draft.counterpartyClass).toBe('internal');
+    const input = draft.payload['input'] as Record<string, unknown>;
+    expect(input['title']).toBe('Send revised SOW (Alice Smith)');
+    expect(input['assigneeIds']).toEqual([config.notion.domUserId]);
+    expect(input['due']).toBe('2026-09-25');
+    expect(draft.payload['delegateName']).toBe('Alice Smith');
+    expect(draft.preview).toContain('(Alice Smith)');
+  });
+});
+
+describe('runTriage', () => {
+  it('turns task and alert candidates into a proposal and a P0 alert and records the triage', async () => {
+    const eventId = await observe('m1', {
+      subject: 'Revised SOW',
+      from: 'client@example.com',
+      bodyText: 'Please send the revised SOW by Friday. Our legal team is reviewing the contract.',
+    });
+    const modelOutput = {
+      importance: 0.8,
+      urgency: 0.7,
+      summary: 'Client wants the revised SOW by Friday and legal is reviewing.',
+      entities: [
+        {
+          kind: 'person',
+          name: 'Client Person',
+          email: 'client@example.com',
+          domain: 'example.com',
+          confidence: 0.9,
+        },
+      ],
+      commitments: [
+        {
+          direction: 'outbound',
+          description: 'Send revised SOW',
+          counterpartyName: 'Client Person',
+          counterpartyEmail: 'client@example.com',
+          dueAt: '2026-09-25',
+          dueConfidence: 0.8,
+          evidenceQuote: 'Please send the revised SOW by Friday',
+          recordId: 'm1',
+        },
+      ],
+      taskCandidates: [
+        {
+          title: 'Send revised SOW',
+          description: null,
+          dueDate: '2026-09-25',
+          assigneeName: null,
+          priority: 'High',
+          evidenceQuote: 'Please send the revised SOW by Friday',
+          recordId: 'm1',
+        },
+      ],
+      proposalsSubmitted: 0,
+      alertCandidates: [
+        {
+          kind: 'risk_language_in_client_mail',
+          severity: 'P0',
+          title: 'Legal is reviewing the contract',
+          evidenceQuote: 'Our legal team is reviewing the contract',
+          recordId: 'm1',
+        },
+      ],
+    };
+    const runner = new ScriptedRunner([[textMessage(JSON.stringify(modelOutput))]]);
+    const result = await runTriage(
+      {
+        db,
+        config,
+        agent: {
+          runner,
+          recorder: new MemoryRunRecorder(),
+          ledger: new LedgerWriter(db),
+          config: agentConfig,
+          readSpendUsd: () => Promise.resolve(0),
+        },
+        createProposal: (draft, context) => {
+          created.push({ draft, context });
+          return Promise.resolve({
+            proposalId: `p-${created.length}`,
+            decision: 'propose',
+            status: 'pending',
+          });
+        },
+      },
+      { watcher: 'graph-mail', correlationId, observationEventIds: [eventId] },
+    );
+    expect(result.taskProposals).toEqual(['p-1']);
+    expect(created[0]?.draft).toMatchObject({ actionClass: 'create_task', targetSystem: 'notion' });
+    expect(created[0]?.draft.provenance[0]).toMatchObject({ system: 'graph', recordId: 'm1' });
+    expect(created[0]?.context).toMatchObject({
+      correlationId,
+      labels: ['Deals'],
+      watcherDryRun: false,
+    });
+    expect(result.alerts).toHaveLength(1);
+    const alert = (
+      await db
+        .select()
+        .from(alerts)
+        .where(eq(alerts.id, result.alerts[0] ?? ''))
+    )[0];
+    expect(alert).toMatchObject({ kind: 'risk_language_in_client_mail', severity: 'P0' });
+    const trail = await new LedgerReader(db).byCorrelation(correlationId);
+    expect(trail.map((event) => event.kind).sort()).toEqual([
+      'alert_raised',
+      'cost_recorded',
+      'observed',
+      'resolved',
+    ]);
+    const prompt = runner.calls[0]?.messages[0]?.content;
+    expect(JSON.stringify(prompt)).toContain('recordId: m1');
+    expect(runner.calls[0]?.tools.map((tool) => ('name' in tool ? tool.name : ''))).toEqual([
+      'ledger_search',
+      'source_get_record',
+      'ontology_lookup',
+      'create_proposal',
+    ]);
+  });
+
+  it('refuses a job whose observations do not exist', async () => {
+    const runner = new ScriptedRunner([]);
+    await expect(
+      runTriage(
+        {
+          db,
+          config,
+          agent: {
+            runner,
+            recorder: new MemoryRunRecorder(),
+            ledger: new LedgerWriter(db),
+            config: agentConfig,
+            readSpendUsd: () => Promise.resolve(0),
+          },
+          createProposal: () => Promise.reject(new Error('unused')),
+        },
+        {
+          watcher: 'graph-mail',
+          correlationId: stableUlid('graph:none'),
+          observationEventIds: ['01ARZ3NDEKTSV4RRFFQ69G5FAV'],
+        },
+      ),
+    ).rejects.toThrow(/names no observed events/);
+  });
+});

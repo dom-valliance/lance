@@ -23,7 +23,8 @@
     "@lance/telemetry": "workspace:*",
     "@lance/agents": "workspace:*",
     "@lance/connectors": "workspace:*",
-    "@lance/policy": "workspace:*"
+    "@lance/policy": "workspace:*",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.1.0",
