@@ -1,14 +1,15 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
 import { apiClient } from '@/lib/trpc';
 
 /**
  * The four decisions the Proposals pages offer (spec 12: "the same four
  * actions as Slack"). Each one is a server action: the id token stays on
  * the server, and the api's tRPC router derives the actor from the token
- * rather than from anything posted here.
+ * rather than from anything posted here. Each answers `useActionState`
+ * with null on success or the message to show; a failure never goes into
+ * the URL.
  */
 
 const EDIT_FIELD_PREFIX = 'field:';
@@ -48,33 +49,38 @@ async function send(decision: Decision): Promise<string | null> {
   }
 }
 
-/** `redirect` throws by design, so it is called outside the try in `send`. */
-async function decideThenReturn(decision: Decision): Promise<never> {
+/** Sends the decision and refreshes the pages that show the proposal. */
+async function decide(decision: Decision): Promise<string | null> {
   const failure = await send(decision);
   revalidatePath(`/proposals/${decision.proposalId}`);
   revalidatePath('/proposals');
-  redirect(
-    failure === null
-      ? `/proposals/${decision.proposalId}`
-      : `/proposals/${decision.proposalId}?error=${encodeURIComponent(failure)}`,
-  );
+  return failure;
 }
 
-export async function approveProposal(form: FormData): Promise<void> {
-  await decideThenReturn({ proposalId: requiredField(form, 'proposalId'), action: 'approve' });
+export async function approveProposal(
+  _previous: string | null,
+  form: FormData,
+): Promise<string | null> {
+  return decide({ proposalId: requiredField(form, 'proposalId'), action: 'approve' });
 }
 
-export async function snoozeProposal(form: FormData): Promise<void> {
-  await decideThenReturn({
+export async function snoozeProposal(
+  _previous: string | null,
+  form: FormData,
+): Promise<string | null> {
+  return decide({
     proposalId: requiredField(form, 'proposalId'),
     action: 'snooze',
     snoozeHours: 4,
   });
 }
 
-export async function rejectProposal(form: FormData): Promise<void> {
+export async function rejectProposal(
+  _previous: string | null,
+  form: FormData,
+): Promise<string | null> {
   const note = optionalField(form, 'note');
-  await decideThenReturn({
+  return decide({
     proposalId: requiredField(form, 'proposalId'),
     action: 'reject',
     reasonCode: requiredField(form, 'reasonCode'),
@@ -83,7 +89,10 @@ export async function rejectProposal(form: FormData): Promise<void> {
 }
 
 /** Every `field:<name>` input becomes one key of the edited payload. */
-export async function editProposal(form: FormData): Promise<void> {
+export async function editProposal(
+  _previous: string | null,
+  form: FormData,
+): Promise<string | null> {
   const editedPayload: Record<string, unknown> = {};
   for (const [key, value] of form.entries()) {
     if (key.startsWith(EDIT_FIELD_PREFIX) && typeof value === 'string') {
@@ -91,7 +100,7 @@ export async function editProposal(form: FormData): Promise<void> {
     }
   }
 
-  await decideThenReturn({
+  return decide({
     proposalId: requiredField(form, 'proposalId'),
     action: 'edit',
     editedPayload,

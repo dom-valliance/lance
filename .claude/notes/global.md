@@ -118,3 +118,31 @@
 **Correction**: Dom pasted the CI log.
 **Rule**: A verification command is judged by its exit code, with its last lines shown unfiltered. Never pipe lint, typecheck or test output through a grep that can drop the failure, and never print a success message after a pipeline whose exit status was not checked.
 **Applies to**: global
+
+### [2026-09-21] Runtime database objects belong to the shared role, never to one identity
+
+**Context**: The first approval in the web app failed with "permission denied for table version". pg-boss had created its tables under the worker's Container App identity, and the api's identity, a member of the same `lance_app` role, could not read them. Membership grants a role's privileges, not ownership of what a member creates.
+**Correction**: Dom reported the failed approval.
+**Rule**: Every app session starts as the shared role (`PG_ROLE=lance_app`, applied by the db client through the connection options) so anything created at runtime is owned by `lance_app`. Anything else that creates objects at runtime gets the same treatment. An environment that predates the setting is repaired once with `REASSIGN OWNED BY "<identity>" TO lance_app`, and the runbook records it.
+**Applies to**: packages/db/src/client.ts, infra/modules/containerapps.bicep, docs/runbooks/deploy.md
+
+### [2026-09-21] A failure message never travels in a URL
+
+**Context**: The proposal decision actions redirected back to the page with the failure in an `error` query parameter, so the message landed in access logs, browser history and bookmarks and reappeared on every refresh.
+**Correction**: Dom: "errors should not be passed in as query string params".
+**Rule**: A server action answers `useActionState` with its failure and the form renders it from React state. No redirect carries a message, an error or anything user-facing in the query string.
+**Applies to**: apps/web
+
+### [2026-09-21] The admin firewall rule is one address and goes stale with the network
+
+**Context**: psql to the dev server timed out for Dom and for me. The `AllowAdminClient` rule still held the morning's public IP; the address had changed during the day.
+**Correction**: Dom pasted the timeout.
+**Rule**: A psql timeout against Flexible Server is checked first against the current public IP and the `AllowAdminClient` rule. The fix is `export LANCE_ADMIN_CLIENT_IP=$(curl -s https://api.ipify.org)` and a redeploy, never a hand-edited rule. The runbook says to take the value from `curl` every time.
+**Applies to**: docs/runbooks/deploy.md, infra/modules/postgres.bicep
+
+### [2026-09-21] The template owns no client firewall rule
+
+**Context**: The single-address rule from `LANCE_ADMIN_CLIENT_IP` went stale within a day because Dom moves between home, work and elsewhere. Supersedes the entry above about refreshing the variable.
+**Correction**: Dom: "I will not always be on the same IP as I move between work and home".
+**Rule**: Access for a laptop is opened per session by `scripts/psql-admin.sh`, which adds a rule for the current address, waits for it, runs psql with an Entra token, and removes the rule on exit. The template's only firewall rule is the Azure services one. Anything tied to where a person happens to be is never a deployment parameter.
+**Applies to**: scripts/psql-admin.sh, infra/modules/postgres.bicep, docs/runbooks/deploy.md
