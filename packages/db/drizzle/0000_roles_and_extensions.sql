@@ -45,14 +45,13 @@ $$;
 GRANT USAGE, CREATE ON SCHEMA public TO lance_migrator;
 --> statement-breakpoint
 -- The role running the migrations reassigns ownership to lance_migrator in a
--- later migration, which needs membership of that role. A superuser has it
--- implicitly; on Azure the migrate identity is an Entra admin principal
--- (azure_pg_admin), not a superuser, so grant it here.
+-- later migration, which needs membership with INHERIT and SET. A superuser has
+-- it implicitly. A CREATEROLE user that created the role holds ADMIN membership
+-- only, without INHERIT or SET, so the grant is made explicitly and unconditionally
+-- (re-granting updates the options; it never fails).
 DO $$
 BEGIN
-  IF NOT pg_has_role(current_user, 'lance_migrator', 'MEMBER') THEN
-    EXECUTE format('GRANT lance_migrator TO %I', current_user);
-  END IF;
+  EXECUTE format('GRANT lance_migrator TO %I WITH INHERIT TRUE, SET TRUE', current_user);
 END
 $$;
 --> statement-breakpoint
