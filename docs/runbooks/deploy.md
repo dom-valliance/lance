@@ -96,12 +96,10 @@ az role assignment list --scope $(az keyvault show -g rg-lance-dev -n <vault nam
   --query "[].{role:roleDefinitionName, principal:principalName}" -o table
 ```
 
-If the vault was deployed from a template older than this step, grant it once by hand and redeploy later:
+Do not grant the role by hand. Azure keys role assignments by name, the template names its own deterministically, and a hand-made assignment for the same principal, role and scope makes the next deploy fail with `RoleAssignmentExists`. If the vault was deployed from a template older than this step, redeploy (step 3) and the assignment appears. If a hand-made one already exists, delete it first:
 
 ```
-az role assignment create --role "Key Vault Secrets Officer" \
-  --assignee-object-id 19fb2afd-6814-4600-8697-eb798ec5691f --assignee-principal-type User \
-  --scope $(az keyvault show -g rg-lance-dev -n <vault name> --query id -o tsv)
+az role assignment delete --ids <assignment id from the list above>
 ```
 
 ## 4. Set the Key Vault secrets
