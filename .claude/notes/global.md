@@ -13,3 +13,10 @@
 **Correction**: Dom: "Problems with entra setup. Where is the key vault setup?" and "There's a race condition on slack creds as well."
 **Rule**: Before writing a runbook, list what each step reads and what produces it, and order the steps so nothing is consumed before it exists. Say up front which other runbook must run first. Values that are identifiers, not secrets (tenant id, client id, UPN, object id, Slack user id), go straight into the parameter files and the runbook's known-values table so Dom is never asked for them twice.
 **Applies to**: global
+
+### [2026-09-21] Name managed resources by what creates them, and read identifiers yourself
+
+**Context**: The Entra runbook said "Postgres Flexible Server" and "Key Vault" as if Dom would recognise and create them, and asked him for his UPN, object id and Slack user id.
+**Correction**: Dom: "What is the allowed-upn value? Where can I find that? What is the Flexible Server for PostGres?"
+**Rule**: In a runbook, the first mention of an Azure resource says which template creates it and whether Dom does anything by hand. Any identifier Claude can read from a logged-in CLI or connector (`az account show`, `az ad signed-in-user show`, the Slack session user id) is read by Claude and written into the parameter files and the runbook's known-values table, never delegated to Dom.
+**Applies to**: global
