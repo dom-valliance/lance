@@ -1,6 +1,6 @@
 # Build context is the repository root, not apps/worker: the worker imports
-# @lance/db, @lance/ledger, @lance/shared and @lance/telemetry as workspace
-# TypeScript source.
+# @lance/agents, @lance/connectors, @lance/db, @lance/ledger, @lance/policy,
+# @lance/shared and @lance/telemetry as workspace TypeScript source.
 #
 #   docker build -f apps/worker/Dockerfile -t lance-worker .
 #
@@ -33,9 +33,12 @@ RUN pnpm install --frozen-lockfile --filter @lance/worker...
 COPY tsconfig.base.json ./
 COPY apps/worker/tsconfig.json apps/worker/
 COPY apps/worker/src apps/worker/src
+COPY packages/agents/src packages/agents/src
+COPY packages/connectors/src packages/connectors/src
 COPY packages/db/src packages/db/src
 COPY packages/db/drizzle packages/db/drizzle
 COPY packages/ledger/src packages/ledger/src
+COPY packages/policy/src packages/policy/src
 COPY packages/shared/src packages/shared/src
 COPY packages/telemetry/src packages/telemetry/src
 

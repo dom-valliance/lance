@@ -1,6 +1,6 @@
 # Build context is the repository root (docker build -f apps/web/Dockerfile .):
-# pnpm workspaces need the root lockfile and workspace manifest even though
-# @lance/web depends on no packages/* package.
+# pnpm workspaces need the root lockfile and workspace manifest, and the
+# build stage needs the api and package sources for their types.
 
 FROM node:22-alpine AS deps
 RUN corepack enable
@@ -22,10 +22,16 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/telemetry/package.json packages/telemetry/
 RUN pnpm install --frozen-lockfile --filter @lance/web...
 
-# Build the standalone Next.js server. Only the web app's own files are
-# copied; next.config.ts roots the file trace at /repo.
+# Build the standalone Next.js server. `next build` type-checks the tRPC
+# AppRouter type from @lance/api, which reaches every packages/* source the
+# api imports, so those sources are copied alongside the web app. Only
+# types cross that boundary: `verbatimModuleSyntax` elides the import and
+# no api code lands in the bundle. next.config.ts roots the file trace at
+# /repo.
 FROM deps AS builder
 COPY tsconfig.base.json ./
+COPY packages ./packages
+COPY apps/api ./apps/api
 COPY apps/web ./apps/web
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm --filter @lance/web build
