@@ -9,6 +9,7 @@
 //   entra-client-id          Application (client) id          docs/runbooks/entra-setup.md
 //   entra-client-secret      Entra app client secret          docs/runbooks/entra-setup.md
 //   allowed-upn              The single UPN allowed to sign in docs/runbooks/entra-setup.md
+//   auth-secret              openssl rand -base64 32, Auth.js   docs/runbooks/deploy.md
 //   graph-refresh-token      Written by api on first consent   docs/runbooks/entra-setup.md
 //   slack-bot-token          Slack bot OAuth token             docs/runbooks/slack-app-setup.md
 //   slack-signing-secret     Slack signing secret              docs/runbooks/slack-app-setup.md

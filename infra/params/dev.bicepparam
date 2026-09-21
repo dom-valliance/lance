@@ -15,8 +15,8 @@ param postgresAdministratorPassword = readEnvironmentVariable('LANCE_PG_ADMIN_PA
 // Bootstrap: the environment stands up on the public quickstart image. Flip to false
 // once az acr build has pushed lance-web, lance-api and lance-worker, and set
 // containerImageTag to the tag that was pushed.
-param useBootstrapImage = true
-param containerImageTag = 'bootstrap'
+param useBootstrapImage = false
+param containerImageTag = 'df8b139'
 
 param allowedUpn = 'dom@valliance.ai'
 // Dom's Slack user id in the Valliance workspace. Not a secret.

@@ -104,7 +104,7 @@ az role assignment delete --ids <assignment id from the list above>
 
 ## 4. Set the Key Vault secrets
 
-The template creates the vault and grants the four identities `Key Vault Secrets User`. It never creates a secret value. Set all eleven by hand. Take the values from `entra-setup.md`, `slack-app-setup.md` and `rotate-secrets.md`.
+The template creates the vault and grants the four identities `Key Vault Secrets User`. It never creates a secret value. Set all twelve by hand. Take the values from `entra-setup.md`, `slack-app-setup.md` and `rotate-secrets.md`.
 
 ```
 KV=<key vault name from the outputs>
@@ -113,6 +113,7 @@ az keyvault secret set --vault-name $KV --name entra-tenant-id         --value '
 az keyvault secret set --vault-name $KV --name entra-client-id         --value '<application client id>'
 az keyvault secret set --vault-name $KV --name entra-client-secret     --value '<client secret>'
 az keyvault secret set --vault-name $KV --name allowed-upn             --value 'dom@valliance.ai'
+az keyvault secret set --vault-name $KV --name auth-secret             --value "$(openssl rand -base64 32)"
 az keyvault secret set --vault-name $KV --name slack-bot-token         --value 'xoxb-...'
 az keyvault secret set --vault-name $KV --name slack-signing-secret    --value '<signing secret>'
 az keyvault secret set --vault-name $KV --name anthropic-api-key       --value '<anthropic key>'
@@ -127,13 +128,13 @@ az keyvault secret set --vault-name $KV --name agent-log-ingest-secret --value "
 az keyvault secret set --vault-name $KV --name graph-refresh-token --value 'pending-first-consent'
 ```
 
-Check all eleven are present:
+Check all twelve are present:
 
 ```
 az keyvault secret list --vault-name $KV --query "[].name" -o tsv | sort
 ```
 
-If the CLI reports a forbidden error, grant yourself `Key Vault Secrets Officer` on the vault. The vault uses RBAC, not access policies, and creating it does not grant you data plane access.
+If the CLI reports a forbidden error, see step 3a.
 
 ## 5. Build and push the three images
 

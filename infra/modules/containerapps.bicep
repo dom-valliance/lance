@@ -54,6 +54,10 @@ var bootstrapPort = 80
 // modules/keyvault.bicep and the rotation runbook.
 var webSecretBindings = [
   {
+    secretName: 'auth-secret'
+    envName: 'AUTH_SECRET'
+  }
+  {
     secretName: 'entra-tenant-id'
     envName: 'ENTRA_TENANT_ID'
   }
@@ -144,6 +148,10 @@ var apps = [
     minReplicas: 1
     maxReplicas: 2
     bindings: webSecretBindings
+    // Auth.js builds callback URLs from AUTH_URL; without it the container's
+    // bind address (0.0.0.0:3000) leaks into the sign-in redirect. The value is
+    // computed in the loop body because it needs the environment's domain.
+    needsAuthUrl: true
   }
   {
     // Container Apps has no path-scoped ingress, so the whole api is reachable from
@@ -158,6 +166,7 @@ var apps = [
     hasIngress: true
     external: true
     targetPort: 3001
+    needsAuthUrl: false
     minReplicas: 1
     maxReplicas: 2
     bindings: apiSecretBindings
@@ -174,6 +183,7 @@ var apps = [
     minReplicas: 1
     maxReplicas: 1
     bindings: workerSecretBindings
+    needsAuthUrl: false
   }
 ]
 
@@ -308,6 +318,18 @@ resource containerApps 'Microsoft.App/containerApps@2025-01-01' = [
                   value: app.identity.clientId
                 }
               ],
+              app.needsAuthUrl
+                ? [
+                    {
+                      name: 'AUTH_URL'
+                      value: 'https://${app.name}.${managedEnvironment.properties.defaultDomain}'
+                    }
+                    {
+                      name: 'AUTH_TRUST_HOST'
+                      value: 'true'
+                    }
+                  ]
+                : [],
               useBootstrapImage
                 ? []
                 : map(app.bindings, binding => {
