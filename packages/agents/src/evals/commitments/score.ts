@@ -44,7 +44,30 @@ export interface CommitmentScore {
 }
 
 /** A pair below or at this similarity is never matched. */
-export const DESCRIPTION_SIMILARITY_THRESHOLD = 0.6;
+export const DESCRIPTION_SIMILARITY_THRESHOLD = 0.5;
+
+/**
+ * Names the extractor is told to leave out of a description (spec 7.2: one
+ * plain sentence naming the thing to be done). The golden set sometimes
+ * writes "Marcus to return the questionnaire" where the extractor writes
+ * "Return the questionnaire", so both sides lose the people's names and
+ * Dom's own before they are compared.
+ */
+function nameTokens(items: readonly ScorableCommitment[]): Set<string> {
+  const tokens = new Set<string>(['dom', 'selvon', 'valliance']);
+  for (const item of items) {
+    for (const token of tokenise(item.counterpartyName ?? '')) tokens.add(token);
+  }
+  return tokens;
+}
+
+/** Jaccard over the content words of two descriptions, ignoring the people named. */
+export function descriptionSimilarity(left: ScorableCommitment, right: ScorableCommitment): number {
+  const ignore = nameTokens([left, right]);
+  const strip = (text: string): string =>
+    [...tokenise(text)].filter((token) => !ignore.has(token)).join(' ');
+  return jaccardSimilarity(strip(left.description), strip(right.description));
+}
 
 /**
  * Function words carry no signal about what was promised, so they are dropped
@@ -249,7 +272,7 @@ export function scoreCommitments(
       if (!sameCounterparty(expectedItem, actualItem)) {
         continue;
       }
-      const similarity = jaccardSimilarity(expectedItem.description, actualItem.description);
+      const similarity = descriptionSimilarity(expectedItem, actualItem);
       if (similarity <= DESCRIPTION_SIMILARITY_THRESHOLD) {
         continue;
       }

@@ -184,9 +184,21 @@ describe('scoreCommitments', () => {
     expect(score).toMatchObject({ truePositives: 0, falsePositives: 1, falseNegatives: 1 });
   });
 
+  it('matches descriptions that differ only by the people named', () => {
+    const expected = commitment({
+      description: 'Marcus Oyelaran to return the completed security questionnaire',
+      counterpartyName: 'Marcus Oyelaran',
+    });
+    const actual = commitment({
+      description: 'Return the completed security questionnaire',
+      counterpartyName: 'Marcus Oyelaran',
+    });
+    expect(scoreCommitments([expected], [actual]).truePositives).toBe(1);
+  });
+
   it('refuses a pair whose similarity sits exactly on the threshold', () => {
-    const expected = commitment({ description: 'alpha beta charlie delta' });
-    const actual = commitment({ description: 'alpha beta charlie echo' });
+    const expected = commitment({ description: 'alpha beta' });
+    const actual = commitment({ description: 'alpha beta charlie delta' });
     expect(jaccardSimilarity(expected.description, actual.description)).toBeCloseTo(
       DESCRIPTION_SIMILARITY_THRESHOLD,
       6,
