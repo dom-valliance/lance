@@ -118,6 +118,41 @@ describe('runWatcher', () => {
     expect(new Set(m1.map((event) => event.correlationId)).size).toBe(1);
   });
 
+  it('triages the records it could normalise and keeps the cursor when one record fails', async () => {
+    triaged.length = 0;
+    const watcher = fakeWatcher({
+      name: 'partial-mail',
+      records: [
+        { id: 'ok-1', observedAt: '2026-09-21T09:00:00.000Z', raw: { conversationId: 'p1' } },
+        { id: 'bad-1', observedAt: '2026-09-21T09:01:00.000Z', raw: { conversationId: 'p2' } },
+        { id: 'ok-2', observedAt: '2026-09-21T09:02:00.000Z', raw: { conversationId: 'p3' } },
+      ],
+      normalise: (record) =>
+        record.id.startsWith('bad')
+          ? Promise.reject(new Error('schema drift'))
+          : Promise.resolve({
+              sourceSystem: 'graph' as const,
+              recordId: record.id,
+              observedAt: record.observedAt,
+              record: record.raw as Record<string, unknown>,
+              correlationKey: (record.raw as { conversationId: string }).conversationId,
+              summary: record.id,
+              labels: ['Internal'],
+            }),
+    });
+
+    const summary = await runWatcher(deps(), watcher);
+
+    expect(summary.partitions[0]).toMatchObject({ status: 'failed' });
+    expect(triaged.map((job) => job.observationEventIds.length)).toEqual([1, 1]);
+    const saved = await db
+      .select({ value: cursors.value })
+      .from(cursors)
+      .where(eq(cursors.watcher, 'partial-mail'));
+    expect(saved.map((row) => row.value)).not.toContain('cursor-after-start');
+    resetPartitionBreaker('partial-mail', 'inbox');
+  });
+
   it('does nothing while paused', async () => {
     await control.pause({ reason: 'drill', actor: 'user:dom' });
     const summary = await runWatcher(deps(), fakeWatcher({ name: 'paused-watcher', records }));

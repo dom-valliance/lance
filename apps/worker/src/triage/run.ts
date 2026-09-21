@@ -5,7 +5,7 @@ import {
   type AgentDeps,
   type ProposalDraft,
 } from '@lance/agents';
-import { observations, type Db } from '@lance/db';
+import { observations, proposals, type Db } from '@lance/db';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
 import { nowIso, type Config, type ProvenanceRef } from '@lance/shared';
 import { and, eq } from 'drizzle-orm';
@@ -78,6 +78,29 @@ function provenanceFor(
     });
   }
   return refs;
+}
+
+function taskTitleOf(draft: ProposalDraft): string {
+  const input = draft.payload['input'];
+  const title =
+    typeof input === 'object' && input !== null ? (input as { title?: unknown }).title : undefined;
+  return typeof title === 'string' ? title : '';
+}
+
+/** Title to proposal id for the create_task proposals already on a correlation id. */
+async function existingTaskProposals(db: Db, correlationId: string): Promise<Map<string, string>> {
+  const rows = await db
+    .select({ id: proposals.id, payload: proposals.payload })
+    .from(proposals)
+    .where(
+      and(eq(proposals.correlationId, correlationId), eq(proposals.actionClass, 'create_task')),
+    );
+  const byTitle = new Map<string, string>();
+  for (const row of rows) {
+    const input = (row.payload as { input?: { title?: unknown } } | null)?.input;
+    if (typeof input?.title === 'string') byTitle.set(input.title, row.id);
+  }
+  return byTitle;
 }
 
 /** Deterministic conversion of a task candidate into a Notion create_task draft (ADR 0009). */
@@ -206,14 +229,22 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   );
   const output = result.output;
 
+  // A retried job (pg-boss redelivers after a crash between the proposals
+  // and the resolved event) must not propose the same task twice, so a
+  // candidate whose title already has a create_task proposal on this
+  // correlation id is reported as that proposal rather than created again.
+  const existing = await existingTaskProposals(deps.db, job.correlationId);
   const taskProposals: string[] = [];
   for (const candidate of output.taskCandidates) {
     const provenance = provenanceFor(events, candidate.recordId);
     if (provenance.length === 0) continue;
-    const outcome = await deps.createProposal(
-      taskDraft(candidate, provenance, deps.config.notion),
-      context,
-    );
+    const draft = taskDraft(candidate, provenance, deps.config.notion);
+    const already = existing.get(taskTitleOf(draft));
+    if (already !== undefined) {
+      taskProposals.push(already);
+      continue;
+    }
+    const outcome = await deps.createProposal(draft, context);
     taskProposals.push(outcome.proposalId);
   }
 
@@ -221,6 +252,8 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   for (const candidate of output.alertCandidates) {
     if (candidate.kind !== 'risk_language_in_client_mail') continue;
     const provenance = provenanceFor(events, candidate.recordId);
+    // Non-negotiable 5: an alert with nothing to point at is not raised.
+    if (provenance.length === 0) continue;
     const raised = await raiseAlert(deps.db, {
       kind: 'risk_language_in_client_mail',
       severity: 'P0',

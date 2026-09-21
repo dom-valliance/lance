@@ -124,21 +124,31 @@ async function runPartition(
     const byCorrelation = new Map<string, string[]>();
     let inserted = 0;
     let duplicates = 0;
+    let firstFailure: Error | null = null;
     for (const record of polled.records) {
-      const observation = await watcher.normalise(record, partition);
-      const outcome = await recordObservation(ledger, watcher, observation);
-      if (outcome.inserted) {
-        inserted += 1;
-        const ids = byCorrelation.get(outcome.correlationId) ?? [];
-        ids.push(outcome.eventId);
-        byCorrelation.set(outcome.correlationId, ids);
-      } else {
-        duplicates += 1;
+      // One bad record must not cost the others their triage: a record that
+      // fails to normalise is skipped, the good ones are recorded and
+      // enqueued, and the cursor stays put so the failure is retried and
+      // counted towards the breaker.
+      try {
+        const observation = await watcher.normalise(record, partition);
+        const outcome = await recordObservation(ledger, watcher, observation);
+        if (outcome.inserted) {
+          inserted += 1;
+          const ids = byCorrelation.get(outcome.correlationId) ?? [];
+          ids.push(outcome.eventId);
+          byCorrelation.set(outcome.correlationId, ids);
+        } else {
+          duplicates += 1;
+        }
+      } catch (error) {
+        firstFailure ??= error instanceof Error ? error : new Error(String(error));
       }
     }
     for (const [correlationId, observationEventIds] of byCorrelation) {
       await deps.enqueueTriage({ watcher: watcher.name, correlationId, observationEventIds });
     }
+    if (firstFailure !== null) throw firstFailure;
     if (polled.nextCursor !== null) {
       await writeCursor(deps.db, watcher.name, partition, polled.nextCursor, now());
     }
@@ -168,7 +178,10 @@ async function runPartition(
  * every partition with its cursor, writes an observed event per new record
  * (idempotent on system:record_id:content_hash), enqueues triage per
  * correlation id, and advances the cursor only after the partition's records
- * are all recorded. Re-running over the same window inserts nothing.
+ * are all recorded. A record that cannot be normalised is skipped for this
+ * run and the cursor is not advanced, so the good records are triaged once
+ * and the bad one is retried. Re-running over the same window inserts
+ * nothing.
  */
 export async function runWatcher(
   deps: WatcherRunnerDeps,
