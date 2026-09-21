@@ -1,0 +1,30 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection(event)",
+  "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/calendarView/delta?$skiptoken=CALPAGE2",
+  "value": [
+    {
+      "id": "AAMkAGI2-evt-0001",
+      "subject": "Northwind pilot review",
+      "start": { "dateTime": "2026-09-22T10:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2026-09-22T11:00:00.0000000", "timeZone": "UTC" },
+      "isCancelled": false,
+      "isAllDay": false,
+      "organizer": {
+        "emailAddress": { "name": "Priya Raman", "address": "priya.raman@northwind.example.com" }
+      },
+      "attendees": [
+        {
+          "type": "required",
+          "status": { "response": "accepted", "time": "2026-09-18T12:00:00Z" },
+          "emailAddress": { "name": "Dom Selvon", "address": "dom@example.com" }
+        }
+      ],
+      "location": { "displayName": "Microsoft Teams Meeting", "locationType": "default" },
+      "onlineMeeting": { "joinUrl": "https://teams.example.com/l/meetup-join/evt-0001" },
+      "webLink": "https://outlook.office365.com/owa/?itemid=AAMkAGI2-evt-0001",
+      "lastModifiedDateTime": "2026-09-18T12:00:04Z",
+      "iCalUId": "040000008200E00074C5B7101A82E00800000000EVT0001",
+      "seriesMasterId": null
+    }
+  ]
+}

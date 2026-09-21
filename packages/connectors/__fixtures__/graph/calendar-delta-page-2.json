@@ -1,0 +1,26 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection(event)",
+  "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/calendarView/delta?$deltatoken=CALDELTA2",
+  "value": [
+    {
+      "id": "AAMkAGI2-evt-0002",
+      "subject": "Focus block: renewal terms",
+      "start": { "dateTime": "2026-09-23T14:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2026-09-23T15:30:00.0000000", "timeZone": "UTC" },
+      "isCancelled": false,
+      "isAllDay": false,
+      "organizer": { "emailAddress": { "name": "Dom Selvon", "address": "dom@example.com" } },
+      "attendees": [],
+      "location": { "displayName": "", "locationType": "default" },
+      "onlineMeeting": null,
+      "webLink": "https://outlook.office365.com/owa/?itemid=AAMkAGI2-evt-0002",
+      "lastModifiedDateTime": "2026-09-20T08:31:00Z",
+      "iCalUId": "040000008200E00074C5B7101A82E00800000000EVT0002",
+      "seriesMasterId": null
+    },
+    {
+      "@removed": { "reason": "deleted" },
+      "id": "AAMkAGI2-evt-0000"
+    }
+  ]
+}

@@ -46,6 +46,26 @@ export interface SlackDeps {
   allowedUserId: string | null;
 }
 
+/**
+ * Where the delegated Graph refresh token lives. Structural, like the
+ * other `*Like` types here: `KeyVaultTokenStore` from `@lance/connectors`
+ * satisfies it without knowing about the api, and a test passes a double.
+ */
+export interface GraphTokenStoreLike {
+  getRefreshToken(): Promise<string | null>;
+  setRefreshToken(token: string): Promise<void>;
+}
+
+/** Everything `/auth/graph/connect` and `/auth/graph/callback` need (spec 4.1). */
+export interface GraphConsentDeps {
+  tenantId: string;
+  clientId: string;
+  clientSecret: string;
+  /** Origin the browser reaches the api on, from `PUBLIC_API_URL`. */
+  publicApiUrl: string;
+  tokenStore: GraphTokenStoreLike;
+}
+
 export interface ApiDeps {
   config: Config;
   control: SystemControlLike;
@@ -56,6 +76,12 @@ export interface ApiDeps {
   slack: SlackDeps;
   /** Shared secret for `POST /ingest/agent-log` (spec 7.1, agent-logs). */
   ingestSecret: string;
+  /**
+   * Absent in a process that was not given the Entra app credentials, the
+   * public api URL and a token store; the consent routes then answer 503
+   * naming what is missing rather than half-running the flow.
+   */
+  graph?: GraphConsentDeps;
   /** Injected in tests. Returns an ISO-8601 instant with an explicit offset. */
   now?: () => string;
 }

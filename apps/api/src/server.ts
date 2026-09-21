@@ -9,6 +9,7 @@ import Fastify, {
 import { requireEntra } from './auth/require-entra.js';
 import type { ApiDeps } from './deps.js';
 import { adminRoutes } from './routes/admin.js';
+import { graphConsentRoutes } from './routes/graph-consent.js';
 import { healthRoutes } from './routes/health.js';
 import { ingestRoutes } from './routes/ingest.js';
 import { appRouter, type AppRouter } from './router.js';
@@ -86,6 +87,7 @@ export const buildServer = (deps: ApiDeps): FastifyInstance => {
   void fastify.register(healthRoutes(deps));
   void fastify.register(ingestRoutes(deps));
   void fastify.register(slackRoutes(deps));
+  void fastify.register(graphConsentRoutes(deps));
   void fastify.register(protectedRoutes(deps));
 
   return fastify;

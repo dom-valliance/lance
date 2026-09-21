@@ -330,6 +330,9 @@ importers:
       pg-boss:
         specifier: ^12.33.0
         version: 12.33.2
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
     devDependencies:
       '@testcontainers/postgresql':
         specifier: 12.1.0

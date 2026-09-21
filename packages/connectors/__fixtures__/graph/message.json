@@ -1,0 +1,30 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('dom')/messages/$entity",
+  "id": "AAMkAGI2-msg-0001",
+  "conversationId": "AAQkAGI2-conv-0001",
+  "conversationIndex": "AQHbAAAA",
+  "subject": "Renewal paperwork for the Northwind pilot",
+  "importance": "normal",
+  "hasAttachments": false,
+  "isDraft": false,
+  "isRead": false,
+  "from": {
+    "emailAddress": { "name": "Priya Raman", "address": "priya.raman@northwind.example.com" }
+  },
+  "sender": {
+    "emailAddress": { "name": "Priya Raman", "address": "priya.raman@northwind.example.com" }
+  },
+  "toRecipients": [{ "emailAddress": { "name": "Dom Selvon", "address": "dom@example.com" } }],
+  "ccRecipients": [],
+  "receivedDateTime": "2026-09-21T08:12:44Z",
+  "sentDateTime": "2026-09-21T08:12:39Z",
+  "categories": ["Deals"],
+  "parentFolderId": "AAMkAGI2-inbox",
+  "bodyPreview": "Sending the renewal paperwork across for signature this week.",
+  "body": {
+    "contentType": "text",
+    "content": "Sending the renewal paperwork across for signature this week. Shout if the commercial terms need another pass.\n\nPriya"
+  },
+  "internetMessageId": "<0001.renewal@northwind.example.com>",
+  "webLink": "https://outlook.office365.com/owa/?ItemID=AAMkAGI2-msg-0001"
+}

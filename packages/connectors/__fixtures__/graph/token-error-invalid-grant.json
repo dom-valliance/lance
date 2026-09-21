@@ -1,0 +1,8 @@
+{
+  "error": "invalid_grant",
+  "error_description": "AADSTS700082: The refresh token has expired due to inactivity.",
+  "error_codes": [700082],
+  "timestamp": "2026-09-21 09:00:00Z",
+  "trace_id": "00000000-0000-0000-0000-00000000aaaa",
+  "correlation_id": "00000000-0000-0000-0000-00000000bbbb"
+}

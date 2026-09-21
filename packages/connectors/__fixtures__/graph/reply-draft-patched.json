@@ -1,0 +1,9 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('dom')/messages/$entity",
+  "id": "AAMkAGI2-draft-0202",
+  "isDraft": true,
+  "conversationId": "AAQkAGI2-conv-0001",
+  "subject": "RE: Renewal paperwork for the Northwind pilot",
+  "body": { "contentType": "text", "content": "Happy with these terms. Signing this afternoon." },
+  "webLink": "https://outlook.office365.com/owa/?ItemID=AAMkAGI2-draft-0202"
+}

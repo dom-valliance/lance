@@ -1,0 +1,6 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('dom')/messages/$entity",
+  "id": "AAMkAGI2-msg-0002-moved",
+  "parentFolderId": "AAMkAGI2-ai-filed",
+  "webLink": "https://outlook.office365.com/owa/?ItemID=AAMkAGI2-msg-0002-moved"
+}

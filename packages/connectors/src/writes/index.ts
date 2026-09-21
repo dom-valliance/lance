@@ -5,6 +5,8 @@
  */
 export const WRITES_ENTRY = 'writes';
 
+export { graphWrites } from '../graph/writes.js';
+export type GraphWrites = typeof import('../graph/writes.js').graphWrites;
 export { notionWrites } from '../notion/writes.js';
 export type NotionWrites = typeof import('../notion/writes.js').notionWrites;
 export { slackWrites } from '../slack/writes.js';

@@ -1,10 +1,11 @@
+import { KeyVaultTokenStore } from '@lance/connectors/graph';
 import { createDb, type Db } from '@lance/db';
 import { LedgerReader, LedgerWriter, SystemControl } from '@lance/ledger';
 import { getConfig, readSecret, type Config } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { pathToFileURL } from 'node:url';
 import { createEntraVerifier } from './auth/entra.js';
-import type { ApiDeps, SlackDeps, TokenVerifier } from './deps.js';
+import type { ApiDeps, GraphConsentDeps, SlackDeps, TokenVerifier } from './deps.js';
 import { buildServer } from './server.js';
 import { createDbStatusSource } from './status.js';
 
@@ -23,6 +24,8 @@ export interface RuntimeOptions {
   auth: TokenVerifier;
   slack: SlackDeps;
   ingestSecret: string;
+  /** Omitted by a process that does not run the Graph consent flow. */
+  graph?: GraphConsentDeps;
 }
 
 /** Assembles the real `SystemControl`, `LedgerReader`, `LedgerWriter` and status source over `db`. */
@@ -40,6 +43,7 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
     auth: options.auth,
     slack: options.slack,
     ingestSecret: options.ingestSecret,
+    ...(options.graph === undefined ? {} : { graph: options.graph }),
   };
 };
 
@@ -77,14 +81,24 @@ export const main = async (): Promise<void> => {
   });
   const db = createDb();
 
+  const tenantId = requiredEnv('ENTRA_TENANT_ID');
+  const clientId = requiredEnv('ENTRA_CLIENT_ID');
+
   const deps = createApiDeps({
     config,
     db,
     auth: createEntraVerifier({
-      tenantId: requiredEnv('ENTRA_TENANT_ID'),
-      clientId: requiredEnv('ENTRA_CLIENT_ID'),
+      tenantId,
+      clientId,
       allowedUpn: requiredEnv('ALLOWED_UPN'),
     }),
+    graph: {
+      tenantId,
+      clientId,
+      clientSecret: readSecret('ENTRA_CLIENT_SECRET'),
+      publicApiUrl: requiredEnv('PUBLIC_API_URL'),
+      tokenStore: KeyVaultTokenStore.fromEnv(),
+    },
     slack: {
       signingSecret: readSecret('SLACK_SIGNING_SECRET'),
       allowedUserId: process.env['SLACK_ALLOWED_USER_ID'] ?? null,

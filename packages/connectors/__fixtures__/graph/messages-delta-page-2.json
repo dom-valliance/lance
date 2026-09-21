@@ -1,0 +1,31 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection(message)",
+  "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/mailFolders/AAMkAGI2-inbox/messages/delta?$deltatoken=DELTA2",
+  "value": [
+    {
+      "id": "AAMkAGI2-msg-0003",
+      "conversationId": "AAQkAGI2-conv-0001",
+      "subject": "RE: Renewal paperwork for the Northwind pilot",
+      "from": { "emailAddress": { "name": "Dom Selvon", "address": "dom@example.com" } },
+      "toRecipients": [
+        {
+          "emailAddress": { "name": "Priya Raman", "address": "priya.raman@northwind.example.com" }
+        }
+      ],
+      "ccRecipients": [],
+      "receivedDateTime": "2026-09-21T09:04:10Z",
+      "sentDateTime": "2026-09-21T09:04:08Z",
+      "isRead": true,
+      "categories": [],
+      "parentFolderId": "AAMkAGI2-inbox",
+      "bodyPreview": "Thanks Priya, reviewing today.",
+      "body": { "contentType": "text", "content": "Thanks Priya, reviewing today." },
+      "internetMessageId": "<0003.renewal@example.com>",
+      "webLink": "https://outlook.office365.com/owa/?ItemID=AAMkAGI2-msg-0003"
+    },
+    {
+      "@removed": { "reason": "deleted" },
+      "id": "AAMkAGI2-msg-0000"
+    }
+  ]
+}
