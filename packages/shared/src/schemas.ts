@@ -167,7 +167,7 @@ export const ProposalSchema = z.object({
   // Spec 5.1 leaves target_system untyped; the policy `system` dimension is
   // the obvious choice, since a proposal always targets one of those systems.
   targetSystem: SystemSchema,
-  targetRecordId: z.string().min(1),
+  targetRecordId: z.string().min(1).nullable(),
   reversibility: ReversibilitySchema,
   payload: JsonRecordSchema,
   preview: z.string().min(1),

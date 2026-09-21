@@ -330,6 +330,31 @@ resource containerApps 'Microsoft.App/containerApps@2025-01-01' = [
                     }
                   ]
                 : [],
+              app.repository == 'lance-api'
+                ? [
+                    {
+                      // Redirect base for the delegated Graph consent flow (spec 4.1).
+                      name: 'PUBLIC_API_URL'
+                      value: 'https://${app.name}.${managedEnvironment.properties.defaultDomain}'
+                    }
+                  ]
+                : [],
+              app.repository == 'lance-web'
+                ? [
+                    {
+                      // Where the web app's server side reaches the api: tRPC calls
+                      // and the /api/events live feed proxy.
+                      name: 'NEXT_PUBLIC_API_URL'
+                      value: 'https://ca-lance-api-${environmentName}.${managedEnvironment.properties.defaultDomain}'
+                    }
+                  ]
+                : [
+                    {
+                      // The api writes and the worker rotates graph-refresh-token here (ADR 0008 scope).
+                      name: 'KEY_VAULT_URL'
+                      value: keyVaultUri
+                    }
+                  ],
               useBootstrapImage
                 ? []
                 : map(app.bindings, binding => {

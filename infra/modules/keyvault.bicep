@@ -38,6 +38,12 @@ param uniqueSuffix string
 @description('Principal ids granted Key Vault Secrets User. The four managed identities.')
 param secretsUserPrincipalIds array
 
+@description('Principal ids allowed to write the graph-refresh-token secret only: the api (first consent) and the worker (rotation on every refresh). Scoped to that one secret.')
+param graphTokenWriterPrincipalIds array = []
+
+@description('Whether the graph-refresh-token secret exists yet. Role assignments can only be scoped to an existing secret, so this is false until the bootstrap phase has set the placeholder value.')
+param graphTokenSecretExists bool = false
+
 @description('Object id of the person who sets secret values from the CLI (Dom). Granted Key Vault Secrets Officer on the vault; RBAC vaults give the deployer no data-plane access by default.')
 param vaultWriterObjectId string
 
@@ -76,6 +82,28 @@ resource secretsUserAssignments 'Microsoft.Authorization/roleAssignments@2022-04
       roleDefinitionId: subscriptionResourceId(
         'Microsoft.Authorization/roleDefinitions',
         keyVaultSecretsUserRoleId
+      )
+      principalId: principalId
+      principalType: 'ServicePrincipal'
+    }
+  }
+]
+
+// The one secret Lance itself writes (spec 4.1, 4.2). Write access is scoped
+// to this secret, not the vault, so neither app can read or change the others.
+resource graphTokenSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = if (graphTokenSecretExists) {
+  parent: keyVault
+  name: 'graph-refresh-token'
+}
+
+resource graphTokenWriterAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
+  for principalId in graphTokenWriterPrincipalIds: if (graphTokenSecretExists) {
+    scope: graphTokenSecret
+    name: guid(keyVault.id, 'graph-refresh-token', principalId, keyVaultSecretsOfficerRoleId)
+    properties: {
+      roleDefinitionId: subscriptionResourceId(
+        'Microsoft.Authorization/roleDefinitions',
+        keyVaultSecretsOfficerRoleId
       )
       principalId: principalId
       principalType: 'ServicePrincipal'

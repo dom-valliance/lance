@@ -29,3 +29,14 @@ describe('isUlid', () => {
     expect(isUlid('01arz3ndektsv4rrffq69g5fav')).toBe(false);
   });
 });
+
+describe('stableUlid', () => {
+  it('returns the same valid ULID for the same seed and different ones for different seeds', async () => {
+    const { stableUlid, isUlid } = await import('./ids.js');
+    const a = stableUlid('graph:conversation-1');
+    expect(isUlid(a)).toBe(true);
+    expect(stableUlid('graph:conversation-1')).toBe(a);
+    expect(stableUlid('graph:conversation-2')).not.toBe(a);
+    expect('01234567').toContain(a[0]);
+  });
+});

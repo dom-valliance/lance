@@ -1,0 +1,32 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('dom')/mailFolders",
+  "value": [
+    {
+      "id": "AAMkAGI2-inbox",
+      "displayName": "Inbox",
+      "parentFolderId": "AAMkAGI2-root",
+      "childFolderCount": 2,
+      "unreadItemCount": 7,
+      "totalItemCount": 412,
+      "isHidden": false
+    },
+    {
+      "id": "AAMkAGI2-sent",
+      "displayName": "Sent Items",
+      "parentFolderId": "AAMkAGI2-root",
+      "childFolderCount": 0,
+      "unreadItemCount": 0,
+      "totalItemCount": 1290,
+      "isHidden": false
+    },
+    {
+      "id": "AAMkAGI2-ai-filed",
+      "displayName": "AI-Filed",
+      "parentFolderId": "AAMkAGI2-inbox",
+      "childFolderCount": 0,
+      "unreadItemCount": 0,
+      "totalItemCount": 38,
+      "isHidden": false
+    }
+  ]
+}

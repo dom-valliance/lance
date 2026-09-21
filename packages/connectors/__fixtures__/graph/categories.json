@@ -1,0 +1,16 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('dom')/outlook/masterCategories",
+  "value": [
+    { "id": "5b1f0e7a-0001-4000-8000-000000000001", "displayName": "Deals", "color": "preset0" },
+    { "id": "5b1f0e7a-0001-4000-8000-000000000002", "displayName": "Internal", "color": "preset1" },
+    { "id": "5b1f0e7a-0001-4000-8000-000000000003", "displayName": "Action", "color": "preset2" },
+    { "id": "5b1f0e7a-0001-4000-8000-000000000004", "displayName": "Calendar", "color": "preset3" },
+    { "id": "5b1f0e7a-0001-4000-8000-000000000005", "displayName": "Alerts", "color": "preset4" },
+    {
+      "id": "5b1f0e7a-0001-4000-8000-000000000006",
+      "displayName": "Newsletters",
+      "color": "preset5"
+    },
+    { "id": "5b1f0e7a-0001-4000-8000-000000000007", "displayName": "Priority", "color": "preset6" }
+  ]
+}

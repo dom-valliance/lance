@@ -4,11 +4,14 @@ import Fastify, {
   type FastifyError,
   type FastifyInstance,
   type FastifyPluginAsync,
+  type FastifyRequest,
   type FastifyServerOptions,
 } from 'fastify';
 import { requireEntra } from './auth/require-entra.js';
 import type { ApiDeps } from './deps.js';
 import { adminRoutes } from './routes/admin.js';
+import { eventsRoutes } from './routes/events.js';
+import { graphConsentRoutes } from './routes/graph-consent.js';
 import { healthRoutes } from './routes/health.js';
 import { ingestRoutes } from './routes/ingest.js';
 import { appRouter, type AppRouter } from './router.js';
@@ -44,11 +47,31 @@ export const LOGGER_REDACT_PATHS = [
 
 type LoggerOptions = NonNullable<FastifyServerOptions['logger']>;
 
+const CENSOR = '[redacted]';
+
+/**
+ * No route reads a token from the query string, but a misconfigured
+ * client may still send one there. `redact` works on object paths and a
+ * request's url is one string, so an `access_token` parameter is scrubbed
+ * out of it here before the serialiser hands the line to a transport.
+ */
+export const scrubAccessToken = (url: string): string =>
+  url.replace(/([?&]access_token=)[^&]*/gi, `$1${CENSOR}`);
+
 export const loggerOptions = (config: Config): LoggerOptions => {
   if (config.nodeEnv === 'test') return false;
   return {
     level: config.nodeEnv === 'production' ? 'info' : 'debug',
-    redact: { paths: LOGGER_REDACT_PATHS, censor: '[redacted]' },
+    redact: { paths: LOGGER_REDACT_PATHS, censor: CENSOR },
+    serializers: {
+      req: (request: FastifyRequest) => ({
+        method: request.method,
+        url: scrubAccessToken(request.url),
+        host: request.headers.host ?? '',
+        remoteAddress: request.socket.remoteAddress ?? '',
+        remotePort: request.socket.remotePort ?? 0,
+      }),
+    },
   };
 };
 
@@ -86,6 +109,8 @@ export const buildServer = (deps: ApiDeps): FastifyInstance => {
   void fastify.register(healthRoutes(deps));
   void fastify.register(ingestRoutes(deps));
   void fastify.register(slackRoutes(deps));
+  void fastify.register(graphConsentRoutes(deps));
+  void fastify.register(eventsRoutes(deps));
   void fastify.register(protectedRoutes(deps));
 
   return fastify;

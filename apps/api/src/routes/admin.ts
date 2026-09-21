@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { DOM_ACTOR, type ApiDeps } from '../deps.js';
+import { DOM_ACTOR, resumeAndRequeue, type ApiDeps } from '../deps.js';
 import { BadRequestError } from '../errors.js';
 
 /**
@@ -25,7 +25,7 @@ export const adminRoutes =
       return deps.control.pause({ reason: parsed.data.reason, actor: DOM_ACTOR });
     });
 
-    fastify.post('/admin/resume', async () => deps.control.resume({ actor: DOM_ACTOR }));
+    fastify.post('/admin/resume', async () => resumeAndRequeue(deps));
 
     fastify.get('/admin/status', async () => deps.status.snapshot());
   };

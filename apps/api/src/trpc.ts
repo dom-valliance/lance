@@ -22,5 +22,7 @@ export const createContextFactory =
 const t = initTRPC.context<ApiContext>().create();
 
 export const router = t.router;
+/** Builds a direct caller over a context, for tests and server-side callers. */
+export const createCallerFactory = t.createCallerFactory;
 /** Guarded at the HTTP layer by `requireEntra`; there is no anonymous tRPC route. */
 export const procedure = t.procedure;

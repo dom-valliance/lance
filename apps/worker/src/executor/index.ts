@@ -9,9 +9,16 @@ import { QUEUES, type ExecuteJob } from '../scheduler/queues.js';
 export const EXECUTOR = 'executor';
 export const EXECUTOR_ACTOR = 'agent:executor@0.1.0';
 
+export interface WriteOutcome {
+  targetRecordId: string | null;
+  url: string | null;
+  /** For compensatable actions: what an undo would do (spec 7.5 step 5). */
+  compensation: Record<string, unknown> | null;
+}
+
 export interface ConnectorWrite {
-  /** The single connector write for one proposal (spec 7.5 step 3). Phase 1 supplies it. */
-  perform(proposalId: string): Promise<{ targetRecordId: string | null }>;
+  /** The single connector write for one proposal (spec 7.5 step 3). */
+  perform(proposalId: string): Promise<WriteOutcome>;
 }
 
 export interface ExecutorDeps {
@@ -28,15 +35,16 @@ export type ExecuteOutcome =
 
 /**
  * Executes one approved proposal. Deterministic code, no model in the loop
- * (CLAUDE.md non-negotiable 2). Phase 0 delivers the gate and the ledger
- * trail; policy re-evaluation and the target hash check arrive in Phase 1
- * alongside the first connector write.
+ * (CLAUDE.md non-negotiable 2). The gate is asked twice, before and after
+ * the claim, and refuses while paused or in any mode other than live, so a
+ * proposal approved in dry run is held rather than written. Policy is
+ * re-evaluated and the target re-checked inside `write.perform`.
  */
 export async function executeProposal(
   deps: ExecutorDeps,
   job: ExecuteJob,
 ): Promise<ExecuteOutcome> {
-  const verdict = await deps.gate.check();
+  const verdict = await deps.gate.checkWrite();
   const rows = await deps.db
     .select()
     .from(proposals)
@@ -83,7 +91,7 @@ export async function executeProposal(
 
   // The gate is checked again after the claim so a pause that landed in the
   // meantime stops the write and the proposal goes back to held.
-  const recheck = await deps.gate.check();
+  const recheck = await deps.gate.checkWrite();
   if (!recheck.runnable) {
     await deps.db
       .update(proposals)
@@ -106,35 +114,64 @@ export async function executeProposal(
       sourceSystem: proposal.targetSystem,
       sourceRecordId: result.targetRecordId,
       correlationId: proposal.correlationId,
-      payload: { proposalId: proposal.id, actionClass: proposal.actionClass },
+      payload: { proposalId: proposal.id, actionClass: proposal.actionClass, url: result.url },
     });
     await deps.db
       .update(proposals)
-      .set({ status: 'executed', executionEventId: event.id, updatedAt: new Date(nowIso()) })
+      .set({
+        status: 'executed',
+        executionEventId: event.id,
+        compensationPayload: result.compensation,
+        updatedAt: new Date(nowIso()),
+      })
       .where(eq(proposals.id, proposal.id));
     return { status: 'executed', eventId: event.id };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const reason =
+      error instanceof Error && 'reason' in error && typeof error.reason === 'string'
+        ? error.reason
+        : null;
+    // A changed target is a hold, not a failure (spec 7.5 step 2): the card is updated and nothing is written.
+    const held = reason === 'target_changed' || reason === 'forbidden_at_execution';
     const event = await ledger.append({
       ts: nowIso(),
       actor: EXECUTOR_ACTOR,
       kind: 'failed',
       sourceSystem: proposal.targetSystem,
       correlationId: proposal.correlationId,
-      payload: { proposalId: proposal.id, actionClass: proposal.actionClass, error: message },
+      payload: {
+        proposalId: proposal.id,
+        actionClass: proposal.actionClass,
+        error: message,
+        reason,
+        held,
+      },
     });
     await deps.db
       .update(proposals)
-      .set({ status: 'failed', executionEventId: event.id, updatedAt: new Date(nowIso()) })
+      .set({
+        status: held ? 'held' : 'failed',
+        decisionNote: held ? message : undefined,
+        executionEventId: held ? undefined : event.id,
+        updatedAt: new Date(nowIso()),
+      })
       .where(eq(proposals.id, proposal.id));
-    return { status: 'failed', eventId: event.id, error: message };
+    return held
+      ? { status: 'held', reason: message }
+      : { status: 'failed', eventId: event.id, error: message };
   }
 }
 
-export function registerExecutor(boss: PgBoss, deps: ExecutorDeps): Promise<string> {
+export function registerExecutor(
+  boss: PgBoss,
+  deps: ExecutorDeps,
+  afterEach?: (proposalId: string, outcome: ExecuteOutcome) => Promise<void>,
+): Promise<string> {
   return boss.work<ExecuteJob>(QUEUES.execute, async (jobs) => {
     for (const job of jobs) {
-      await executeProposal(deps, job.data);
+      const outcome = await executeProposal(deps, job.data);
+      await afterEach?.(job.data.proposalId, outcome);
     }
   });
 }

@@ -1,0 +1,181 @@
+{
+  "object": "list",
+  "results": [
+    {
+      "object": "page",
+      "id": "aa11bb22-cc33-4dd4-8ee5-ff6600112233",
+      "url": "https://www.notion.so/Draft-the-quarterly-plan-aa11bb22cc334dd48ee5ff6600112233",
+      "created_time": "2026-09-01T09:15:00.000Z",
+      "last_edited_time": "2026-09-18T16:42:00.000Z",
+      "in_trash": false,
+      "parent": {
+        "type": "data_source_id",
+        "data_source_id": "20257534-6e48-81fe-b4b5-000b69ecace6"
+      },
+      "properties": {
+        "Title": {
+          "id": "title",
+          "type": "title",
+          "title": [
+            {
+              "type": "text",
+              "text": {
+                "content": "Draft the quarterly plan (Robin Ash)",
+                "link": null
+              },
+              "plain_text": "Draft the quarterly plan (Robin Ash)",
+              "href": null
+            }
+          ]
+        },
+        "Status": {
+          "id": "Z%3ClH",
+          "type": "status",
+          "status": {
+            "id": "4c1f0a7e-1111-4222-8333-444455556666",
+            "name": "In Progress",
+            "color": "blue"
+          }
+        },
+        "Assignee": {
+          "id": "%7BLUX",
+          "type": "people",
+          "people": [
+            {
+              "object": "user",
+              "id": "1fdd872b-594c-8146-b22f-00028f1f5a41",
+              "name": "Sample Owner",
+              "avatar_url": null,
+              "type": "person",
+              "person": {
+                "email": "owner@example.test"
+              }
+            }
+          ]
+        },
+        "Contributors": {
+          "id": "Ktq%3A",
+          "type": "people",
+          "people": [
+            {
+              "object": "user",
+              "id": "3b7c1d90-2f44-4a11-9c02-7d5e8a1b6c40",
+              "name": "Robin Ash",
+              "avatar_url": null,
+              "type": "person",
+              "person": {
+                "email": "robin.ash@example.test"
+              }
+            }
+          ]
+        },
+        "Due": {
+          "id": "M%3BBw",
+          "type": "date",
+          "date": {
+            "start": "2026-10-03",
+            "end": null,
+            "time_zone": null
+          }
+        },
+        "Priority": {
+          "id": "Yc%3FJ",
+          "type": "select",
+          "select": {
+            "id": "b2f8",
+            "name": "High",
+            "color": "orange"
+          }
+        },
+        "Project": {
+          "id": "hgMz",
+          "type": "relation",
+          "relation": [
+            {
+              "id": "5c9e2a71-8d3b-4c6f-9a10-2b3c4d5e6f70"
+            }
+          ],
+          "has_more": false
+        },
+        "Type": {
+          "id": "pQr1",
+          "type": "relation",
+          "relation": [
+            {
+              "id": "6d0f3b82-9e4c-4d70-8b21-3c4d5e6f7081"
+            },
+            {
+              "id": "7e1a4c93-af5d-4e81-9c32-4d5e6f708192"
+            }
+          ],
+          "has_more": false
+        },
+        "Sub-type": {
+          "id": "QyRn",
+          "type": "multi_select",
+          "multi_select": [
+            {
+              "id": "s1",
+              "name": "Internal",
+              "color": "gray"
+            },
+            {
+              "id": "s2",
+              "name": "Deliverables",
+              "color": "green"
+            }
+          ]
+        },
+        "Description": {
+          "id": "HbZT",
+          "type": "rich_text",
+          "rich_text": [
+            {
+              "type": "text",
+              "text": {
+                "content": "Collect the numbers, then write the one-pager.",
+                "link": null
+              },
+              "plain_text": "Collect the numbers, then write the one-pager.",
+              "href": null
+            }
+          ]
+        },
+        "Notes": {
+          "id": "Nt5k",
+          "type": "rich_text",
+          "rich_text": [
+            {
+              "type": "text",
+              "text": {
+                "content": "Raised in the Monday review.",
+                "link": null
+              },
+              "plain_text": "Raised in the Monday review.",
+              "href": null
+            }
+          ]
+        },
+        "Hubspot Task ID": {
+          "id": "Hb01",
+          "type": "rich_text",
+          "rich_text": []
+        },
+        "Completed on": {
+          "id": "Cm02",
+          "type": "date",
+          "date": null
+        },
+        "Delegate to Ian": {
+          "id": "Dg03",
+          "type": "checkbox",
+          "checkbox": false
+        }
+      }
+    }
+  ],
+  "next_cursor": "cursor-page-2",
+  "has_more": true,
+  "type": "page_or_data_source",
+  "page_or_data_source": {}
+}

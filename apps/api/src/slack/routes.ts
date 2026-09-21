@@ -1,8 +1,9 @@
 import { nowIso } from '@lance/shared';
 import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { DOM_ACTOR, type ApiDeps } from '../deps.js';
+import { DOM_ACTOR, type ApiDeps, resumeAndRequeue } from '../deps.js';
 import { renderStatus } from '../status.js';
+import { handleInteraction } from './interactions.js';
 import { verifySlackSignature } from './verify.js';
 
 /**
@@ -108,7 +109,7 @@ const handlePause = async (
 };
 
 const handleResume = async (deps: ApiDeps, displayName: string): Promise<SlackReply> => {
-  const result = await deps.control.resume({ actor: DOM_ACTOR });
+  const result = await resumeAndRequeue(deps);
 
   const opening = result.changed
     ? `${displayName} has resumed.`
@@ -226,17 +227,21 @@ export const slackRoutes =
 
     fastify.post('/slack/interactions', async (request, reply) => {
       const payloadField = formFields(rawBody(request))['payload'] ?? '{}';
-      const parsed = InteractionSchema.safeParse(JSON.parse(payloadField) as unknown);
+      const payload: unknown = JSON.parse(payloadField);
+      const envelope = InteractionSchema.safeParse(payload);
 
       request.log.info(
         {
-          interactionType: parsed.success ? parsed.data.type : 'unrecognised',
-          actionIds: parsed.success ? (parsed.data.actions?.map((a) => a.action_id) ?? []) : [],
-          callbackId: parsed.success ? (parsed.data.view?.callback_id ?? null) : null,
+          interactionType: envelope.success ? envelope.data.type : 'unrecognised',
+          actionIds: envelope.success ? (envelope.data.actions?.map((a) => a.action_id) ?? []) : [],
+          callbackId: envelope.success ? (envelope.data.view?.callback_id ?? null) : null,
         },
-        'Acknowledged a Slack interaction; handlers arrive in Phase 1',
+        'Handling a Slack interaction',
       );
 
-      return reply.send({ ok: true });
+      const outcome = await handleInteraction(deps, payload);
+      // Slack reads an empty 200 as "accepted, nothing to show"; the card
+      // itself has already been redrawn through chat.update.
+      return outcome.kind === 'empty' ? reply.code(200).send('') : reply.send(outcome.body);
     });
   };

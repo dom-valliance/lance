@@ -4,12 +4,26 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.127.0",
+    "@lance/db": "workspace:*",
+    "@lance/ledger": "workspace:*",
+    "@lance/shared": "workspace:*",
+    "@lance/telemetry": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "12.1.0",
+    "@types/node": "26.6.2"
   }
 }

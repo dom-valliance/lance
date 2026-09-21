@@ -11,6 +11,8 @@ allowBuilds:
   cpu-features: false
   protobufjs: false
   ssh2: false
+  # msw prints an install notice only; nothing native.
+  msw: false
 overrides:
   # vite lists tsx as an optional peer; without a pin pnpm auto-installs the
   # newest release, which lands a second tsx in the lockfile.

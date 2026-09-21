@@ -1,0 +1,10 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('dom')/events/$entity",
+  "id": "AAMkAGI2-evt-0303",
+  "subject": "Hold: draft the Northwind renewal note",
+  "start": { "dateTime": "2026-09-24T09:00:00.0000000", "timeZone": "Europe/London" },
+  "end": { "dateTime": "2026-09-24T10:00:00.0000000", "timeZone": "Europe/London" },
+  "showAs": "busy",
+  "isReminderOn": false,
+  "webLink": "https://outlook.office365.com/owa/?itemid=AAMkAGI2-evt-0303"
+}

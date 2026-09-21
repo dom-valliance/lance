@@ -103,6 +103,14 @@ describe('POST /admin/resume', () => {
     });
     expect(harness.control.resumeCalls).toEqual([{ actor: 'user:dom' }]);
   });
+
+  it('re-queues every proposal the resume released', async () => {
+    harness.control.state = { ...harness.control.state, paused: true };
+
+    await server.inject({ method: 'POST', url: '/admin/resume', headers: BEARER });
+
+    expect(harness.enqueued).toEqual(['01K5S9V6QW3SWCCPVB0N0E301A']);
+  });
 });
 
 describe('GET /admin/status', () => {

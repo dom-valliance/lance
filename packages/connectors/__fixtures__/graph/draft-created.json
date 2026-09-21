@@ -1,0 +1,7 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('dom')/messages/$entity",
+  "id": "AAMkAGI2-draft-0101",
+  "isDraft": true,
+  "subject": "Renewal terms, as discussed",
+  "webLink": "https://outlook.office365.com/owa/?ItemID=AAMkAGI2-draft-0101"
+}

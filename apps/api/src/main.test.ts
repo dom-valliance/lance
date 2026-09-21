@@ -1,11 +1,13 @@
 import { startPostgresContainer } from '@lance/db/testing';
-import { agentRuns, createDb, cursors, runMigrations, seed, type Db } from '@lance/db';
+import { agentRuns, createDb, cursors, proposals, runMigrations, seed, type Db } from '@lance/db';
 import { LedgerReader } from '@lance/ledger';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEntraVerifier, entraIssuer } from './auth/entra.js';
+import { createExecuteQueue, type ExecuteQueue } from './executeQueue.js';
 import { createApiDeps } from './main.js';
 import { buildServer } from './server.js';
 import { slackSignature } from './slack/verify.js';
@@ -34,6 +36,10 @@ let db: Db;
 let server: FastifyInstance;
 let keys: TestJwks;
 let bearer: string;
+let executeQueue: ExecuteQueue;
+
+const PROPOSAL_ID = '01K5S9V6QW3SWCCPVB0N0E301A';
+const CORRELATION_ID = '01K5S9V6QW3SWCCPVB0N0E301B';
 
 const slashCommand = async (
   text: string,
@@ -80,10 +86,12 @@ beforeAll(async () => {
   keys = await createTestJwks(entraIssuer(TENANT_ID), CLIENT_ID);
   bearer = await keys.sign({ preferred_username: TEST_UPN });
 
+  executeQueue = createExecuteQueue(db);
   server = buildServer(
     createApiDeps({
       config: testConfig(),
       db,
+      executeQueue,
       auth: createEntraVerifier({
         tenantId: TENANT_ID,
         clientId: CLIENT_ID,
@@ -99,6 +107,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await server?.close();
+  await executeQueue?.stop();
   await db?.$client.end();
   await container?.stop();
 });
@@ -158,6 +167,50 @@ describe('the api over a real database', () => {
       'resume',
     ]);
     expect(events.every((event) => event.actor === 'user:dom')).toBe(true);
+  });
+
+  it('approves a pending proposal through tRPC and queues it for execution', async () => {
+    await db.insert(proposals).values({
+      id: PROPOSAL_ID,
+      correlationId: CORRELATION_ID,
+      actionClass: 'draft_email',
+      counterpartyClass: 'client',
+      targetSystem: 'graph',
+      targetRecordId: 'AAMk1',
+      reversibility: 'compensatable',
+      payload: { subject: 'Re: the pilot', bodyText: 'Tuesday suits.' },
+      preview: 'Reply to "the pilot"',
+      rationale: 'They asked for a date.',
+      provenance: [
+        { system: 'graph', recordId: 'AAMk1', hash: 'h1', observedAt: '2026-09-21T09:00:00.000Z' },
+      ],
+      policyDecision: 'propose',
+      status: 'pending',
+      expiresAt: new Date(Date.now() + 3600 * 1000),
+    });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/trpc/proposals.decide',
+      headers: { authorization: `Bearer ${bearer}` },
+      payload: { proposalId: PROPOSAL_ID, action: 'approve' },
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const decided = await new LedgerReader(db).query({ kind: 'decided' });
+    const forProposal = decided.filter(
+      (event) => (event.payload as { proposalId?: string }).proposalId === PROPOSAL_ID,
+    );
+    expect(forProposal).toHaveLength(1);
+    expect(forProposal[0]?.actor).toBe('user:dom');
+    expect((forProposal[0]?.payload as { to: string }).to).toBe('approved');
+
+    const queued = await db.execute<{ name: string; data: { proposalId: string } }>(
+      sql`select name, data from pgboss.job where name = 'execute'`,
+    );
+    expect(queued.rows).toHaveLength(1);
+    expect(queued.rows[0]?.data.proposalId).toBe(PROPOSAL_ID);
   });
 
   it('appends an observed agent log through the ingest webhook', async () => {

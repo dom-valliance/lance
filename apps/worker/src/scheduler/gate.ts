@@ -18,4 +18,24 @@ export class PauseGate {
     }
     return { runnable: true };
   }
+
+  /**
+   * The check before an external write (spec 6.3, non-negotiable 7): a
+   * pause stops it, and so does any mode other than live. Watchers and
+   * triage keep running in dry run so the ledger fills; only the executor
+   * asks this question.
+   */
+  async checkWrite(): Promise<GateVerdict> {
+    const state = await this.control.read();
+    if (state.paused) {
+      return { runnable: false, reason: state.pausedReason ?? 'paused' };
+    }
+    if (state.mode !== 'live') {
+      return {
+        runnable: false,
+        reason: `${state.mode} mode: external writes are held until the mode is live`,
+      };
+    }
+    return { runnable: true };
+  }
 }
