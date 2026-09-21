@@ -32,7 +32,7 @@ docker/                    Local Postgres image for docker-compose. Not deployed
 
 **containerapps** The managed environment bound to the Log Analytics workspace, then `ca-lance-web-<env>`, `ca-lance-api-<env>` and `ca-lance-worker-<env>`. Each app carries its own identity, pulls with that identity, and reads its secrets as Key Vault references resolved with the same identity. Web is external on 3000 and api on 3001; worker has no ingress. Worker holds at one replica, web and api scale 1 to 2 on HTTP concurrency. While `useBootstrapImage` is true the apps run the public quickstart image on port 80 with no registry and no secret references, so the environment stands up before the first image is pushed.
 
-**migrate-job** `caj-lance-migrate-<env>`, manual trigger only, worker image, `pnpm --filter @lance/db migrate`. Its identity is the one granted `lance_migrator`, so no running app can migrate.
+**migrate-job** `caj-lance-migrate-<env>`, manual trigger only, worker image, runs the migrations and the idempotent seed with tsx. Its identity is the one granted `lance_migrator`, so no running app can migrate.
 
 ## Read-only checks
 
