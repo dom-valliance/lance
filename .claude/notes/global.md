@@ -62,3 +62,10 @@
 **Correction**: Found from the failed job log and Dom's psql error.
 **Rule**: Before the first migration against a managed Postgres, list every statement that touches server internals (LOAD, extensions, roles, ownership, search_path) and check each against the provider's documented restrictions; set preload parameters in the template and note that static parameters need a restart. Runbook steps that use provider admin functions say which database to connect to.
 **Applies to**: infra/, packages/db/drizzle/
+
+### [2026-09-21] First deployment day, consolidated
+
+**Context**: Seven error reports from Dom during the first dev deployment, each recorded above: git-less `prepare` script, missing `.dockerignore`, unbuilt web image, hand-made role assignment colliding with the template, missing `AUTH_URL` and `AUTH_SECRET`, Postgres firewall blocking psql, and Azure rejecting `LOAD 'age'` with the `pgaadauth_*` functions living only in the `postgres` database.
+**Correction**: All seven were error pastes, not instructions; every one was a gap between what passed locally and what the managed platform does.
+**Rule**: Treat the first deployment of any environment as a test run to be driven end to end by Claude before Dom touches it: build every image, deploy, restart for static parameters, run the job, probe every endpoint, and sign in. Each provider restriction found goes into the template and the runbook the same day.
+**Applies to**: global
