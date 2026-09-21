@@ -94,6 +94,7 @@ module keyVault 'modules/keyvault.bicep' = {
     tags: tags
     uniqueSuffix: uniqueSuffix
     secretsUserPrincipalIds: identity.outputs.principalIds
+    vaultWriterObjectId: postgresEntraAdminObjectId
   }
 }
 

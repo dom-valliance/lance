@@ -37,8 +37,13 @@ param uniqueSuffix string
 @description('Principal ids granted Key Vault Secrets User. The four managed identities.')
 param secretsUserPrincipalIds array
 
+@description('Object id of the person who sets secret values from the CLI (Dom). Granted Key Vault Secrets Officer on the vault; RBAC vaults give the deployer no data-plane access by default.')
+param vaultWriterObjectId string
+
 // Key Vault Secrets User. Read secret contents, nothing else.
 var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
+// Key Vault Secrets Officer. Set, read and list secrets; no vault management.
+var keyVaultSecretsOfficerRoleId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
 
 resource keyVault 'Microsoft.KeyVault/vaults@2025-05-01' = {
   name: 'kv-lance-${environmentName}-${uniqueSuffix}'
@@ -76,6 +81,19 @@ resource secretsUserAssignments 'Microsoft.Authorization/roleAssignments@2022-04
     }
   }
 ]
+
+resource secretsOfficerAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: keyVault
+  name: guid(keyVault.id, vaultWriterObjectId, keyVaultSecretsOfficerRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      keyVaultSecretsOfficerRoleId
+    )
+    principalId: vaultWriterObjectId
+    principalType: 'User'
+  }
+}
 
 output vaultName string = keyVault.name
 output vaultId string = keyVault.id

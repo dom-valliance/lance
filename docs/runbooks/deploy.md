@@ -87,6 +87,23 @@ The order matters. The environment stands up on a public bootstrap image first, 
 
    The deployment name defaults to `main`. The outputs give the Key Vault name, the registry name and login server, the Postgres FQDN, the web and api hostnames, the migration job name, and the four identity names.
 
+## 3a. Confirm you can write secrets
+
+The vault uses RBAC, and the template grants you Key Vault Secrets Officer from `postgresEntraAdminObjectId`. Role assignments can take a few minutes to propagate. If `az keyvault secret set` returns `ForbiddenByRbac`, check the assignment exists and wait:
+
+```
+az role assignment list --scope $(az keyvault show -g rg-lance-dev -n <vault name> --query id -o tsv) \
+  --query "[].{role:roleDefinitionName, principal:principalName}" -o table
+```
+
+If the vault was deployed from a template older than this step, grant it once by hand and redeploy later:
+
+```
+az role assignment create --role "Key Vault Secrets Officer" \
+  --assignee-object-id 19fb2afd-6814-4600-8697-eb798ec5691f --assignee-principal-type User \
+  --scope $(az keyvault show -g rg-lance-dev -n <vault name> --query id -o tsv)
+```
+
 ## 4. Set the Key Vault secrets
 
 The template creates the vault and grants the four identities `Key Vault Secrets User`. It never creates a secret value. Set all eleven by hand. Take the values from `entra-setup.md`, `slack-app-setup.md` and `rotate-secrets.md`.
