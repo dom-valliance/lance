@@ -87,6 +87,17 @@ The order matters. The environment stands up on a public bootstrap image first, 
 
    The deployment name defaults to `main`. The outputs give the Key Vault name, the registry name and login server, the Postgres FQDN, the web and api hostnames, the migration job name, and the four identity names.
 
+## 3b. Restart Postgres once
+
+`shared_preload_libraries` (which preloads Apache AGE) is a static server parameter, so the first deploy leaves it pending until a restart. Do this once after the first deploy of an environment; later deploys do not change it:
+
+```
+az postgres flexible-server restart -g rg-lance-dev -n <postgres server name from the outputs>
+az postgres flexible-server parameter show -g rg-lance-dev -s <server name> -n shared_preload_libraries --query value -o tsv
+```
+
+The second command must print `pg_cron,pg_stat_statements,age`.
+
 ## 3a. Confirm you can write secrets
 
 The vault uses RBAC, and the template grants you Key Vault Secrets Officer from `postgresEntraAdminObjectId`. Role assignments can take a few minutes to propagate. If `az keyvault secret set` returns `ForbiddenByRbac`, check the assignment exists and wait:

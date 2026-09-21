@@ -7,10 +7,9 @@ CREATE EXTENSION IF NOT EXISTS age;
 --> statement-breakpoint
 CREATE EXTENSION IF NOT EXISTS vector;
 --> statement-breakpoint
--- AGE's functions live in a shared library that must be loaded before the
--- graph catalogue is queried or create_graph is called.
-LOAD 'age';
---> statement-breakpoint
+-- AGE's shared library is preloaded by the server (shared_preload_libraries
+-- in infra/modules/postgres.bicep and in the local image), so no LOAD here.
+-- Azure Flexible Server rejects LOAD for restricted libraries.
 -- Group roles. NOLOGIN: Container App managed identities and the local
 -- development user are granted membership, they never log in as the group.
 -- lance_app       the three Container Apps. SELECT and INSERT on the ledger.

@@ -111,6 +111,21 @@ resource azureExtensions 'Microsoft.DBforPostgreSQL/flexibleServers/configuratio
   ]
 }
 
+// AGE must be preloaded: Azure rejects LOAD 'age' per session. This parameter is
+// static, so the server needs one restart after the first deploy (deploy.md step 3).
+// The two defaults are kept so nothing Azure relies on is dropped.
+resource sharedPreloadLibraries 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: postgresServer
+  name: 'shared_preload_libraries'
+  properties: {
+    value: 'pg_cron,pg_stat_statements,age'
+    source: 'user-override'
+  }
+  dependsOn: [
+    azureExtensions
+  ]
+}
+
 resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {
   parent: postgresServer
   name: databaseName
