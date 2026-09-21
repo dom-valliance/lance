@@ -1,14 +1,15 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
 import type { Linter } from 'eslint';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 // Four levels up from packages/shared/src/lint/ is the repo root, where
-// eslint.config.js lives. Fixtures are written under the real package
-// directories the boundary rule keys off, so the config's path-based
-// overrides apply to them exactly as they would to real source files.
+// eslint.config.js lives. Fixtures are linted as text under virtual paths
+// inside the real package directories the boundary rule keys off, so the
+// config's path-based overrides apply exactly as they would to real source
+// files. Nothing is written to disk: a fixture on disk would be picked up
+// by another workspace's tsc or vitest running at the same time.
 const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
 
 interface Fixture {
@@ -36,70 +37,36 @@ const apiFixture: Fixture = {
   content: "import '@lance/connectors/writes';\n",
 };
 
-const allFixtures = [agentsFixture, policyFixture, executorFixture, apiFixture];
-
-function absolutePath(fixture: Fixture): string {
-  return path.join(repoRoot, fixture.relPath);
-}
-
-async function writeFixtures(): Promise<void> {
-  for (const fixture of allFixtures) {
-    const abs = absolutePath(fixture);
-    await mkdir(path.dirname(abs), { recursive: true });
-    await writeFile(abs, fixture.content, 'utf8');
-  }
-}
-
-async function removeFixtures(): Promise<void> {
-  await Promise.all(allFixtures.map((fixture) => rm(absolutePath(fixture), { force: true })));
-}
-
 function restrictedImportErrors(messages: Linter.LintMessage[]): Linter.LintMessage[] {
   return messages.filter((message) => message.ruleId === 'no-restricted-imports');
 }
 
-async function lintAllFixtures(): Promise<Map<string, Linter.LintMessage[]>> {
+async function lintFixture(fixture: Fixture): Promise<Linter.LintMessage[]> {
   const eslint = new ESLint({ cwd: repoRoot });
-  const results = await eslint.lintFiles(allFixtures.map((fixture) => absolutePath(fixture)));
-  const byPath = new Map<string, Linter.LintMessage[]>();
-  for (const result of results) {
-    byPath.set(result.filePath, restrictedImportErrors(result.messages));
-  }
-  return byPath;
+  const results = await eslint.lintText(fixture.content, {
+    filePath: path.join(repoRoot, fixture.relPath),
+  });
+  return restrictedImportErrors(results.flatMap((result) => result.messages));
 }
 
 describe('import boundary rules', () => {
-  afterEach(async () => {
-    await removeFixtures();
-  });
-
   it('rejects @anthropic-ai/sdk import outside packages/agents', async () => {
-    await writeFixtures();
-    const byPath = await lintAllFixtures();
-    const errors = byPath.get(absolutePath(policyFixture)) ?? [];
+    const errors = await lintFixture(policyFixture);
     expect(errors).toHaveLength(1);
     expect(errors[0]?.message).toContain('packages/agents');
   }, 30000);
 
   it('allows @anthropic-ai/sdk import inside packages/agents', async () => {
-    await writeFixtures();
-    const byPath = await lintAllFixtures();
-    const errors = byPath.get(absolutePath(agentsFixture)) ?? [];
-    expect(errors).toHaveLength(0);
+    expect(await lintFixture(agentsFixture)).toHaveLength(0);
   }, 30000);
 
   it('rejects @lance/connectors/writes import outside apps/worker/src/executor', async () => {
-    await writeFixtures();
-    const byPath = await lintAllFixtures();
-    const errors = byPath.get(absolutePath(apiFixture)) ?? [];
+    const errors = await lintFixture(apiFixture);
     expect(errors).toHaveLength(1);
     expect(errors[0]?.message).toContain('executor');
   }, 30000);
 
   it('allows @lance/connectors/writes import inside apps/worker/src/executor', async () => {
-    await writeFixtures();
-    const byPath = await lintAllFixtures();
-    const errors = byPath.get(absolutePath(executorFixture)) ?? [];
-    expect(errors).toHaveLength(0);
+    expect(await lintFixture(executorFixture)).toHaveLength(0);
   }, 30000);
 });

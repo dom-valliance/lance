@@ -63,6 +63,15 @@ const executorBoundaryRestriction = [
   },
 ];
 
+// Virtual files the import boundary test lints as text (see
+// packages/shared/src/lint/import-boundaries.test.ts). Nothing writes them.
+const BOUNDARY_FIXTURE_PATHS = [
+  'packages/agents/src/__boundary_fixture__.ts',
+  'packages/policy/src/__boundary_fixture__.ts',
+  'apps/worker/src/executor/__boundary_fixture__.ts',
+  'apps/api/src/__boundary_fixture__.ts',
+];
+
 const sourceGlobs = ['apps/*/src/**/*.{ts,tsx}', 'packages/*/src/**/*.{ts,tsx}'];
 
 export default tseslint.config(
@@ -82,7 +91,11 @@ export default tseslint.config(
     extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
-        projectService: true,
+        projectService: {
+          // The boundary test in packages/shared/src/lint lints these paths
+          // as in-memory text; they never exist on disk.
+          allowDefaultProject: BOUNDARY_FIXTURE_PATHS,
+        },
         tsconfigRootDir: import.meta.dirname,
       },
       globals: {
