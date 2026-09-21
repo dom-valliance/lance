@@ -63,6 +63,6 @@ Opened 2026-09-21 on branch `feat/phase-2-meetings`, with Dom's go-ahead, while 
 
 | Criterion | Evidence | Date |
 |---|---|---|
-| Eval F1 for commitment extraction above 0.8 on the golden set | pending | |
+| Eval F1 for commitment extraction above 0.8 on the golden set | `pnpm --filter @lance/agents eval:commitments:live` over the 50 synthetic records in `fixtures/evals/commitments` with `claude-sonnet-5`: F1 0.857, precision 85.7%, recall 85.7%, due date accuracy 87.5% over 48 matched pairs (56 expected, 56 extracted, 48 true positives). First run scored 0.533 before the scorer stopped counting people's names in descriptions and the prompt refused group counterparties and third-party promises. | 2026-09-21 |
 | A real meeting produces a debrief card with at least one approved Notion task within one hour of transcript arrival | pending | |
 
