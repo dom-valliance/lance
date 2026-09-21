@@ -1,7 +1,5 @@
-import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { z } from 'zod';
+import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import type { ApiDeps } from '../deps.js';
-import { UnauthorisedError } from '../errors.js';
 import { bearerToken } from '../auth/require-entra.js';
 
 /**
@@ -9,30 +7,14 @@ import { bearerToken } from '../auth/require-entra.js';
  * (spec 12). Server-Sent Events rather than a socket, because the traffic
  * is one way and a proxy can buffer it without breaking anything.
  *
- * `EventSource` cannot set request headers, so the Entra bearer is accepted
- * as the `access_token` query parameter as well. It is the same token and
- * the same verifier; only the carrier differs. Query strings reach access
- * logs, so the api's own logger never records one (see `LOGGER_REDACT_PATHS`)
- * and the token is short lived.
+ * The Entra bearer travels in the Authorization header and nowhere else.
+ * A browser's `EventSource` cannot set headers, so the web app's own
+ * `/api/events` route handler subscribes here on the browser's behalf
+ * and pipes the stream through; the token never enters a URL.
  */
 
 /** Long enough to be cheap, short enough to beat a 60-second proxy idle timeout. */
 export const HEARTBEAT_MS = 25_000;
-
-const QuerySchema = z.object({ access_token: z.string().min(1).optional() });
-
-const eventsBearer = (request: FastifyRequest): string => {
-  const query = QuerySchema.safeParse(request.query);
-  if (query.success && query.data.access_token !== undefined) {
-    return query.data.access_token;
-  }
-  if (request.headers.authorization !== undefined) {
-    return bearerToken(request);
-  }
-  throw new UnauthorisedError(
-    'No Entra token. Send it as "Authorization: Bearer <token>" or, from EventSource, as the access_token query parameter.',
-  );
-};
 
 export const eventsRoutes =
   (deps: ApiDeps): FastifyPluginAsync =>
@@ -41,7 +23,7 @@ export const eventsRoutes =
     fastify.get('/events', async (request, reply) => {
       // Verified before the response is hijacked, so a rejection still
       // goes through the error handler as an ordinary 401.
-      await deps.auth.verify(eventsBearer(request));
+      await deps.auth.verify(bearerToken(request));
 
       reply.hijack();
       const stream = reply.raw;

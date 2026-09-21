@@ -8,9 +8,9 @@ const MAX_RECONNECT_DELAY_MS = 30000;
 /**
  * Subscribes to a Server-Sent Events endpoint for as long as the calling
  * component stays mounted, reconnecting with exponential backoff whenever
- * the connection drops. Not wired into any page yet: `apps/api` has no SSE
- * endpoint until a later work package lands it (see ./api.ts for the same
- * note on the tRPC `AppRouter`).
+ * the connection drops. Pages subscribe to the same-origin `/api/events`
+ * route handler, which authenticates on the session cookie and pipes the
+ * api's stream through, so no token appears in the URL.
  */
 export function useServerEvents(url: string, onEvent: (event: MessageEvent<string>) => void): void {
   const onEventRef = useRef(onEvent);

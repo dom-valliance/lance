@@ -1,12 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { auth } from '@/auth';
 import { LiveRefresh } from '@/components/live-refresh';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { apiBaseUrl } from '@/lib/api';
 import type { SearchParams } from '@/lib/filters';
 import { diffPayload, editableFields, formatInstant, REJECT_REASONS } from '@/lib/proposal-view';
 import { apiClient } from '@/lib/trpc';
@@ -37,7 +35,6 @@ export default async function ProposalPage({
 }) {
   const { id } = await params;
   const query = await searchParams;
-  const session = await auth();
   const client = await apiClient();
 
   const proposal = await client.proposals.get.query({ proposalId: id });
@@ -49,12 +46,7 @@ export default async function ProposalPage({
 
   return (
     <div className="flex flex-col gap-6">
-      {session?.idToken === undefined ? null : (
-        <LiveRefresh
-          streamUrl={`${apiBaseUrl()}/events?access_token=${encodeURIComponent(session.idToken)}`}
-          watch="proposal"
-        />
-      )}
+      <LiveRefresh streamUrl="/api/events" watch="proposal" />
 
       <Button asChild variant="ghost" className="w-fit">
         <Link href="/proposals">Back to proposals</Link>

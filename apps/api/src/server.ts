@@ -50,10 +50,10 @@ type LoggerOptions = NonNullable<FastifyServerOptions['logger']>;
 const CENSOR = '[redacted]';
 
 /**
- * `GET /events` carries the Entra token in the query string, because
- * `EventSource` cannot set headers. `redact` works on object paths and a
- * request's url is one string, so the token is scrubbed out of it here
- * before the serialiser hands the line to a transport.
+ * No route reads a token from the query string, but a misconfigured
+ * client may still send one there. `redact` works on object paths and a
+ * request's url is one string, so an `access_token` parameter is scrubbed
+ * out of it here before the serialiser hands the line to a transport.
  */
 export const scrubAccessToken = (url: string): string =>
   url.replace(/([?&]access_token=)[^&]*/gi, `$1${CENSOR}`);

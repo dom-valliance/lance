@@ -17,7 +17,10 @@ let origin: string;
 
 const readFirstEvent = async (url: string): Promise<string> => {
   const controller = new AbortController();
-  const response = await fetch(url, { signal: controller.signal });
+  const response = await fetch(url, {
+    headers: { authorization: 'Bearer good-token' },
+    signal: controller.signal,
+  });
   expect(response.status).toBe(200);
   expect(response.headers.get('content-type')).toContain('text/event-stream');
 
@@ -55,33 +58,29 @@ afterEach(async () => {
 });
 
 describe('GET /events', () => {
-  it('streams a proposal event to a client that sent the token as a query parameter', async () => {
-    const seen = await readFirstEvent(`${origin}/events?access_token=good-token`);
+  it('streams a proposal event to a client that sent the token in the Authorization header', async () => {
+    const seen = await readFirstEvent(`${origin}/events`);
 
     expect(seen).toContain('"type":"proposal"');
     expect(seen).toContain('"id":"01K5S9V6QW3SWCCPVB0N0E301A"');
-  });
-
-  it('streams to a client that sent the token in the Authorization header', async () => {
-    const controller = new AbortController();
-    const response = await fetch(`${origin}/events`, {
-      headers: { authorization: 'Bearer good-token' },
-      signal: controller.signal,
-    });
-
-    expect(response.status).toBe(200);
-    controller.abort();
   });
 
   it('refuses a request with no token', async () => {
     const response = await fetch(`${origin}/events`);
 
     expect(response.status).toBe(401);
-    expect(await response.text()).toContain('access_token');
+  });
+
+  it('ignores a token sent as a query parameter', async () => {
+    const response = await fetch(`${origin}/events?access_token=good-token`);
+
+    expect(response.status).toBe(401);
   });
 
   it('refuses a token the verifier rejects', async () => {
-    const response = await fetch(`${origin}/events?access_token=stale-token`);
+    const response = await fetch(`${origin}/events`, {
+      headers: { authorization: 'Bearer stale-token' },
+    });
 
     expect(response.status).toBe(401);
   });
@@ -91,7 +90,9 @@ describe('GET /events', () => {
     // node:http rather than fetch: destroying the request closes the socket
     // at once, where an aborted fetch waits out undici's keep-alive.
     const before = harness.feed.size;
-    const request = get(`${origin}/events?access_token=good-token`);
+    const request = get(`${origin}/events`, {
+      headers: { authorization: 'Bearer good-token' },
+    });
     await new Promise<void>((resolve) => request.once('response', () => resolve()));
     expect(harness.feed.size).toBe(before + 1);
 

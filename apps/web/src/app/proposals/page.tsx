@@ -3,7 +3,6 @@ import { LiveRefresh } from '@/components/live-refresh';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { apiBaseUrl } from '@/lib/api';
 import {
   ACTION_CLASSES,
   PROPOSAL_STATUSES,
@@ -14,7 +13,6 @@ import {
 } from '@/lib/filters';
 import { formatInstant } from '@/lib/proposal-view';
 import { apiClient } from '@/lib/trpc';
-import { auth } from '@/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,18 +51,12 @@ export default async function ProposalsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
-  const session = await auth();
   const client = await apiClient();
   const proposals = await client.proposals.list.query(proposalFilterFrom(params));
 
   return (
     <div className="flex flex-col gap-6">
-      {session?.idToken === undefined ? null : (
-        <LiveRefresh
-          streamUrl={`${apiBaseUrl()}/events?access_token=${encodeURIComponent(session.idToken)}`}
-          watch="proposal"
-        />
-      )}
+      <LiveRefresh streamUrl="/api/events" watch="proposal" />
 
       <Card>
         <CardHeader>
