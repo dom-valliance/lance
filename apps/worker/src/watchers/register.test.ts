@@ -53,7 +53,7 @@ describe('registerWatcher', () => {
         db,
         gate: new PauseGate(control),
         control,
-        enqueueTriage: (_job: TriageJob) => Promise.resolve(),
+        enqueueTriage: () => Promise.resolve(),
       },
       watcher,
       'Europe/London',
