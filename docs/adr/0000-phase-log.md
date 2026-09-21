@@ -32,3 +32,27 @@ Branch `feat/phase-1-connectors`. Built 2026-09-21: connector framework, Graph a
 | Every proposal in Slack resolves to a ledger trail in the UI Ledger page | The Ledger page follows a correlation id end to end; pending a live proposal. | pending |
 | Dom has approved at least 20 proposals live | Pending five dry-run working days then live use. | pending |
 | Inbox agent's Slack posting retired in favour of Lance | Pending, end of Phase 1 (`docs/runbooks/slack-app-setup.md` section 7). | pending |
+
+### Phase 1 review, 2026-09-21
+
+An independent Opus 5 review of the branch against the non-negotiables returned eleven findings. All confirmed findings were fixed on the branch before hand-over:
+
+| Finding | Fix |
+|---|---|
+| Dry run did not stop the executor: an approval in `dry_run` mode wrote to the mailbox (non-negotiable 7) | `PauseGate.checkWrite` refuses while paused or in any mode other than live; the executor uses it before and after the claim. Kill switch test covers dry run. |
+| An edit replaced the payload instead of merging, dropping recipients and task input | The executor merges the edit over the proposed payload and re-evaluates policy with the edited destination and the recorded labels. |
+| The target check compared a Graph folder id with a well-known name, so it never ran | The re-fetched message is normalised under the folder kind the observation recorded; any fetch or parse failure holds the proposal. |
+| The critic ran only on `auto` decisions, so no `draft_email` was ever checked; the model review was unwired; two spec 7.4 checks were missing | The critic runs on every proposal policy does not forbid. It now checks the authorising rule covers the action and that no email address in the payload is absent from the source records. The Opus draft review is wired through `critic/review.ts`. |
+| A retried write could duplicate a committed one | Non-idempotent connector writes retry only on 429; PATCH writes keep the full policy (`packages/connectors`). |
+| The package root exported general-purpose write methods, bypassing the `writes` boundary | Write capability is package-internal; the public connector objects expose reads only. |
+| The Entra id token was passed to the browser in the SSE URL | The web app's `/api/events` route handler subscribes on the browser's behalf with the token in a header; the api accepts the header alone. |
+| Triage jobs were completed and discarded while paused | The job is re-sent with a delay instead. |
+| A record that failed to normalise lost triage for the records before it | Per-record failures are isolated; good records are triaged, the cursor stays put, the failure counts towards the breaker. |
+| Notion paging had no cap | `MAX_QUERY_PAGES`. |
+| `/lance resume` released held proposals without re-queuing them | Both resume entry points re-queue every released proposal. |
+| A retried triage job re-proposed the same tasks; an alert could be raised with no provenance | Task candidates are matched to existing proposals on the correlation id; an alert with empty provenance is not raised. |
+
+Accepted as is, with the reason:
+
+- Refresh token rotation has no cross-process lock. The worker runs one replica (`maxReplicas: 1` in `infra/modules/containerapps.bicep`) and the api never refreshes, so no second rotation can race it. A Postgres advisory lock is the Phase 5 item if the worker ever scales.
+- The mail backfill cannot be narrowed to 14 days: the Graph message delta endpoint takes no filter. The first poll is bounded by `MAX_DELTA_PAGES` and idempotent.
