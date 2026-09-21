@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { monotonicFactory } from 'ulid';
 
 /**
@@ -33,4 +34,24 @@ export function newUlid(): Ulid {
  */
 export function isUlid(value: string): value is Ulid {
   return ULID_PATTERN.test(value);
+}
+
+const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/**
+ * A ULID-shaped id derived from a seed, the same every time for the same
+ * seed. Used where several observations must share one correlation id
+ * (a mail conversation, a meeting) without a lookup: the id is a function
+ * of the source and its grouping key. The first character is kept in 0 to 7
+ * so the value is also a valid ULID timestamp.
+ */
+export function stableUlid(seed: string): Ulid {
+  const digest = createHash('sha256').update(seed).digest();
+  let out = '';
+  for (let i = 0; i < 26; i += 1) {
+    const byte = digest[i % digest.length] ?? 0;
+    const index = i === 0 ? byte % 8 : byte % 32;
+    out += CROCKFORD[index];
+  }
+  return out as Ulid;
 }
