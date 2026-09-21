@@ -97,3 +97,10 @@
 **Correction**: Dom pasted the CI log.
 **Rule**: Before the first push, run the exact commands in the workflow with the exact binaries it installs (the standalone CLI, not the `az` wrapper), and run the full root lint after every edit, not the package filter. A file that ESLint parses without a matching config block is a gap; every `.ts` file gets the same globals.
 **Applies to**: .github/, eslint.config.js
+
+### [2026-09-21] Rebuild every image whenever a workspace dependency changes
+
+**Context**: The first registry build after the Phase 1 merge failed. Each Dockerfile copies an explicit list of workspace sources; Phase 1 added @lance/connectors to the api, @lance/agents, @lance/connectors and @lance/policy to the worker, and an api type import to the web app, and none of the three Dockerfiles was updated or rebuilt. CI was green because it never builds an image.
+**Correction**: Dom pasted the `az acr build` log.
+**Rule**: A Dockerfile that enumerates sources is coupled to every `workspace:*` dependency and every cross-app type import; when either changes, update the Dockerfile and build the image locally before the phase is called done. Image builds are part of every phase's verification, not only the deploy runbook, and CI builds all three Dockerfiles on every pull request so the gap cannot recur silently.
+**Applies to**: apps/*/Dockerfile, .github/workflows/ci.yml
