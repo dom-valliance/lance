@@ -29,6 +29,8 @@ import { createProposalHandler } from './executor/createProposal.js';
 import { createConnectorWrite, type ExecutionWriters } from './executor/dispatch.js';
 import { graphExecutionWriters, notionExecutionWriters } from './executor/writers.js';
 import { registerExecutor } from './executor/index.js';
+import { reflectProposal } from './executor/reflect.js';
+import { postDryRunDigest } from './digest/dryRunDigest.js';
 import { ensureSeedRules, loadActiveRules } from './policy/rules.js';
 import { createBoss, startBoss } from './scheduler/boss.js';
 import { PauseGate } from './scheduler/gate.js';
@@ -158,6 +160,25 @@ async function registerExpiry(boss: PgBoss, db: Db): Promise<void> {
   });
 }
 
+const DIGEST_QUEUE = 'dry-run-digest';
+
+/** One message at 17:00 on weekdays while in dry run (spec 6.3). */
+async function registerDigest(
+  boss: PgBoss,
+  db: Db,
+  slack: SlackSurface | null,
+  config: Config,
+): Promise<void> {
+  await boss.createQueue(DIGEST_QUEUE);
+  await boss.schedule(DIGEST_QUEUE, '0 17 * * 1-5', {}, { tz: config.timeZone, key: DIGEST_QUEUE });
+  await boss.work(DIGEST_QUEUE, async () => {
+    const state = await new SystemControl(db).read();
+    if (state.mode !== 'dry_run') return;
+    const since = new Date(Date.now() - 24 * 3600 * 1000);
+    await postDryRunDigest(db, slack, { since, displayName: config.agentDisplayName });
+  });
+}
+
 async function main(): Promise<void> {
   const config = getConfig();
   const telemetry = initTelemetry({
@@ -208,7 +229,11 @@ async function main(): Promise<void> {
   });
 
   await startBoss(boss);
-  await registerExecutor(boss, { db, gate, write });
+  const render = { displayName: config.agentDisplayName, timeZone: config.timeZone };
+  await registerExecutor(boss, { db, gate, write }, (proposalId, outcome) =>
+    reflectProposal({ db, surface: slack, render }, proposalId, outcome),
+  );
+  await registerDigest(boss, db, slack, config);
   await registerExpiry(boss, db);
 
   if (agent !== null) {

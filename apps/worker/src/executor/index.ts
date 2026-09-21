@@ -162,10 +162,15 @@ export async function executeProposal(
   }
 }
 
-export function registerExecutor(boss: PgBoss, deps: ExecutorDeps): Promise<string> {
+export function registerExecutor(
+  boss: PgBoss,
+  deps: ExecutorDeps,
+  afterEach?: (proposalId: string, outcome: ExecuteOutcome) => Promise<void>,
+): Promise<string> {
   return boss.work<ExecuteJob>(QUEUES.execute, async (jobs) => {
     for (const job of jobs) {
-      await executeProposal(deps, job.data);
+      const outcome = await executeProposal(deps, job.data);
+      await afterEach?.(job.data.proposalId, outcome);
     }
   });
 }
