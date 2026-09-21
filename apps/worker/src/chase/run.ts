@@ -195,29 +195,42 @@ export async function runChase(deps: ChaseDeps, input: ChaseInput): Promise<Chas
     confidence: 0.7,
   };
   const outcome = await deps.createProposal(proposal, { correlationId, actor: CHASE_ACTOR });
+  if (outcome.decision === 'forbid') {
+    // Policy refused the draft, so nothing reached Dom and the commitment
+    // is not chased: it stays where it was, with the refusal in the ledger.
+    return refuse(`Policy forbids a chase email for commitment ${commitment.id}.`);
+  }
 
-  await deps.db
-    .update(commitments)
-    .set({
-      status: 'chased',
-      chaseCount: commitment.chaseCount + 1,
-      nextChaseAt: new Date(at.getTime() + NEXT_CHASE_DAYS * DAY_MS),
-      updatedAt: at,
-    })
-    .where(eq(commitments.id, commitment.id));
-
-  await ledger.append({
-    ts: now(),
-    actor: CHASE_ACTOR,
-    kind: 'resolved',
-    sourceSystem: 'lance',
-    sourceRecordId: commitment.id,
-    correlationId,
-    payload: {
-      kind: 'commitment_chased',
-      commitmentId: commitment.id,
-      proposalId: outcome.proposalId,
-    },
+  // The row update and its ledger event commit together; a held proposal
+  // (dry run) still counts as a chase, because the draft exists and is
+  // released to Dom on resume.
+  await deps.db.transaction(async (tx) => {
+    await tx
+      .update(commitments)
+      .set({
+        status: 'chased',
+        chaseCount: commitment.chaseCount + 1,
+        nextChaseAt: new Date(at.getTime() + NEXT_CHASE_DAYS * DAY_MS),
+        updatedAt: at,
+      })
+      .where(eq(commitments.id, commitment.id));
+    await ledger.append(
+      {
+        ts: now(),
+        actor: CHASE_ACTOR,
+        kind: 'resolved',
+        sourceSystem: 'lance',
+        sourceRecordId: commitment.id,
+        correlationId,
+        payload: {
+          kind: 'commitment_chased',
+          commitmentId: commitment.id,
+          proposalId: outcome.proposalId,
+          proposalStatus: outcome.status,
+        },
+      },
+      tx,
+    );
   });
 
   return { status: 'drafted', proposalId: outcome.proposalId, correlationId };

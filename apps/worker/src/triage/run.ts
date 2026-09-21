@@ -419,22 +419,31 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
     (candidate) => provenanceFor(events, candidate.recordId).length > 0,
   );
 
-  let recordedCommitments: RecordedCommitment[] = [];
-  if (deps.ontology && deps.dom && commitmentCandidates.length > 0) {
-    const first = commitmentCandidates[0];
-    const provenance = first === undefined ? [] : provenanceFor(events, first.recordId);
-    const result = await recordCommitments(
-      { db: deps.db, ontology: deps.ontology, dom: deps.dom, now },
-      commitmentCandidates,
-      {
-        correlationId: job.correlationId,
-        actor: TRIAGE_ACTOR,
-        provenance,
-        derivedFromNodeId: meetingNodeId,
-        directory,
-      },
-    );
-    recordedCommitments = result.recorded;
+  // Each commitment is recorded with the provenance of the record it was
+  // quoted from (non-negotiable 5), so candidates are grouped by record: a
+  // correlation id can carry a meeting and its action items together.
+  const recordedCommitments: RecordedCommitment[] = [];
+  if (deps.ontology && deps.dom) {
+    const byRecord = new Map<string, CommitmentCandidate[]>();
+    for (const candidate of commitmentCandidates) {
+      const group = byRecord.get(candidate.recordId) ?? [];
+      group.push(candidate);
+      byRecord.set(candidate.recordId, group);
+    }
+    for (const [recordId, group] of byRecord) {
+      const result = await recordCommitments(
+        { db: deps.db, ontology: deps.ontology, dom: deps.dom, now },
+        group,
+        {
+          correlationId: job.correlationId,
+          actor: TRIAGE_ACTOR,
+          provenance: provenanceFor(events, recordId),
+          derivedFromNodeId: meetingNodeId,
+          directory,
+        },
+      );
+      recordedCommitments.push(...result.recorded);
+    }
   }
 
   let debrief: DebriefResult | null = null;

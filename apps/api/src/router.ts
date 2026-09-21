@@ -170,16 +170,23 @@ export const appRouter = router({
       .query(({ ctx, input }) => getCommitment(ctx.deps, input.id)),
     markDone: procedure
       .input(z.object({ id: UlidSchema }))
-      .mutation(({ ctx, input }) => resolveCommitment(ctx.deps, { id: input.id, to: 'done' })),
+      .mutation(({ ctx, input }) =>
+        resolveCommitment(ctx.deps, { id: input.id, to: 'done', actor: actorFromUpn(ctx.upn) }),
+      ),
     drop: procedure
       .input(z.object({ id: UlidSchema, reason: z.string().min(1) }))
       .mutation(({ ctx, input }) =>
-        resolveCommitment(ctx.deps, { id: input.id, to: 'dropped', reason: input.reason }),
+        resolveCommitment(ctx.deps, {
+          id: input.id,
+          to: 'dropped',
+          reason: input.reason,
+          actor: actorFromUpn(ctx.upn),
+        }),
       ),
     /** Queues the draft; the worker writes it and it arrives as a proposal. */
     chase: procedure
       .input(z.object({ id: UlidSchema }))
-      .mutation(({ ctx, input }) => chaseCommitment(ctx.deps, input.id)),
+      .mutation(({ ctx, input }) => chaseCommitment(ctx.deps, input.id, actorFromUpn(ctx.upn))),
   }),
   tasks: router({
     list: procedure

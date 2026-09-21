@@ -3,6 +3,7 @@ import { LedgerWriter } from '@lance/ledger';
 import { newUlid, nowIso, type SourceSystem } from '@lance/shared';
 import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import {
+  drizzleRunner,
   isVertex,
   runCypher,
   sqlRunnerOf,
@@ -349,10 +350,12 @@ export class OntologyRepository {
   /** Case-insensitive substring search over the naming property of every label. */
   async search(text: string, limit = 20): Promise<Node[]> {
     const needle = text.toLowerCase();
+    // AGE takes no parameter in LIMIT, so the bound is checked and inlined.
+    const bound = Number.isInteger(limit) && limit > 0 && limit <= 200 ? limit : 20;
     const rows = await runCypher(
       this.runner,
-      'MATCH (n) WHERE toLower(coalesce(n.display_name, n.name, n.title, "")) CONTAINS $needle RETURN n LIMIT $limit',
-      { needle, limit },
+      `MATCH (n) WHERE toLower(coalesce(n.display_name, n.name, n.title, "")) CONTAINS $needle RETURN n LIMIT ${String(bound)}`,
+      { needle },
     );
     return rows
       .map((row) => row[0])
@@ -479,9 +482,18 @@ export class OntologyRepository {
       return { id: created.id, decision: 'none', matchedId: null, score: null };
     }
     let decision = decide(best.score);
-    if (decision === 'merge' && (await this.wouldViolateRuleThree(input, best.node.id))) {
-      decision = 'candidate';
-    }
+    const barred = await this.wouldViolateRuleThree(input, best.node.id);
+    if (decision === 'merge' && barred) decision = 'candidate';
+    // A sighting with no identifier at all (a name in a transcript, no
+    // address) has nothing that could ever distinguish it from the person
+    // of that name already known, so a candidate-grade match reuses that
+    // node rather than minting one per meeting.
+    const hasKey =
+      emails.length > 0 ||
+      Boolean(input.notionUserId) ||
+      Boolean(input.slackId) ||
+      (input.jamieParticipantIds?.length ?? 0) > 0;
+    if (decision === 'candidate' && !hasKey && !barred) decision = 'merge';
     if (decision === 'merge') {
       await this.upsertPerson(
         {
@@ -772,14 +784,23 @@ export class OntologyRepository {
     params: CypherParams,
     context: MutationContext,
   ): Promise<void> {
-    await runCypher(this.runner, cypher, params);
-    await this.writer.append({
-      ts: this.now(),
-      actor: context.actor ?? ONTOLOGY_ACTOR,
-      kind: 'resolved',
-      sourceSystem: 'lance',
-      correlationId: context.correlationId,
-      payload: { kind: MUTATION_KIND, cypher, params },
+    // One transaction: the graph write and the ledger event that makes it
+    // replayable commit together, or neither does (spec 5.2).
+    await this.db.transaction(async (tx) => {
+      const runner = drizzleRunner(tx);
+      await runner.query('SET LOCAL search_path = ag_catalog, "$user", public');
+      await runCypher(runner, cypher, params);
+      await this.writer.append(
+        {
+          ts: this.now(),
+          actor: context.actor ?? ONTOLOGY_ACTOR,
+          kind: 'resolved',
+          sourceSystem: 'lance',
+          correlationId: context.correlationId,
+          payload: { kind: MUTATION_KIND, cypher, params },
+        },
+        tx,
+      );
     });
   }
 
@@ -813,7 +834,14 @@ export class OntologyRepository {
       if (page.length === 0) break;
       for (const event of page) {
         const payload = event.payload as { cypher?: unknown; params?: unknown } | null;
-        if (typeof payload?.cypher !== 'string') continue;
+        if (typeof payload?.cypher !== 'string') {
+          // A mutation whose statement is gone (retention nulled the
+          // payload, ADR 0011) cannot be replayed, and everything after it
+          // that matched on its node would silently vanish too.
+          throw new Error(
+            `Ontology rebuild stopped at ledger event ${event.id}: its mutation payload is missing, so the graph can no longer be rebuilt from the ledger alone. Restore from the last graph backup or extend the ledger retention window.`,
+          );
+        }
         await runCypher(
           this.runner,
           payload.cypher,

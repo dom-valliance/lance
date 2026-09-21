@@ -104,6 +104,8 @@ export interface ResolveCommitmentInput {
   id: string;
   to: Extract<Commitment['status'], 'done' | 'dropped'>;
   reason?: string;
+  /** The ledger actor, derived from the verified UPN by the router. */
+  actor?: string;
 }
 
 /**
@@ -149,7 +151,7 @@ export async function resolveCommitment(
 
   await deps.writer.append({
     ts,
-    actor: DOM_ACTOR,
+    actor: input.actor ?? DOM_ACTOR,
     kind: 'resolved',
     sourceSystem: 'lance',
     sourceRecordId: input.id,
@@ -177,7 +179,11 @@ export interface ChaseEnqueued {
  * worker loads the commitment, runs the model and creates the proposal, so
  * there is no path from this request to an outbound email.
  */
-export async function chaseCommitment(deps: CommitmentDeps, id: string): Promise<ChaseEnqueued> {
+export async function chaseCommitment(
+  deps: CommitmentDeps,
+  id: string,
+  actor: string = DOM_ACTOR,
+): Promise<ChaseEnqueued> {
   const existing = await deps.commitments.get(id);
   if (existing === null) {
     throw new TRPCError({
@@ -186,5 +192,15 @@ export async function chaseCommitment(deps: CommitmentDeps, id: string): Promise
     });
   }
   const jobId = await deps.enqueueChase(id);
+  // The request is in the ledger even if the worker never consumes the job.
+  await deps.writer.append({
+    ts: (deps.now ?? nowIso)(),
+    actor,
+    kind: 'resolved',
+    sourceSystem: 'lance',
+    sourceRecordId: id,
+    correlationId: newUlid(),
+    payload: { kind: 'commitment_chase_requested', commitmentId: id, jobId },
+  });
   return { enqueued: true, jobId };
 }

@@ -1,4 +1,5 @@
 import type { Db } from '@lance/db';
+import { sql, type SQL } from 'drizzle-orm';
 
 /**
  * Cypher over Apache AGE (ADR 0004). Every statement runs through
@@ -34,6 +35,31 @@ export function sqlRunnerOf(db: Db): SqlRunner {
         await client.query('RESET search_path').catch(() => undefined);
         client.release();
       }
+    },
+  };
+}
+
+/** A Drizzle database or transaction: anything with `execute`. */
+export interface DrizzleExecutor {
+  execute(query: SQL): Promise<{ rows: Record<string, unknown>[] }>;
+}
+
+/**
+ * A runner over a Drizzle transaction, so a Cypher statement and the ledger
+ * event that records it commit or roll back together. `SET LOCAL` scopes
+ * the search path to that transaction. The statement text carries at most
+ * one positional parameter, the agtype map, which is bound here.
+ */
+export function drizzleRunner(executor: DrizzleExecutor): SqlRunner {
+  return {
+    query: async (text, values) => {
+      const at = text.indexOf('$1');
+      if (at < 0 || values === undefined || values.length === 0) {
+        return executor.execute(sql.raw(text));
+      }
+      const before = text.slice(0, at);
+      const after = text.slice(at + 2);
+      return executor.execute(sql`${sql.raw(before)}${values[0]}${sql.raw(after)}`);
     },
   };
 }

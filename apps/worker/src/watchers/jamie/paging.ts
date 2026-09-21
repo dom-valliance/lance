@@ -33,8 +33,11 @@ export function windowStart(cursor: string | null, now: string): string {
   const nowMs = Date.parse(now);
   if (cursor !== null) {
     const cursorMs = Date.parse(cursor);
+    // A meeting scheduled in the future lists with a future start, which
+    // would drag the window past everything recent; the cursor never
+    // counts past now.
     if (!Number.isNaN(cursorMs))
-      return new Date(cursorMs - JAMIE_OVERLAP_HOURS * HOUR_MS).toISOString();
+      return new Date(Math.min(cursorMs, nowMs) - JAMIE_OVERLAP_HOURS * HOUR_MS).toISOString();
   }
   return new Date(nowMs - JAMIE_FIRST_RUN_DAYS * DAY_MS).toISOString();
 }

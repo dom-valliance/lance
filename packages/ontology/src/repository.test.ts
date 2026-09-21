@@ -1,6 +1,6 @@
 import { createDb, runMigrations, seed, type Db } from '@lance/db';
 import { startPostgresContainer } from '@lance/db/testing';
-import { LedgerReader } from '@lance/ledger';
+import { LedgerReader, LedgerWriter } from '@lance/ledger';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OntologyRepository, type SourceRef } from './repository.js';
@@ -149,5 +149,34 @@ describe('OntologyRepository', () => {
   it('finds nodes by a case-insensitive substring of their name', async () => {
     const hits = await repo.search('client');
     expect(hits.map((hit) => hit.label)).toContain('Organisation');
+  });
+});
+
+describe('OntologyRepository, review follow-ups', () => {
+  it('reuses the known person for a same-name sighting that carries no identifier', async () => {
+    const known = await repo.upsertPerson(
+      { displayName: 'Priya Nandra', emails: ['priya@client.test'], sourceRef: ref('graph', 'm9') },
+      context,
+    );
+    const sighting = await repo.resolvePerson(
+      { displayName: 'Priya Nandra', sourceRef: ref('jamie', 'mt-9') },
+      context,
+    );
+    expect(sighting.id).toBe(known.id);
+    expect(sighting.decision).toBe('merge');
+  });
+
+  it('refuses to rebuild when a recorded mutation has lost its statement', async () => {
+    // Retention nulls a payload in place (ADR 0011); the closest a test can
+    // get without that role is a mutation event whose statement is absent.
+    await new LedgerWriter(db).append({
+      ts: '2026-09-21T12:00:00.000Z',
+      actor: 'system:ontology',
+      kind: 'resolved',
+      sourceSystem: 'lance',
+      correlationId: context.correlationId,
+      payload: { kind: 'ontology_mutation' },
+    });
+    await expect(repo.rebuild()).rejects.toThrow(/no longer be rebuilt/);
   });
 });
