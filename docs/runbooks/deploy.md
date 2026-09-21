@@ -179,28 +179,9 @@ az acr repository show-tags --name $ACR --repository lance-web -o tsv
 
    A revision stuck in `Failed` is normally a Key Vault reference that cannot resolve. Check that the secret exists and that the role assignment has propagated; propagation takes up to five minutes after the first deploy.
 
-## 7. Run the migration job
+## 7. Create the Postgres principals
 
-The job is manual trigger only. It never runs on a schedule and never as part of a deploy.
-
-```
-az containerapp job start -g rg-lance-dev -n caj-lance-migrate-dev
-```
-
-Follow it:
-
-```
-az containerapp job execution list -g rg-lance-dev -n caj-lance-migrate-dev \
-  --query "[0].{name:name, status:properties.status, start:properties.startTime}" -o table
-
-az containerapp job logs show -g rg-lance-dev -n caj-lance-migrate-dev --container migrate --follow
-```
-
-The first run fails with a permission error because the migration identity has no Postgres principal yet. Do step 8, then start the job again.
-
-## 8. Create the Postgres principals
-
-Run this once per environment, as the Entra administrator from step 2. The identity names come from the `identityNames` deployment output and are exactly `id-lance-web-dev`, `id-lance-api-dev`, `id-lance-worker-dev` and `id-lance-migrate-dev`.
+Run this once per environment, as the Entra administrator from step 2, before the migration job. The identity names come from the `identityNames` deployment output and are exactly `id-lance-web-dev`, `id-lance-api-dev`, `id-lance-worker-dev` and `id-lance-migrate-dev`.
 
 1. Connect with an Entra access token as the password:
 
@@ -211,37 +192,46 @@ Run this once per environment, as the Entra administrator from step 2. The ident
    psql "host=$PGHOST port=5432 dbname=lance user=dom@valliance.ai sslmode=require"
    ```
 
-2. Create a principal for each managed identity. The second and third arguments are `isAdmin` and `isMfa`, both false:
+2. Create a principal for each managed identity. The arguments are `isAdmin` and `isMfa`. The migrate identity is an admin principal because the migrations create roles and extensions, which needs `azure_pg_admin`; the three app identities are not:
 
    ```sql
+   SELECT * FROM pgaadauth_create_principal('id-lance-migrate-dev', true, false);
    SELECT * FROM pgaadauth_create_principal('id-lance-web-dev', false, false);
    SELECT * FROM pgaadauth_create_principal('id-lance-api-dev', false, false);
    SELECT * FROM pgaadauth_create_principal('id-lance-worker-dev', false, false);
-   SELECT * FROM pgaadauth_create_principal('id-lance-migrate-dev', false, false);
    ```
 
-3. Grant the roles the migrations create. The three app identities get `lance_app`, which has INSERT and SELECT on the ledger and no UPDATE or DELETE anywhere:
+   Stay connected; step 9 uses the same session.
 
-   ```sql
-   GRANT lance_app TO "id-lance-web-dev";
-   GRANT lance_app TO "id-lance-api-dev";
-   GRANT lance_app TO "id-lance-worker-dev";
-   GRANT lance_migrator TO "id-lance-migrate-dev";
-   ```
+## 8. Run the migration job
 
-   The role names are case sensitive and the identity names must stay in double quotes.
+The job is manual trigger only. It never runs on a schedule and never as part of a deploy. It runs the migrations and then the idempotent seed (system_state row, Dom's user row) as the migrate identity, and migration 0000 grants that identity `lance_migrator` so later migrations can reassign ownership.
 
-4. `lance_retention` arrives with the retention jobs in a later phase (ADR 0011). When its identity exists, create its principal the same way and grant it:
+```
+az containerapp job start -g rg-lance-dev -n caj-lance-migrate-dev
+az containerapp job execution list -g rg-lance-dev -n caj-lance-migrate-dev \
+  --query "[].{name:name, status:properties.status}" -o table
+```
 
-   ```sql
-   GRANT lance_retention TO "id-lance-retention-dev";
-   ```
+Wait for `Succeeded`. On failure read the logs:
 
-   Until then there is no retention identity and nothing to grant.
+```
+az containerapp job logs show -g rg-lance-dev -n caj-lance-migrate-dev --container migrate
+```
 
-5. Quit psql, then start the migration job again (step 7). It should finish `Succeeded`.
+## 9. Grant the application roles
 
-## 9. Verify
+Back in the psql session from step 7, now that the migrations have created the roles. The three app identities get `lance_app`, which has INSERT and SELECT on the ledger and no UPDATE or DELETE there:
+
+```sql
+GRANT lance_app TO "id-lance-web-dev";
+GRANT lance_app TO "id-lance-api-dev";
+GRANT lance_app TO "id-lance-worker-dev";
+```
+
+The role names are case sensitive and the identity names must stay in double quotes. `lance_retention` arrives with the retention jobs in Phase 5 (ADR 0011); its identity and grant are added then. Quit psql.
+
+## 10. Verify
 
 1. Open `https://<web hostname>` and sign in as Dom. Any other UPN is refused.
 2. Run `/lance status` in `dom-claude-agent`. The api answers with an ephemeral message and the ledger records a `state_changed` event.
