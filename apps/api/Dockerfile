@@ -1,5 +1,6 @@
 # Build context is the repository root, not apps/api: the api imports
-# @lance/db, @lance/ledger and @lance/shared as workspace TypeScript source.
+# @lance/connectors, @lance/db, @lance/ledger, @lance/shared and
+# @lance/telemetry as workspace TypeScript source.
 #
 #   docker build -f apps/api/Dockerfile -t lance-api .
 #
@@ -33,6 +34,7 @@ RUN pnpm install --frozen-lockfile --filter @lance/api...
 COPY tsconfig.base.json ./
 COPY apps/api/tsconfig.json apps/api/
 COPY apps/api/src apps/api/src
+COPY packages/connectors/src packages/connectors/src
 COPY packages/db/src packages/db/src
 COPY packages/db/drizzle packages/db/drizzle
 COPY packages/ledger/src packages/ledger/src
