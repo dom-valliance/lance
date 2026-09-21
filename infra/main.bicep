@@ -124,6 +124,7 @@ module postgres 'modules/postgres.bicep' = {
     entraAdminObjectId: postgresEntraAdminObjectId
     entraAdminPrincipalName: postgresEntraAdminPrincipalName
     adminClientIp: postgresAdminClientIp
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     passwordAuthEnabled: postgresPasswordAuthEnabled
     administratorLogin: postgresAdministratorLogin
     administratorPassword: postgresAdministratorPassword

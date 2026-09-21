@@ -18,8 +18,35 @@ export const runMigrations = async (options: CreateDbOptions = {}): Promise<void
   }
 };
 
+const CONNECTION_ERROR =
+  /terminated unexpectedly|ECONNRESET|ETIMEDOUT|timeout expired|Connection terminated/i;
+
+/**
+ * Migrations are transactional, so a run cut off by a dropped connection can
+ * be repeated safely. A fresh Container Apps job replica sometimes loses its
+ * first connection while the managed identity sidecar is still warming up.
+ */
+export const runMigrationsWithRetry = async (
+  options: CreateDbOptions = {},
+  attempts = 5,
+): Promise<void> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await runMigrations(options);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt >= attempts || !CONNECTION_ERROR.test(message)) throw error;
+      console.warn(
+        `Migration attempt ${attempt} lost its connection (${message}); retrying in ${attempt * 5} s.`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, attempt * 5000));
+    }
+  }
+};
+
 const entrypoint = process.argv[1];
 if (entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).href) {
-  await runMigrations();
+  await runMigrationsWithRetry();
   console.info('Migrations applied.');
 }

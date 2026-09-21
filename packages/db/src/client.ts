@@ -116,10 +116,23 @@ export const createDb = (options: CreateDbOptions = {}): Db => {
   if (options.max !== undefined) {
     config.max = options.max;
   }
+  // A handshake that waits on a token fetch is what the server times out on;
+  // 30 seconds is generous for a cold managed identity sidecar.
+  config.connectionTimeoutMillis = 30_000;
   const password = resolvePassword(options, config.connectionString ?? '');
   if (password !== undefined) {
     config.password = password;
+    if (typeof password === 'function') {
+      // Fetch the first token now, outside any handshake, so the server is not
+      // kept waiting while the managed identity sidecar warms up. Failures
+      // surface on the first real connection, where the caller handles them.
+      void password().catch(() => undefined);
+    }
   }
 
-  return drizzle(new pg.Pool(config), { schema });
+  const pool = new pg.Pool(config);
+  pool.on('error', (error: Error) => {
+    console.error(`Postgres pool error: ${error.message}`);
+  });
+  return drizzle(pool, { schema });
 };

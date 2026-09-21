@@ -43,6 +43,9 @@ param administratorPassword string
 @description('Database name. Matches the local compose database so connection strings differ only in host.')
 param databaseName string = 'lance'
 
+@description('Log Analytics workspace that receives the server logs.')
+param logAnalyticsWorkspaceId string
+
 var isProd = environmentName == 'prod'
 
 var skuName = isProd ? 'Standard_D2ds_v5' : 'Standard_B1ms'
@@ -164,6 +167,40 @@ resource allowAdminClient 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRul
   dependsOn: [
     allowAzureServices
   ]
+}
+
+// Connection attempts and their outcome, so a dropped handshake has a server
+// side record. log_connections is dynamic; no restart needed.
+resource logConnections 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: postgresServer
+  name: 'log_connections'
+  properties: {
+    value: 'on'
+    source: 'user-override'
+  }
+  dependsOn: [
+    sharedPreloadLibraries
+  ]
+}
+
+resource diagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  scope: postgresServer
+  name: 'to-log-analytics'
+  properties: {
+    workspaceId: logAnalyticsWorkspaceId
+    logs: [
+      {
+        category: 'PostgreSQLLogs'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: true
+      }
+    ]
+  }
 }
 
 output serverName string = postgresServer.name
