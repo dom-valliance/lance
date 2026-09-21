@@ -14,3 +14,5 @@ export type {
   PauseResult,
   ResumeResult,
 } from './control.js';
+export { decideProposal, expireProposals, ProposalTransitionError } from './proposals.js';
+export type { DecisionInput, DecisionResult, ProposalAction } from './proposals.js';
