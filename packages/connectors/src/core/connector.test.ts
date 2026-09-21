@@ -33,6 +33,14 @@ const policy = {
   breaker: { failureThreshold: 3, halfOpenAfterMs: 1000 },
 };
 
+const failure = (status: number): ConnectorError =>
+  new ConnectorError(`HTTP ${status}`, {
+    connector: 'notion',
+    operation: 'x',
+    status,
+    retryable: true,
+  });
+
 describe('defineConnector', () => {
   it('runs a read, records the span attributes and the call record', async () => {
     const calls: CallRecord[] = [];
@@ -65,22 +73,33 @@ describe('defineConnector', () => {
     ]);
   });
 
-  it('retries a retryable failure inside the breaker and reports the attempts', async () => {
+  it('retries a retryable failure on an idempotent write and reports the attempts', async () => {
     const connector = defineConnector({ name: 'notion', policy, clock: new FakeClock() });
-    const fn = vi
-      .fn()
-      .mockRejectedValueOnce(
-        new ConnectorError('HTTP 503', {
-          connector: 'notion',
-          operation: 'x',
-          status: 503,
-          retryable: true,
-        }),
-      )
-      .mockResolvedValueOnce('done');
-    await expect(connector.write('createPage', {}, fn)).resolves.toBe('done');
+    const fn = vi.fn().mockRejectedValueOnce(failure(503)).mockResolvedValueOnce('done');
+    await expect(connector.write('updatePage', {}, fn, { idempotent: true })).resolves.toBe('done');
     expect(fn).toHaveBeenCalledTimes(2);
     expect(exporter.getFinishedSpans()[0]?.attributes['lance.call_kind']).toBe('write');
+  });
+
+  it('attempts a write that is not idempotent once when the remote may have committed', async () => {
+    const connector = defineConnector({ name: 'notion', policy, clock: new FakeClock() });
+    const fn = vi.fn().mockRejectedValueOnce(failure(503)).mockResolvedValueOnce('done');
+    await expect(connector.write('createPage', {}, fn)).rejects.toThrow('HTTP 503');
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a write that is not idempotent when the remote answers 429', async () => {
+    const connector = defineConnector({ name: 'notion', policy, clock: new FakeClock() });
+    const fn = vi.fn().mockRejectedValueOnce(failure(429)).mockResolvedValueOnce('done');
+    await expect(connector.write('createPage', {}, fn)).resolves.toBe('done');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a read that is not marked either way, since a read commits nothing', async () => {
+    const connector = defineConnector({ name: 'notion', policy, clock: new FakeClock() });
+    const fn = vi.fn().mockRejectedValueOnce(failure(503)).mockResolvedValueOnce('done');
+    await expect(connector.read('getPage', {}, fn)).resolves.toBe('done');
+    expect(fn).toHaveBeenCalledTimes(2);
   });
 
   it('opens the breaker after repeated failures and refuses the next call', async () => {

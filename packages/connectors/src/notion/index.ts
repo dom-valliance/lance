@@ -10,13 +10,19 @@ export {
   NOTION_API_BASE_URL,
   NOTION_API_VERSION,
 } from './client.js';
-export type { NotionConnector, NotionConnectorOptions, NotionRequest } from './client.js';
+export type {
+  NotionConnector,
+  NotionConnectorOptions,
+  NotionReadRequest,
+  NotionRequest,
+} from './client.js';
 
 export {
   getDataSourceSchema,
   getTask,
   getUser,
   listUsers,
+  MAX_QUERY_PAGES,
   queryTasksEditedSince,
   QUERY_PAGE_SIZE,
 } from './reads.js';

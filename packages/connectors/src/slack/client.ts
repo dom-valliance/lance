@@ -4,6 +4,7 @@ import {
   type CallContext,
   type Connector,
   type ConnectorEvents,
+  type WriteOptions,
 } from '../core/connector.js';
 import { ConnectorError } from '../core/errors.js';
 import { fetchJson } from '../core/http.js';
@@ -22,16 +23,49 @@ export interface SlackClientOptions {
   fetchImpl?: typeof fetch;
 }
 
+/**
+ * What the rest of the repository may do with Slack: read, and inspect the
+ * framework wrapper. `call` reads; there is no write kind on it (spec 8,
+ * non-negotiable 2). `slackWriteAccess` below hands the write function to
+ * `writes.ts`, and no barrel re-exports it.
+ */
 export interface SlackClient {
   connector: Connector;
-  /** Calls a Web API method and returns its parsed, ok-checked body. */
+  /** Calls a read-only Web API method and returns its parsed, ok-checked body. */
   call<T>(
-    kind: 'read' | 'write',
     method: string,
     body: Record<string, unknown>,
     context?: CallContext,
     schema?: z.ZodType<T>,
   ): Promise<T>;
+}
+
+/** One Slack write. Package-internal; `writes.ts` is its only caller. */
+export interface SlackWrite {
+  <T>(
+    method: string,
+    body: Record<string, unknown>,
+    context: CallContext | undefined,
+    schema: z.ZodType<T> | undefined,
+    options?: WriteOptions,
+  ): Promise<T>;
+}
+
+const writeAccess = new WeakMap<SlackClient, SlackWrite>();
+
+/**
+ * The write half of a Slack client, for `slack/writes.ts` only. Deliberately
+ * absent from `slack/index.js` and from the package root.
+ */
+export function slackWriteAccess(client: SlackClient): SlackWrite {
+  const write = writeAccess.get(client);
+  if (write === undefined) {
+    throw new ConnectorError(
+      'slack: this object was not built by createSlackClient, so it carries no write capability. Pass the client createSlackClient returned.',
+      { connector: 'slack', operation: 'slackWriteAccess', retryable: false },
+    );
+  }
+  return write;
 }
 
 const RETRYABLE_SLACK_ERRORS = new Set([
@@ -59,12 +93,13 @@ export function createSlackClient(options: SlackClientOptions): SlackClient {
   });
   const fetchImpl = options.fetchImpl ?? fetch;
 
-  const call = async <T>(
+  const send = async <T>(
     kind: 'read' | 'write',
     method: string,
     body: Record<string, unknown>,
     context: CallContext = {},
-    schema?: z.ZodType<T>,
+    schema: z.ZodType<T> | undefined,
+    writeOptions: WriteOptions | undefined,
   ): Promise<T> => {
     const run = async (): Promise<T> => {
       const response = await fetchJson<unknown>(
@@ -87,8 +122,17 @@ export function createSlackClient(options: SlackClientOptions): SlackClient {
       return schema === undefined ? (envelope as T) : schema.parse(envelope);
     };
     const ctx: CallContext = { ...context, request: { method, keys: Object.keys(body).sort() } };
-    return kind === 'read' ? connector.read(method, ctx, run) : connector.write(method, ctx, run);
+    return kind === 'read'
+      ? connector.read(method, ctx, run)
+      : connector.write(method, ctx, run, writeOptions ?? {});
   };
 
-  return { connector, call };
+  const client: SlackClient = {
+    connector,
+    call: (method, body, context, schema) => send('read', method, body, context, schema, undefined),
+  };
+  const write: SlackWrite = (method, body, context, schema, options) =>
+    send('write', method, body, context, schema, options);
+  writeAccess.set(client, write);
+  return client;
 }

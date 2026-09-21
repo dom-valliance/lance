@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ConnectorError } from '../core/errors.js';
+import * as packageRoot from '../index.js';
 import { FakeClock } from '../core/testing.js';
 import { createSlackClient } from './client.js';
 import { slackReads } from './reads.js';
@@ -137,5 +138,69 @@ describe('Slack connector', () => {
       'postMessage',
       'updateMessage',
     ]);
+  });
+});
+
+describe('the Slack write boundary', () => {
+  it('keeps no write kind on the client callers hold', () => {
+    const client = createSlackClient({
+      token: 't',
+      fetchImpl: stubFetch([]).fetchImpl,
+      clock: new FakeClock(),
+    });
+    expect(Object.keys(client).sort()).toEqual(['call', 'connector']);
+  });
+
+  it('keeps the write accessor out of the package root', () => {
+    expect(Object.keys(packageRoot)).not.toContain('slackWriteAccess');
+    expect('slackWriteAccess' in packageRoot).toBe(false);
+  });
+});
+
+describe('write retries', () => {
+  const failures = (status: number, count: number) =>
+    Array.from({ length: count }, () => ({ status, body: { ok: false, error: 'internal_error' } }));
+
+  it('attempts a post once when Slack may already have delivered it', async () => {
+    const { fetchImpl, captured } = stubFetch(failures(503, 4));
+    const client = createSlackClient({ token: 't', fetchImpl, clock: new FakeClock() });
+    await expect(slackWrites(client).postMessage({ channel: 'C1', text: 'hello' })).rejects.toThrow(
+      'HTTP 503',
+    );
+    expect(captured).toHaveLength(1);
+  });
+
+  it('retries an update, which names the message it edits', async () => {
+    const { fetchImpl, captured } = stubFetch(failures(503, 4));
+    const clock = new FakeClock();
+    const client = createSlackClient({ token: 't', fetchImpl, clock });
+    await expect(
+      slackWrites(client).updateMessage({ channel: 'C1', ts: '9.9', text: 'edited' }),
+    ).rejects.toThrow('HTTP 503');
+    expect(captured).toHaveLength(4);
+  });
+
+  it('attempts a modal open once and an ephemeral post once', async () => {
+    const view = stubFetch(failures(503, 4));
+    const viewClient = createSlackClient({
+      token: 't',
+      fetchImpl: view.fetchImpl,
+      clock: new FakeClock(),
+    });
+    await expect(
+      slackWrites(viewClient).openView({ triggerId: 'tr', view: { type: 'modal' } }),
+    ).rejects.toThrow('HTTP 503');
+    expect(view.captured).toHaveLength(1);
+
+    const ephemeral = stubFetch(failures(503, 4));
+    const ephemeralClient = createSlackClient({
+      token: 't',
+      fetchImpl: ephemeral.fetchImpl,
+      clock: new FakeClock(),
+    });
+    await expect(
+      slackWrites(ephemeralClient).postEphemeral({ channel: 'C1', user: 'U1', text: 'only you' }),
+    ).rejects.toThrow('HTTP 503');
+    expect(ephemeral.captured).toHaveLength(1);
   });
 });

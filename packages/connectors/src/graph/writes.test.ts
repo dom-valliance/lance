@@ -1,6 +1,8 @@
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import * as packageRoot from '../index.js';
+import { FakeClock } from '../core/testing.js';
 import { createGraphConnector, GRAPH_BASE_URL, type GraphConnector } from './client.js';
 import { graphFixture } from './testing.js';
 import { graphWrites } from './writes.js';
@@ -241,5 +243,77 @@ describe('createEvent', () => {
       id: 'AAMkAGI2-evt-0303',
       webLink: 'https://outlook.office365.com/owa/?itemid=AAMkAGI2-evt-0303',
     });
+  });
+});
+
+describe('the Graph write boundary', () => {
+  it('keeps no write method on the connector callers hold', () => {
+    expect('write' in graph()).toBe(false);
+    expect(Object.keys(graph()).sort()).toEqual(['connector', 'read']);
+  });
+
+  it('keeps the write accessor out of the package root', () => {
+    expect(Object.keys(packageRoot)).not.toContain('graphWriteAccess');
+    expect('graphWriteAccess' in packageRoot).toBe(false);
+  });
+});
+
+describe('write retries', () => {
+  const failing = (status: number) => {
+    let calls = 0;
+    const handler = (): Response => {
+      calls += 1;
+      return new HttpResponse(null, { status });
+    };
+    return { handler, calls: () => calls };
+  };
+
+  /** A fake clock, so the backoff between attempts costs the test nothing. */
+  const quickGraph = (): GraphConnector =>
+    createGraphConnector({
+      accessToken: () => Promise.resolve('an-access-token'),
+      clock: new FakeClock(),
+    });
+
+  it('attempts a POST once when Graph may already have created the record', async () => {
+    const attempts = failing(503);
+    server.use(http.post(`${GRAPH_BASE_URL}/me/messages`, attempts.handler));
+
+    await expect(
+      graphWrites.createDraft(quickGraph(), {
+        subject: 'A note',
+        bodyText: 'Short.',
+        to: ['priya.raman@northwind.example.com'],
+      }),
+    ).rejects.toThrow('HTTP 503');
+    expect(attempts.calls()).toBe(1);
+  });
+
+  it('retries a PATCH, which names the record it changes and cannot duplicate it', async () => {
+    const attempts = failing(503);
+    server.use(http.patch(`${GRAPH_BASE_URL}/me/messages/:id`, attempts.handler));
+
+    await expect(
+      graphWrites.applyCategories(quickGraph(), {
+        messageId: 'AAMkAGI2-msg-0001',
+        categories: ['Deals'],
+      }),
+    ).rejects.toThrow('HTTP 503');
+    expect(attempts.calls()).toBe(4);
+  });
+
+  it('retries a POST when Graph answers 429, which says it refused the request', async () => {
+    const attempts = failing(429);
+    server.use(http.post(`${GRAPH_BASE_URL}/me/events`, attempts.handler));
+
+    await expect(
+      graphWrites.createEvent(quickGraph(), {
+        subject: 'Hold',
+        start: '2026-09-24T09:00:00',
+        end: '2026-09-24T10:00:00',
+        timeZone: 'Europe/London',
+      }),
+    ).rejects.toThrow('HTTP 429');
+    expect(attempts.calls()).toBe(4);
   });
 });

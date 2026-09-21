@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { CallContext } from '../core/connector.js';
 import { ConnectorError } from '../core/errors.js';
-import { notionPageUrl, type NotionConnector } from './client.js';
+import { notionPageUrl, notionSendAccess, type NotionConnector } from './client.js';
 import {
   LIST_MAX_LENGTH,
   notionCommentSchema,
@@ -17,7 +17,13 @@ import {
 /**
  * The three writes ADR 0009 allows on the All Tasks DB. There is no archive,
  * no delete and no schema change: Lance never removes a row and never touches
- * the database's columns.
+ * the database's columns. The request function comes from `notionSendAccess`,
+ * which no barrel exports, so the connector object callers hold cannot write.
+ *
+ * `updateTask` names the page it changes, so a repeat cannot make a second
+ * record and it keeps the full retry policy. `createTask` and `addComment`
+ * create one, so they retry only on 429, where Notion states it refused the
+ * request.
  */
 
 export const createTaskInputSchema = z.strictObject({
@@ -168,8 +174,9 @@ async function createTask(
     parent: { type: 'data_source_id', data_source_id: args.dataSourceId },
     properties: buildProperties(input),
   };
+  const send = notionSendAccess(notion);
   const raw = await notion.connector.write('createTask', { ...context, request: body }, () =>
-    notion.send('createTask', '/pages', { method: 'POST', body }),
+    send('createTask', '/pages', { method: 'POST', body }),
   );
   return notionPageRefSchema.parse(raw);
 }
@@ -186,10 +193,12 @@ async function updateTask(
   }
   const patch = updateTaskPatchSchema.parse(record);
   const body = { properties: buildProperties(patch) };
+  const send = notionSendAccess(notion);
   const raw = await notion.connector.write(
     'updateTask',
     { ...context, request: { pageId: args.pageId, ...body } },
-    () => notion.send('updateTask', `/pages/${args.pageId}`, { method: 'PATCH', body }),
+    () => send('updateTask', `/pages/${args.pageId}`, { method: 'PATCH', body }),
+    { idempotent: true },
   );
   return notionPageRefSchema.parse(raw);
 }
@@ -205,8 +214,9 @@ async function addComment(
 ): Promise<WriteResult> {
   const text = commentTextSchema.parse(args.text);
   const body = { parent: { page_id: args.pageId }, rich_text: richText(text) };
+  const send = notionSendAccess(notion);
   const raw = await notion.connector.write('addComment', { ...context, request: body }, () =>
-    notion.send('addComment', '/comments', { method: 'POST', body }),
+    send('addComment', '/comments', { method: 'POST', body }),
   );
   const comment = notionCommentSchema.parse(raw);
   return { id: comment.id, url: notionPageUrl(args.pageId) };

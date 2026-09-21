@@ -13,17 +13,26 @@ export interface RetryOutcome<T> {
   attempts: number;
 }
 
+/** Decides whether a failed attempt may be tried again. */
+export type ShouldRetry = (error: unknown) => boolean;
+
+/** The default: an error is retried only when it says it is retryable. */
+export const retryWhenRetryable: ShouldRetry = (error) =>
+  isConnectorError(error) ? error.retryable : false;
+
 /**
  * Exponential backoff with full jitter (delay uniformly drawn from 0 to the
  * capped exponential), honouring Retry-After when the remote sends one.
  * Only errors that say they are retryable are retried; a 400 or 404 fails
- * at once.
+ * at once. A caller that must be stricter, such as a write the remote may
+ * already have committed, passes its own `shouldRetry`.
  */
 export async function retryWithJitter<T>(
   fn: (attempt: number) => Promise<T>,
   policy: RetryPolicy,
   clock: Clock = systemClock,
   random: () => number = Math.random,
+  shouldRetry: ShouldRetry = retryWhenRetryable,
 ): Promise<RetryOutcome<T>> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= policy.attempts; attempt += 1) {
@@ -31,7 +40,7 @@ export async function retryWithJitter<T>(
       return { value: await fn(attempt), attempts: attempt };
     } catch (error) {
       lastError = error;
-      const retryable = isConnectorError(error) ? error.retryable : false;
+      const retryable = shouldRetry(error);
       if (!retryable || attempt === policy.attempts) throw error;
       const retryAfterMs =
         isConnectorError(error) && error.retryAfterSeconds !== undefined

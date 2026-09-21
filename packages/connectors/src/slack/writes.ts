@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { CallContext } from '../core/connector.js';
-import type { SlackClient } from './client.js';
+import { slackWriteAccess, type SlackClient } from './client.js';
 
 const PostedSchema = z
   .object({ ok: z.literal(true), channel: z.string(), ts: z.string() })
@@ -20,9 +20,16 @@ export interface PostMessageInput {
 /**
  * The four Slack writes spec 8 allows: post, update, ephemeral, open modal.
  * Lance posts as its own bot user, never as Dom (spec 4.1). Reachable only
- * from the executor and the proposal router through the writes entry point.
+ * from the executor and the proposal router through the writes entry point,
+ * and the write capability comes from `slackWriteAccess`, which no barrel
+ * exports.
+ *
+ * `chat.update` names the message it edits, so a repeat cannot post a second
+ * one and it keeps the full retry policy. The other three create something,
+ * so they retry only on 429, where Slack states it refused the request.
  */
 export function slackWrites(client: SlackClient) {
+  const write = slackWriteAccess(client);
   return {
     async postMessage(
       input: PostMessageInput,
@@ -35,7 +42,7 @@ export function slackWrites(client: SlackClient) {
       };
       if (input.blocks !== undefined) body['blocks'] = input.blocks;
       if (input.threadTs !== undefined) body['thread_ts'] = input.threadTs;
-      const posted = await client.call('write', 'chat.postMessage', body, context, PostedSchema);
+      const posted = await write('chat.postMessage', body, context, PostedSchema);
       return { channel: posted.channel, ts: posted.ts };
     },
     async updateMessage(
@@ -48,7 +55,9 @@ export function slackWrites(client: SlackClient) {
         text: input.text,
       };
       if (input.blocks !== undefined) body['blocks'] = input.blocks;
-      const updated = await client.call('write', 'chat.update', body, context, PostedSchema);
+      const updated = await write('chat.update', body, context, PostedSchema, {
+        idempotent: true,
+      });
       return { channel: updated.channel, ts: updated.ts };
     },
     async postEphemeral(
@@ -61,21 +70,14 @@ export function slackWrites(client: SlackClient) {
         text: input.text,
       };
       if (input.blocks !== undefined) body['blocks'] = input.blocks;
-      const posted = await client.call(
-        'write',
-        'chat.postEphemeral',
-        body,
-        context,
-        EphemeralSchema,
-      );
+      const posted = await write('chat.postEphemeral', body, context, EphemeralSchema);
       return { messageTs: posted.message_ts };
     },
     async openView(
       input: { triggerId: string; view: unknown },
       context?: CallContext,
     ): Promise<{ viewId: string }> {
-      const opened = await client.call(
-        'write',
+      const opened = await write(
         'views.open',
         { trigger_id: input.triggerId, view: input.view },
         context,

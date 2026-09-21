@@ -39,7 +39,7 @@ export function slackReads(client: SlackClient) {
       const body: Record<string, unknown> = { channel: input.channel, limit: input.limit ?? 200 };
       if (input.oldest !== undefined) body['oldest'] = input.oldest;
       if (input.cursor !== undefined) body['cursor'] = input.cursor;
-      const page = await client.call('read', 'conversations.history', body, {}, HistorySchema);
+      const page = await client.call('conversations.history', body, {}, HistorySchema);
       const next = page.response_metadata?.next_cursor;
       return {
         messages: page.messages,
@@ -53,7 +53,7 @@ export function slackReads(client: SlackClient) {
     }): Promise<HistoryPage> {
       const body: Record<string, unknown> = { channel: input.channel, ts: input.ts, limit: 200 };
       if (input.cursor !== undefined) body['cursor'] = input.cursor;
-      const page = await client.call('read', 'conversations.replies', body, {}, HistorySchema);
+      const page = await client.call('conversations.replies', body, {}, HistorySchema);
       const next = page.response_metadata?.next_cursor;
       return {
         messages: page.messages,

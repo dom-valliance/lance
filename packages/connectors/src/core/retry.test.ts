@@ -50,6 +50,24 @@ describe('retryWithJitter', () => {
     expect(clock.sleeps).toEqual([99, 199, 399]);
   });
 
+  it('obeys a caller predicate that is stricter than the error itself', async () => {
+    const only429 = (error: unknown): boolean =>
+      error instanceof ConnectorError && error.status === 429;
+    const fn = vi.fn().mockRejectedValue(retryable(503));
+    await expect(retryWithJitter(fn, policy, new FakeClock(), () => 0, only429)).rejects.toThrow(
+      'HTTP 503',
+    );
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('still retries what a caller predicate allows', async () => {
+    const only429 = (error: unknown): boolean =>
+      error instanceof ConnectorError && error.status === 429;
+    const fn = vi.fn().mockRejectedValueOnce(retryable(429)).mockResolvedValueOnce('ok');
+    const outcome = await retryWithJitter(fn, policy, new FakeClock(), () => 0, only429);
+    expect(outcome).toEqual({ value: 'ok', attempts: 2 });
+  });
+
   it('honours Retry-After over the backoff, capped at the maximum delay', async () => {
     const clock = new FakeClock();
     const error = new ConnectorError('HTTP 429', {

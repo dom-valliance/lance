@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GRAPH_BASE_URL, type GraphConnector } from './client.js';
+import { graphWriteAccess, GRAPH_BASE_URL, type GraphConnector } from './client.js';
 
 /**
  * The five Graph writes of spec 8: create draft, create reply draft,
@@ -13,7 +13,13 @@ import { GRAPH_BASE_URL, type GraphConnector } from './client.js';
  * stays free of construction and the executor supplies a connector built
  * with the current access token. Only `apps/worker/src/executor` may
  * import this module's re-export, enforced by the ESLint boundary on
- * `@lance/connectors/writes`.
+ * `@lance/connectors/writes`, and the write capability itself comes from
+ * `graphWriteAccess`, which no barrel exports.
+ *
+ * A POST creates a record, so it is not marked idempotent: it retries only
+ * on 429, where Graph states it refused the request. The PATCHes name the
+ * record they change, so repeating one cannot make a second, and they keep
+ * the full retry policy.
  */
 
 export interface GraphWriteResult {
@@ -91,14 +97,11 @@ async function createDraft(
   if (input.cc !== undefined && input.cc.length > 0) {
     body['ccRecipients'] = recipients(input.cc);
   }
-  const record = await graph.write(
+  const record = await graphWriteAccess(graph)(
     'createDraft',
     `${GRAPH_BASE_URL}/me/messages`,
     WrittenRecordSchema,
-    {
-      method: 'POST',
-      body,
-    },
+    { method: 'POST', body },
   );
   return toResult(record);
 }
@@ -112,16 +115,20 @@ async function createReplyDraft(
   graph: GraphConnector,
   input: CreateReplyDraftInput,
 ): Promise<GraphWriteResult> {
-  const draft = await graph.write(
+  const write = graphWriteAccess(graph);
+  const draft = await write(
     'createReplyDraft',
     `${messageUrl(input.messageId)}/createReply`,
     WrittenRecordSchema,
     { method: 'POST', body: {} },
   );
-  const updated = await graph.write('createReplyDraft', messageUrl(draft.id), WrittenRecordSchema, {
-    method: 'PATCH',
-    body: { body: textBody(input.comment) },
-  });
+  const updated = await write(
+    'createReplyDraft',
+    messageUrl(draft.id),
+    WrittenRecordSchema,
+    { method: 'PATCH', body: { body: textBody(input.comment) } },
+    { idempotent: true },
+  );
   return toResult(updated);
 }
 
@@ -129,11 +136,12 @@ async function applyCategories(
   graph: GraphConnector,
   input: ApplyCategoriesInput,
 ): Promise<GraphWriteResult> {
-  const record = await graph.write(
+  const record = await graphWriteAccess(graph)(
     'applyCategories',
     messageUrl(input.messageId),
     WrittenRecordSchema,
     { method: 'PATCH', body: { categories: [...input.categories] } },
+    { idempotent: true },
   );
   return toResult(record);
 }
@@ -143,7 +151,7 @@ async function moveMessage(
   graph: GraphConnector,
   input: MoveMessageInput,
 ): Promise<GraphWriteResult> {
-  const record = await graph.write(
+  const record = await graphWriteAccess(graph)(
     'moveMessage',
     `${messageUrl(input.messageId)}/move`,
     WrittenRecordSchema,
@@ -156,7 +164,7 @@ async function createEvent(
   graph: GraphConnector,
   input: CreateEventInput,
 ): Promise<GraphWriteResult> {
-  const record = await graph.write(
+  const record = await graphWriteAccess(graph)(
     'createEvent',
     `${GRAPH_BASE_URL}/me/events`,
     WrittenRecordSchema,

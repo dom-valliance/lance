@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import type { ConnectorError } from '../core/errors.js';
 import { FakeClock } from '../core/testing.js';
 import { createNotionConnector, type NotionConnector } from './client.js';
 import {
@@ -9,6 +10,7 @@ import {
   getTask,
   getUser,
   listUsers,
+  MAX_QUERY_PAGES,
   queryTasksEditedSince,
 } from './reads.js';
 
@@ -167,5 +169,51 @@ describe('getUser', () => {
     );
     const user = await getUser(connector(), '3b7c1d90-2f44-4a11-9c02-7d5e8a1b6c40');
     expect(user.name).toBe('Robin Ash');
+  });
+});
+
+describe('the paging cap', () => {
+  it('stops a task query that never converges and says what to do', async () => {
+    let pages = 0;
+    server.use(
+      http.post(QUERY_URL, () => {
+        pages += 1;
+        return HttpResponse.json({
+          object: 'list',
+          results: [],
+          next_cursor: `cursor-${pages}`,
+          has_more: true,
+        });
+      }),
+    );
+    const error = (await queryTasksEditedSince(connector(), {
+      dataSourceId: DATA_SOURCE_ID,
+      since: '2026-09-18T00:00:00.000Z',
+    }).catch((caught: unknown) => caught)) as ConnectorError;
+    expect(pages).toBe(MAX_QUERY_PAGES);
+    expect(error.message).toContain(`within ${MAX_QUERY_PAGES} pages`);
+    expect(error.message).toContain('Narrow the window');
+    expect(error.retryable).toBe(false);
+  });
+
+  it('stops a member listing that never converges', async () => {
+    let pages = 0;
+    server.use(
+      http.get('https://api.notion.com/v1/users', () => {
+        pages += 1;
+        return HttpResponse.json({
+          object: 'list',
+          results: [],
+          next_cursor: `cursor-${pages}`,
+          has_more: true,
+        });
+      }),
+    );
+    const error = (await listUsers(connector()).catch(
+      (caught: unknown) => caught,
+    )) as ConnectorError;
+    expect(pages).toBe(MAX_QUERY_PAGES);
+    expect(error.message).toContain(`within ${MAX_QUERY_PAGES} pages`);
+    expect(error.message).toContain('Check the Notion workspace member count');
   });
 });

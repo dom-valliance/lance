@@ -8,6 +8,7 @@ import {
   type ConnectorEvents,
   type ConnectorPolicy,
   type JsonRequest,
+  type WriteOptions,
 } from '../core/index.js';
 import type { AccessTokenProvider } from './accessToken.js';
 
@@ -47,16 +48,45 @@ export interface GraphConnectorOptions {
   fetchImpl?: typeof fetch;
 }
 
+/**
+ * What the rest of the repository may do with Graph: read, and inspect the
+ * framework wrapper. Writing is not on this object at all (spec 8,
+ * non-negotiable 2); `graphWriteAccess` below hands the write function to
+ * `writes.ts`, and no barrel re-exports it, so nothing outside this package
+ * can reach it.
+ */
 export interface GraphConnector {
   /** The framework wrapper, for breaker state on the Agents page. */
   readonly connector: Connector;
   read<T>(operation: string, url: string, schema: z.ZodType<T>, request?: GraphRequest): Promise<T>;
-  write<T>(
+}
+
+/** One Graph write. Package-internal; `writes.ts` is its only caller. */
+export interface GraphWrite {
+  <T>(
     operation: string,
     url: string,
     schema: z.ZodType<T>,
     request?: GraphRequest,
+    options?: WriteOptions,
   ): Promise<T>;
+}
+
+const writeAccess = new WeakMap<GraphConnector, GraphWrite>();
+
+/**
+ * The write half of a Graph connector, for `graph/writes.ts` only. Deliberately
+ * absent from `graph/index.js` and from the package root.
+ */
+export function graphWriteAccess(graph: GraphConnector): GraphWrite {
+  const write = writeAccess.get(graph);
+  if (write === undefined) {
+    throw new ConnectorError(
+      'graph: this object was not built by createGraphConnector, so it carries no write capability. Pass the connector createGraphConnector returned.',
+      { connector: 'graph', operation: 'graphWriteAccess', retryable: false },
+    );
+  }
+  return write;
 }
 
 /**
@@ -88,6 +118,7 @@ export function createGraphConnector(options: GraphConnectorOptions): GraphConne
     url: string,
     schema: z.ZodType<T>,
     request: GraphRequest,
+    writeOptions: WriteOptions | undefined,
   ): Promise<T> => {
     const run = async (): Promise<T> => {
       const bearer = await options.accessToken();
@@ -116,12 +147,16 @@ export function createGraphConnector(options: GraphConnectorOptions): GraphConne
     const context = { request: { method: request.method ?? 'GET', path: pathOf(url) } };
     return kind === 'read'
       ? connector.read(operation, context, run)
-      : connector.write(operation, context, run);
+      : connector.write(operation, context, run, writeOptions ?? {});
   };
 
-  return {
+  const graph: GraphConnector = {
     connector,
-    read: (operation, url, schema, request = {}) => send('read', operation, url, schema, request),
-    write: (operation, url, schema, request = {}) => send('write', operation, url, schema, request),
+    read: (operation, url, schema, request = {}) =>
+      send('read', operation, url, schema, request, undefined),
   };
+  const write: GraphWrite = (operation, url, schema, request = {}, options) =>
+    send('write', operation, url, schema, request, options);
+  writeAccess.set(graph, write);
+  return graph;
 }

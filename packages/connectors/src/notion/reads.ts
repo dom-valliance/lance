@@ -1,5 +1,6 @@
 import type { CallContext } from '../core/connector.js';
-import type { NotionConnector } from './client.js';
+import { ConnectorError } from '../core/errors.js';
+import { notionSendAccess, type NotionConnector } from './client.js';
 import {
   fromNotionDataSource,
   fromNotionPage,
@@ -16,6 +17,21 @@ import {
 
 /** Notion's maximum, and the watcher's window size. */
 export const QUERY_PAGE_SIZE = 100;
+
+/**
+ * The ceiling on a paged Notion read, as Graph's delta reads have. At 100
+ * rows a page this is 20,000 rows, far more than the All Tasks database or
+ * the workspace member list holds; reaching it means Notion is paging
+ * without converging, and the read fails loudly rather than spinning.
+ */
+export const MAX_QUERY_PAGES = 200;
+
+function pagingDidNotFinish(operation: string, advice: string): ConnectorError {
+  return new ConnectorError(
+    `notion ${operation}: paging did not finish within ${MAX_QUERY_PAGES} pages of ${QUERY_PAGE_SIZE}. ${advice}`,
+    { connector: 'notion', operation, retryable: false },
+  );
+}
 
 export interface QueryTasksArgs {
   /**
@@ -57,10 +73,11 @@ async function queryOnePage(
     'queryTasksEditedSince',
     { ...context, request: { dataSourceId: args.dataSourceId, since: args.since, cursor } },
     () =>
-      notion.send('queryTasksEditedSince', `/data_sources/${args.dataSourceId}/query`, {
-        method: 'POST',
-        body,
-      }),
+      notionSendAccess(notion)(
+        'queryTasksEditedSince',
+        `/data_sources/${args.dataSourceId}/query`,
+        { method: 'POST', body },
+      ),
   );
   const response = notionQueryResponseSchema.parse(raw);
   return {
@@ -81,13 +98,16 @@ export async function queryTasksEditedSince(
 ): Promise<QueryTasksResult> {
   const tasks: TaskRecord[] = [];
   let cursor: string | null = args.cursor ?? null;
-  for (;;) {
-    const page: QueryPageResult = await queryOnePage(notion, args, cursor, context);
-    tasks.push(...page.tasks);
-    cursor = page.nextCursor;
-    if (!page.hasMore || cursor === null) break;
+  for (let page = 1; page <= MAX_QUERY_PAGES; page += 1) {
+    const result: QueryPageResult = await queryOnePage(notion, args, cursor, context);
+    tasks.push(...result.tasks);
+    cursor = result.nextCursor;
+    if (!result.hasMore || cursor === null) return { tasks, cursor };
   }
-  return { tasks, cursor };
+  throw pagingDidNotFinish(
+    'queryTasksEditedSince',
+    'Narrow the window by moving the watcher cursor forward, then resume from the cursor the last run returned.',
+  );
 }
 
 /** One task page, normalised. */
@@ -126,7 +146,7 @@ export async function listUsers(
 ): Promise<readonly NotionUserSummary[]> {
   const users: NotionUserSummary[] = [];
   let cursor: string | null = null;
-  for (;;) {
+  for (let page = 1; page <= MAX_QUERY_PAGES; page += 1) {
     const query: Record<string, string> = { page_size: String(QUERY_PAGE_SIZE) };
     if (cursor !== null) query.start_cursor = cursor;
     const raw = await notion.connector.read('listUsers', { ...context, request: { cursor } }, () =>
@@ -135,9 +155,12 @@ export async function listUsers(
     const response = notionUserListSchema.parse(raw);
     users.push(...response.results.map(fromNotionUser));
     cursor = response.next_cursor;
-    if (!response.has_more || cursor === null) break;
+    if (!response.has_more || cursor === null) return users;
   }
-  return users;
+  throw pagingDidNotFinish(
+    'listUsers',
+    'Check the Notion workspace member count and the integration permissions before retrying.',
+  );
 }
 
 /** One workspace member by id. */

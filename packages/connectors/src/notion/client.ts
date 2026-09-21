@@ -1,4 +1,10 @@
-import { defineConnector, fetchJson, type Connector, type ConnectorEvents } from '../core/index.js';
+import {
+  ConnectorError,
+  defineConnector,
+  fetchJson,
+  type Connector,
+  type ConnectorEvents,
+} from '../core/index.js';
 import type { ConnectorPolicy } from '../core/connector.js';
 import type { Clock } from '../core/rateLimit.js';
 import type { JsonRequest } from '../core/http.js';
@@ -47,15 +53,53 @@ export interface NotionRequest {
   query?: Record<string, string>;
 }
 
+/** What the public `send` accepts: a GET, with query parameters at most. */
+export interface NotionReadRequest {
+  method?: 'GET';
+  query?: Record<string, string>;
+}
+
+/**
+ * What the rest of the repository may do with Notion: read, and inspect the
+ * framework wrapper. `send` refuses anything but a GET, so the object cannot
+ * be turned into a general-purpose writer (spec 8, non-negotiable 2).
+ * `notionSendAccess` below hands the unrestricted request function to the
+ * modules that need it, and no barrel re-exports it.
+ */
 export interface NotionConnector {
   /** The framework connector: rate limit, retry, breaker and span per call. */
   readonly connector: Connector;
   /**
-   * One authorised request. Callers wrap it in `connector.read` or
-   * `connector.write`; it does no wrapping itself, so paging takes one token
-   * per page rather than one per run.
+   * One authorised GET. Callers wrap it in `connector.read`; it does no
+   * wrapping itself, so paging takes one token per page rather than one per
+   * run.
    */
-  send(operation: string, path: string, request?: NotionRequest): Promise<unknown>;
+  send(operation: string, path: string, request?: NotionReadRequest): Promise<unknown>;
+}
+
+/** One authorised request of any method. Package-internal. */
+export type NotionSend = (
+  operation: string,
+  path: string,
+  request?: NotionRequest,
+) => Promise<unknown>;
+
+const sendAccess = new WeakMap<NotionConnector, NotionSend>();
+
+/**
+ * The unrestricted request function, for `notion/writes.ts` and for the one
+ * read Notion requires a POST for (`/data_sources/{id}/query`). Deliberately
+ * absent from `notion/index.js` and from the package root.
+ */
+export function notionSendAccess(notion: NotionConnector): NotionSend {
+  const send = sendAccess.get(notion);
+  if (send === undefined) {
+    throw new ConnectorError(
+      'notion: this object was not built by createNotionConnector, so it carries no write capability. Pass the connector createNotionConnector returned.',
+      { connector: 'notion', operation: 'notionSendAccess', retryable: false },
+    );
+  }
+  return send;
 }
 
 function buildUrl(path: string, query: Record<string, string> | undefined): string {
@@ -79,7 +123,7 @@ export function createNotionConnector(options: NotionConnectorOptions): NotionCo
   };
   const connector = defineConnector(connectorOptions);
 
-  const send = async (
+  const sendAny: NotionSend = async (
     operation: string,
     path: string,
     request: NotionRequest = {},
@@ -102,7 +146,24 @@ export function createNotionConnector(options: NotionConnectorOptions): NotionCo
     return response.body;
   };
 
-  return { connector, send };
+  const send = async (
+    operation: string,
+    path: string,
+    request: NotionReadRequest = {},
+  ): Promise<unknown> => {
+    const method = (request as NotionRequest).method;
+    if (method !== undefined && method !== 'GET') {
+      throw new ConnectorError(
+        `notion ${operation}: send is read-only and refuses ${method}. Every Notion write lives in packages/connectors/src/notion/writes.ts and reaches callers through @lance/connectors/writes, which only apps/worker/src/executor may import.`,
+        { connector: 'notion', operation, retryable: false },
+      );
+    }
+    return sendAny(operation, path, { ...request, method: 'GET' });
+  };
+
+  const notion: NotionConnector = { connector, send };
+  sendAccess.set(notion, sendAny);
+  return notion;
 }
 
 /**

@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { ConnectorError } from '../core/errors.js';
+import * as packageRoot from '../index.js';
 import { FakeClock } from '../core/testing.js';
 import { createNotionConnector, type NotionConnector } from './client.js';
 import { notionWrites } from './writes.js';
@@ -259,5 +260,83 @@ describe('addComment', () => {
     await expect(
       notionWrites.addComment(connector(), { pageId: PAGE_ID, text: '   ' }),
     ).rejects.toThrow();
+  });
+});
+
+describe('the Notion write boundary', () => {
+  it('refuses a non-GET on the connector callers hold', async () => {
+    /** TypeScript refuses this too; the cast proves the runtime guard is real. */
+    const post = { method: 'POST' } as unknown as { method: 'GET' };
+    const error = (await connector()
+      .send('createTask', '/pages', post)
+      .catch((caught: unknown) => caught)) as ConnectorError;
+    expect(error).toBeInstanceOf(ConnectorError);
+    expect(error.retryable).toBe(false);
+    expect(error.message).toContain('send is read-only and refuses POST');
+    expect(error.message).toContain('@lance/connectors/writes');
+  });
+
+  it('keeps the send accessor out of the package root', () => {
+    expect(Object.keys(packageRoot)).not.toContain('notionSendAccess');
+    expect('notionSendAccess' in packageRoot).toBe(false);
+  });
+});
+
+describe('write retries', () => {
+  const failing = (status: number) => {
+    let calls = 0;
+    const handler = (): Response => {
+      calls += 1;
+      return new HttpResponse(null, { status });
+    };
+    return { handler, calls: () => calls };
+  };
+
+  it('attempts a task create once when Notion may already have made the page', async () => {
+    const attempts = failing(503);
+    server.use(http.post('https://api.notion.com/v1/pages', attempts.handler));
+    await expect(
+      notionWrites.createTask(connector(), {
+        dataSourceId: DATA_SOURCE_ID,
+        permittedProperties: PERMITTED,
+        input: { title: 'Send the revised scope' },
+      }),
+    ).rejects.toThrow('HTTP 503');
+    expect(attempts.calls()).toBe(1);
+  });
+
+  it('attempts a comment once, since a repeat would post a second comment', async () => {
+    const attempts = failing(503);
+    server.use(http.post('https://api.notion.com/v1/comments', attempts.handler));
+    await expect(
+      notionWrites.addComment(connector(), { pageId: PAGE_ID, text: 'Moved to Done.' }),
+    ).rejects.toThrow('HTTP 503');
+    expect(attempts.calls()).toBe(1);
+  });
+
+  it('retries a task update, which names the page it changes', async () => {
+    const attempts = failing(503);
+    server.use(http.patch(`https://api.notion.com/v1/pages/${PAGE_ID}`, attempts.handler));
+    await expect(
+      notionWrites.updateTask(connector(), {
+        pageId: PAGE_ID,
+        permittedProperties: PERMITTED,
+        patch: { status: 'Done' },
+      }),
+    ).rejects.toThrow('HTTP 503');
+    expect(attempts.calls()).toBe(4);
+  });
+
+  it('retries a task create when Notion answers 429, which says it refused it', async () => {
+    const attempts = failing(429);
+    server.use(http.post('https://api.notion.com/v1/pages', attempts.handler));
+    await expect(
+      notionWrites.createTask(connector(), {
+        dataSourceId: DATA_SOURCE_ID,
+        permittedProperties: PERMITTED,
+        input: { title: 'Send the revised scope' },
+      }),
+    ).rejects.toThrow('HTTP 429');
+    expect(attempts.calls()).toBe(4);
   });
 });
