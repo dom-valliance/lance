@@ -1,11 +1,11 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { ActionForm } from '@/components/action-form';
 import { LiveRefresh } from '@/components/live-refresh';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import type { SearchParams } from '@/lib/filters';
 import { diffPayload, editableFields, formatInstant, REJECT_REASONS } from '@/lib/proposal-view';
 import { apiClient } from '@/lib/trpc';
 import { approveProposal, editProposal, rejectProposal, snoozeProposal } from '../actions';
@@ -26,15 +26,8 @@ function summarise(payload: unknown): string {
     .join(', ');
 }
 
-export default async function ProposalPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ id: string }>;
-  searchParams: Promise<SearchParams>;
-}) {
+export default async function ProposalPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const query = await searchParams;
   const client = await apiClient();
 
   const proposal = await client.proposals.get.query({ proposalId: id });
@@ -42,7 +35,6 @@ export default async function ProposalPage({
 
   const trail = await client.ledger.correlation.query({ correlationId: proposal.correlationId });
   const changes = diffPayload(proposal.payload, proposal.editedPayload);
-  const failure = typeof query['error'] === 'string' ? query['error'] : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -51,16 +43,6 @@ export default async function ProposalPage({
       <Button asChild variant="ghost" className="w-fit">
         <Link href="/proposals">Back to proposals</Link>
       </Button>
-
-      {failure === null ? null : (
-        <Card>
-          <CardContent>
-            <p role="alert" className="text-sm text-destructive">
-              {failure}
-            </p>
-          </CardContent>
-        </Card>
-      )}
 
       <Card>
         <CardHeader>
@@ -172,21 +154,21 @@ export default async function ProposalPage({
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           <div className="flex flex-wrap gap-3">
-            <form action={approveProposal}>
+            <ActionForm action={approveProposal}>
               <input type="hidden" name="proposalId" value={proposal.id} />
               <Button type="submit">Approve</Button>
-            </form>
-            <form action={snoozeProposal}>
+            </ActionForm>
+            <ActionForm action={snoozeProposal}>
               <input type="hidden" name="proposalId" value={proposal.id} />
               <Button type="submit" variant="outline">
                 Snooze 4h
               </Button>
-            </form>
+            </ActionForm>
           </div>
 
           <Separator />
 
-          <form action={editProposal} className="flex flex-col gap-3">
+          <ActionForm action={editProposal} className="flex flex-col gap-3">
             <h2 className="text-sm font-medium">Edit</h2>
             <input type="hidden" name="proposalId" value={proposal.id} />
             {editableFields(proposal.payload).map(([field, value]) => (
@@ -203,11 +185,11 @@ export default async function ProposalPage({
             <Button type="submit" variant="outline" className="w-fit">
               Save the edit and execute
             </Button>
-          </form>
+          </ActionForm>
 
           <Separator />
 
-          <form action={rejectProposal} className="flex flex-col gap-3">
+          <ActionForm action={rejectProposal} className="flex flex-col gap-3">
             <h2 className="text-sm font-medium">Reject</h2>
             <input type="hidden" name="proposalId" value={proposal.id} />
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -227,7 +209,7 @@ export default async function ProposalPage({
             <Button type="submit" variant="destructive" className="w-fit">
               Reject
             </Button>
-          </form>
+          </ActionForm>
         </CardContent>
       </Card>
 
