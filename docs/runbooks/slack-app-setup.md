@@ -24,7 +24,7 @@ az containerapp show -g rg-lance-dev -n ca-lance-api-dev --query properties.conf
 ## 2. Create the app from the manifest
 
 1. api.slack.com/apps, Create New App, From a manifest, pick the Valliance workspace.
-2. Paste `slack-app-manifest.json` with `<api-hostname>` replaced by the value from step 1. Create.
+2. Paste `slack-app-manifest.json` with `<api-hostname>` replaced by the value from step 1. It is the api hostname (`ca-lance-api-...`), not the web one; a command sent to the web app comes back as its sign-in page. Create.
 
 ## 3. Install and capture the secrets
 
@@ -41,6 +41,10 @@ read -s SIGN && az keyvault secret set --vault-name $KV --name slack-signing-sec
 ## 4. Channel
 
 `/invite @Lance` in `dom-claude-agent`. The channel id is configuration, not a secret, and is the default in `packages/shared` config.
+
+## 4a. If the app already exists with the wrong URLs
+
+Slack app settings, Slash Commands, edit `/lance` and set the request URL to `https://<api-hostname>/slack/commands`. Then Interactivity and Shortcuts, set the request URL to `https://<api-hostname>/slack/interactions`. Save each; no reinstall is needed for URL changes.
 
 ## 5. Verify
 
