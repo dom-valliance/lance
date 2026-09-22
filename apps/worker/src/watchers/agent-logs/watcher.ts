@@ -76,6 +76,8 @@ export function createAgentLogsWatcher(options: AgentLogsWatcherOptions): Watche
 
   return {
     name: AGENT_LOGS_WATCHER_NAME,
+    // Log lines are for the stale-watermark and error detectors, not for a Sonnet triage call each.
+    triage: false,
     // The watcher's own system. Each stream's observations carry the system
     // they came from: `slack`, `lance` and `webhook` (spec 7.1).
     sourceSystem: 'lance',

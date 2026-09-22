@@ -39,6 +39,11 @@ export interface Watcher {
   partitions(): Promise<string[]>;
   poll(partition: string, cursor: string | null): Promise<PollResult>;
   normalise(record: SourceRecord, partition: string): Promise<Observation>;
+  /**
+   * False for a watcher whose observations feed detectors rather than the
+   * triage agent; the agent-logs watcher is one. Default true.
+   */
+  triage?: boolean;
 }
 
 export interface PartitionRunSummary {
