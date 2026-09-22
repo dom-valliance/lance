@@ -96,6 +96,14 @@ describe('renderAlertCard', () => {
     expect(contextTexts(statusBlock as ContextBlock)[0]).toBe('Acked by user:dom at 09:05');
   });
 
+  it('renders no provenance block when the alert has no provenance, so Slack accepts the card', () => {
+    const { blocks } = renderAlertCard(validAlert({ provenance: [] }), OPTIONS);
+    expect(() => assertWithinSlackLimits(blocks)).not.toThrow();
+    expect(blocks.every((block) => block.type !== 'context' || block.elements.length > 0)).toBe(
+      true,
+    );
+  });
+
   it('renders provenance without a url as plain text', () => {
     const alert = validAlert({
       provenance: [

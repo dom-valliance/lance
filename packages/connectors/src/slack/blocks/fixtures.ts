@@ -104,5 +104,10 @@ export function assertWithinSlackLimits(blocks: readonly KnownBlock[]): void {
     if (block.type === 'header' && block.text.text.length > MAX_HEADER_TEXT) {
       throw new Error(`Header text exceeds ${String(MAX_HEADER_TEXT)} characters`);
     }
+    if (block.type === 'context' && (block.elements.length < 1 || block.elements.length > 10)) {
+      throw new Error(
+        `Context block must carry between 1 and 10 elements, has ${String(block.elements.length)}`,
+      );
+    }
   }
 }

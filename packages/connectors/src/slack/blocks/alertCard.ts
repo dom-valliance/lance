@@ -65,7 +65,7 @@ export function renderAlertCard(alert: Alert, options: RenderOptions): RenderedM
     { type: 'header', text: { type: 'plain_text', text: alert.severity } },
     { type: 'section', text: { type: 'mrkdwn', text: `*${alert.title}*` } },
     { type: 'section', text: { type: 'mrkdwn', text: body } },
-    provenanceContext(alert.provenance),
+    ...provenanceContext(alert.provenance),
   ];
 
   if (alert.count > 1) {
