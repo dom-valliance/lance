@@ -268,6 +268,8 @@ Lance starts in dry run: proposals are created and held, nothing is written exte
 
 ## Notes
 
+- A deploy updates the migration job's image but never runs it. After any deploy that carries a new migration, start the job and read its execution status and log (step 8) before trusting the apps; a worker or api that needs a table or a graph label the job has not created fails at its first use, not at start-up.
+
 - Prod uses `infra/params/prod.bicepparam`, which never deploys on the bootstrap image. Push the images to the prod registry and set `containerImageTag` before the first prod deploy.
 - Deleting the resource group leaves the Key Vault soft deleted for 90 days, and purge protection means it cannot be purged early. The vault name is derived from the subscription id and the resource group name, so a redeploy into the same group asks for the same name and collides with the soft deleted vault. Recover it rather than renaming: `az keyvault recover --name <vault name>`.
 - The api is externally reachable on every route because Container Apps has no path-scoped ingress. The api enforces Entra bearer authentication on every route except `/slack/*` and `/ingest/*`, and Slack signature verification on those two. Phase 5 revisits this.

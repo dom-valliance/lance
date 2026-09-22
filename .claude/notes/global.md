@@ -146,3 +146,10 @@
 **Correction**: Dom: "I will not always be on the same IP as I move between work and home".
 **Rule**: Access for a laptop is opened per session by `scripts/psql-admin.sh`, which adds a rule for the current address, waits for it, runs psql with an Entra token, and removes the rule on exit. The template's only firewall rule is the Azure services one. Anything tied to where a person happens to be is never a deployment parameter.
 **Applies to**: scripts/psql-admin.sh, infra/modules/postgres.bicep, docs/runbooks/deploy.md
+
+### [2026-09-22] An image that builds is not an image that starts
+
+**Context**: The Phase 2 deploy at 7bd63f5 succeeded, then the api and worker crashed at start with ERR_MODULE_NOT_FOUND on @lance/ontology: the new package was never added to the two Dockerfiles' source lists. CI's image job built all three images green, because a Dockerfile that omits a source directory still builds; the failure only exists at start-up.
+**Correction**: Found by reading the worker console log after the deploy, as the gotcha says; Dom saw nothing new.
+**Rule**: CI runs every image it builds: the api and worker import their entry module inside the container (`scripts/smoke-image.sh`), the web image is started and asked for a page. A new `workspace:*` dependency is not done until that step passes. The migration job is started by hand after a deploy that adds a migration; the deploy alone never runs it.
+**Applies to**: .github/workflows/ci.yml, scripts/smoke-image.sh, apps/*/Dockerfile, docs/runbooks/deploy.md
