@@ -95,3 +95,14 @@ The web app was rebuilt from the Claude Design package described in `docs/design
 - Regenerate on Today, Mark done and Create task on Tasks are wired as server actions that answer with a plain-words sentence until the Phase 3 planner and the create-task and complete-task proposals exist; each is one call away from the real mutation.
 
 The api gained `systemState.status`, `pause`, `resume`, `setMode` and `setInterruptionBudget`, `settings.retention` and `briefs.latest`; `SystemControl.setInterruptionBudget` records quiet hours and the push budget as a `state_changed` event (spec 9.4, "Configurable in Settings"). Sign-in moved to `/sign-in` inside the app; Auth.js's `error=AccessDenied` code is the one query parameter read, and the copy shown is the app's own.
+
+## Phase 3. Briefs and alerts
+
+Opened 2026-09-22 on branch `feat/phase-3-briefs-alerts` after Phase 2 was deployed to dev at d95cff8. Phase 2's remaining criterion (a real meeting producing a debrief with an approved Notion task within an hour) waits on use.
+
+| Criterion | Evidence | Date |
+|---|---|---|
+| Five consecutive weekday briefs delivered by 06:35 with no missing meeting | pending | |
+| Stale watermark in the inbox agent's channel raises an alert in test | pending | |
+| Push budget test passes | pending | |
+
