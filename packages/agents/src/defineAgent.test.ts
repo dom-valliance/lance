@@ -29,6 +29,12 @@ const config = {
       cacheReadPerMTok: 0.2,
       cacheWritePerMTok: 2.5,
     },
+    'claude-haiku-4-5': {
+      inputPerMTok: 1,
+      outputPerMTok: 5,
+      cacheReadPerMTok: 0.1,
+      cacheWritePerMTok: 1.25,
+    },
   },
   cost: { dailyCeilingGbp: 15, usdToGbp: 0.78 },
 };
@@ -72,6 +78,16 @@ describe('runAgent', () => {
     expect(params?.output_config?.effort).toBe('medium');
     expect(params?.output_config?.format).toBeDefined();
     expect(params?.tool_choice).toBeUndefined();
+  });
+
+  it('sends neither thinking nor effort to a model that rejects them', async () => {
+    const runner = new ScriptedRunner([[textMessage('{"importance":0.4,"summary":"fine"}')]]);
+    const { deps: d } = deps(runner);
+    await runAgent(d, { ...definition, model: { id: 'claude-haiku-4-5', effort: 'low' } }, input);
+    const params = runner.calls[0];
+    expect(params?.thinking).toBeUndefined();
+    expect(params?.output_config?.effort).toBeUndefined();
+    expect(params?.output_config?.format).toBeDefined();
   });
 
   it('records the run, sums usage across iterations and prices it from the table', async () => {
@@ -134,6 +150,18 @@ describe('runAgent', () => {
     const { deps: d } = deps(runner, 20);
     await expect(runAgent(d, definition, input)).rejects.toBeInstanceOf(BudgetExceededError);
     expect(runner.calls).toHaveLength(0);
+  });
+
+  it('reads the ceiling Settings set rather than the configured default', async () => {
+    const runner = new ScriptedRunner([[textMessage('{"importance":0.4,"summary":"fine"}')]]);
+    const { deps: d } = deps(runner, 20);
+    await expect(runAgent(d, definition, input)).rejects.toThrow(/ceiling/);
+    const result = await runAgent(
+      { ...d, readCeilingGbp: () => Promise.resolve(100) },
+      definition,
+      input,
+    );
+    expect(result.output).toEqual({ importance: 0.4, summary: 'fine' });
   });
 
   it('treats a refusal as a failed run', async () => {

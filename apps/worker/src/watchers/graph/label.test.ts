@@ -83,7 +83,9 @@ describe('createHaikuLabeller', () => {
     expect(call?.tools).toEqual([]);
     expect(call?.model).toBe('claude-haiku-4-5');
     expect(call?.max_tokens).toBe(300);
-    expect(call?.output_config?.effort).toBe('low');
+    // Haiku 4.5 rejects adaptive thinking and the effort parameter with a 400, so neither is sent.
+    expect(call?.thinking).toBeUndefined();
+    expect(call?.output_config?.effort).toBeUndefined();
   });
 
   it('adds Risk when the model reports risk language', async () => {
