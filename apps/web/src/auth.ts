@@ -35,6 +35,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // trust the incoming request's Host header explicitly.
   trustHost: true,
   session: { strategy: 'jwt' },
+  // Auth.js's own sign-in and error screens are replaced by /sign-in
+  // (design 7.12). Both point at the same page: a refused account arrives
+  // there with `?error=AccessDenied`, which the page reads as a code and
+  // answers with copy of its own.
+  pages: { signIn: '/sign-in', error: '/sign-in' },
   providers: [
     MicrosoftEntraID({
       clientId: readEnv('ENTRA_CLIENT_ID'),
