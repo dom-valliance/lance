@@ -1,0 +1,31 @@
+{
+  "id": "e21-calder-colleague-commits",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Stefan Bloom",
+      "email": "stefan.bloom@calderhealth.example.test"
+    },
+    {
+      "name": "Nadia Kaur",
+      "email": "nadia.kaur@valliance.ai"
+    }
+  ],
+  "text": "Subject: Information governance pack\nDate: Tuesday 27 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Stefan Bloom <stefan.bloom@calderhealth.example.test>\n\nStefan,\n\nNadia is copied. She will send you the information governance pack by 30 October, including the retention schedule your team asked about.\n\nCome to me if anything is missing from it.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Nadia Kaur to send Stefan Bloom the information governance pack with the retention schedule",
+      "counterpartyName": "Stefan Bloom",
+      "counterpartyEmail": "stefan.bloom@calderhealth.example.test",
+      "dueAt": "2026-10-30",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "She will send you the information governance pack by 30 October, including the retention schedule your team asked about."
+    }
+  ],
+  "notes": "A Valliance colleague carries the work, so the direction stays outbound with the client as counterparty."
+}

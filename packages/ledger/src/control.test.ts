@@ -349,3 +349,42 @@ describe('SystemControl.setMode', () => {
     expect(event.payload?.['to']).toBe('live');
   });
 });
+
+describe('SystemControl.setInterruptionBudget', () => {
+  const budget = { quietHoursStart: '20:00', quietHoursEnd: '06:30', pushBudgetPerHour: 5 };
+
+  it('stores the quiet hours and the push budget', async () => {
+    const result = await control.setInterruptionBudget(budget, { actor: DOM });
+    const state = await control.read();
+
+    expect(result.changed).toBe(true);
+    expect(state.quietHoursStart).toBe('20:00');
+    expect(state.quietHoursEnd).toBe('06:30');
+    expect(state.pushBudgetPerHour).toBe(5);
+  });
+
+  it('writes a state_changed event carrying the new budget', async () => {
+    const result = await control.setInterruptionBudget(
+      { ...budget, pushBudgetPerHour: 2 },
+      { actor: DOM },
+    );
+    const event = await eventById(result.eventId);
+
+    expect(event.kind).toBe('state_changed');
+    expect(event.actor).toBe(DOM);
+    expect(event.source_system).toBe('lance');
+    expect(event.payload?.['change']).toBe('interruption_budget');
+    expect(event.payload?.['quietHoursStart']).toBe('20:00');
+    expect(event.payload?.['quietHoursEnd']).toBe('06:30');
+    expect(event.payload?.['pushBudgetPerHour']).toBe(2);
+  });
+
+  it('reports no change when the budget is already the one asked for', async () => {
+    const already = { ...budget, pushBudgetPerHour: 2 };
+    const result = await control.setInterruptionBudget(already, { actor: DOM });
+
+    expect(result.changed).toBe(false);
+    const event = await eventById(result.eventId);
+    expect(event.payload?.['change']).toBe('interruption_budget');
+  });
+});

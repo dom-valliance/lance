@@ -1,0 +1,52 @@
+{
+  "id": "mtg_0000000000000001",
+  "title": "Weekly delivery review",
+  "generatedTitle": "Delivery review: pilot scope and timeline",
+  "startTime": "2026-09-21T09:00:00.000Z",
+  "endTime": "2026-09-21T09:30:00.000Z",
+  "locked": false,
+  "user": { "id": "usr_0000000000000001", "email": "owner@example.com" },
+  "summary": {
+    "markdown": "## Decisions\n\n- The pilot keeps its current scope.\n- The timeline moves by one week.",
+    "html": "<h2>Decisions</h2><ul><li>The pilot keeps its current scope.</li></ul>",
+    "short": "The pilot keeps its scope; the timeline moves by one week."
+  },
+  "transcript": "**Sam Placeholder:** Shall we keep the pilot scope as it stands?\n\n**Robin Placeholder:** Yes, and I will move the timeline by one week.\n\n**Sam Placeholder:** Agreed. I will write that up before Friday.",
+  "scratchpadNotes": "Check the timeline against the delivery plan.",
+  "participants": [
+    { "id": "par_0000000000000001", "name": "Sam Placeholder", "email": "sam@example.com" }
+  ],
+  "tasks": [
+    {
+      "content": "Move the delivery timeline by one week",
+      "completed": false,
+      "assignee": {
+        "id": "par_0000000000000002",
+        "name": "Robin Placeholder",
+        "email": "robin@example.com"
+      }
+    }
+  ],
+  "tags": [{ "name": "delivery", "color": "#2f6f4f" }],
+  "event": {
+    "id": "evt_0000000000000001",
+    "externalId": "AAMkAGExAmpleGraphEventId00000000",
+    "title": "Weekly delivery review",
+    "scheduledTime": "2026-09-21T09:00:00.000Z",
+    "endTime": "2026-09-21T09:30:00.000Z",
+    "attendees": [
+      {
+        "name": "Sam Placeholder",
+        "email": "sam@example.com",
+        "responseStatus": "accepted",
+        "organizer": true
+      },
+      {
+        "name": "Robin Placeholder",
+        "email": "robin@example.com",
+        "responseStatus": "tentative",
+        "organizer": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "t19-calder-long-noisy",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Ravi Khatri",
+      "email": "ravi.khatri@calderhealth.example.test"
+    },
+    {
+      "name": "Stefan Bloom",
+      "email": "stefan.bloom@calderhealth.example.test"
+    }
+  ],
+  "text": "# Calder Health Trust: programme board\n\n**Date:** Tuesday 13 October 2026\n\n###### 00:00 - 00:31\n**Ravi Khatri**\n\nLet us take the agenda in order. Finance first, then the pilot, then anything under other business.\n\n###### 00:31 - 01:02\n**Stefan Bloom**\n\nFinance is unchanged. The allocation holds until the end of the financial year and nobody is proposing to move it.\n\n###### 01:02 - 01:37\n**Dom Selvon**\n\nOn the pilot, the two wards are live and usage is roughly where we expected. The nursing staff find the handover summary useful and the doctors barely touch it.\n\n###### 01:37 - 02:05\n**Ravi Khatri**\n\nThat matches what I hear on the floor. Is there anything we should change?\n\n###### 02:05 - 02:36\n**Dom Selvon**\n\nNot yet. I will send the usage figures with a short commentary by Friday so the board can see the split.\n\n###### 02:36 - 03:04\n**Stefan Bloom**\n\nUseful. We should think about whether the third ward joins before Christmas, though I would not decide today.\n\n###### 03:04 - 03:31\n**Ravi Khatri**\n\nAgreed, not today. I will put the third ward question on the November agenda and let you know the date once it is fixed.\n\n###### 03:31 - 03:48\n**Dom Selvon**\n\nThat works. Nothing else from me.\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send the pilot usage figures with a short commentary to the programme board",
+      "counterpartyName": "Ravi Khatri",
+      "counterpartyEmail": "ravi.khatri@calderhealth.example.test",
+      "dueAt": "2026-10-16",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the usage figures with a short commentary by Friday so the board can see the split."
+    },
+    {
+      "direction": "inbound",
+      "description": "Ravi Khatri to put the third ward question on the November agenda and confirm the date",
+      "counterpartyName": "Ravi Khatri",
+      "counterpartyEmail": "ravi.khatri@calderhealth.example.test",
+      "dueAt": null,
+      "dueConfidence": 0,
+      "evidenceQuote": "I will put the third ward question on the November agenda and let you know the date once it is fixed."
+    }
+  ],
+  "notes": "Long meeting with two commitments buried in status discussion, one of them undated."
+}

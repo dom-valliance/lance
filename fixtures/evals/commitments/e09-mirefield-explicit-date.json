@@ -1,0 +1,27 @@
+{
+  "id": "e09-mirefield-explicit-date",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Eleanor Vance",
+      "email": "eleanor.vance@mirefield.example.test"
+    }
+  ],
+  "text": "Subject: Framework pricing\nDate: Friday 2 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Eleanor Vance <eleanor.vance@mirefield.example.test>\n\nEleanor,\n\nThank you for the steer on the framework route.\n\nI will send the framework pricing schedule by 9 October so it is with you before the directorate meets.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Eleanor Vance the framework pricing schedule",
+      "counterpartyName": "Eleanor Vance",
+      "counterpartyEmail": "eleanor.vance@mirefield.example.test",
+      "dueAt": "2026-10-09",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the framework pricing schedule by 9 October so it is with you before the directorate meets."
+    }
+  ],
+  "notes": "Explicit calendar date."
+}

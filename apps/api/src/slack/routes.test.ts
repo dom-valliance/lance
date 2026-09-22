@@ -5,6 +5,7 @@ import { buildServer } from '../server.js';
 import {
   fakeDeps,
   fakeSnapshot,
+  TEST_COMMITMENT_ID,
   TEST_SIGNING_SECRET,
   TEST_SLACK_USER_ID,
   type FakeDeps,
@@ -197,6 +198,33 @@ describe('/lance resume', () => {
   });
 });
 
+describe('/lance mode', () => {
+  it('reports the current mode when no mode is given', async () => {
+    const text = await slashText('mode');
+    expect(text).toContain('Lance is in dry_run mode.');
+    expect(harness.control.modeCalls).toEqual([]);
+  });
+
+  it('switches to live and says how held proposals are released', async () => {
+    const text = await slashText('mode live');
+    expect(harness.control.modeCalls).toEqual([{ mode: 'live', actor: 'user:dom' }]);
+    expect(text).toContain('Lance is now in live mode.');
+    expect(text).toContain('/lance pause then /lance resume');
+  });
+
+  it('refuses a word that is not a mode', async () => {
+    const text = await slashText('mode shadow');
+    expect(harness.control.modeCalls).toEqual([]);
+    expect(text).toContain('is not a mode');
+  });
+
+  it('refuses a user who is not on the Slack allowlist', async () => {
+    const text = await slashText('mode live', 'U0INTRUDER');
+    expect(harness.control.modeCalls).toEqual([]);
+    expect(text).toContain('Only Dom');
+  });
+});
+
 describe('the commands that arrive in a later phase', () => {
   it('says so for brief', async () => {
     expect(await slashText('brief')).toBe(
@@ -209,18 +237,49 @@ describe('the commands that arrive in a later phase', () => {
       'The task command arrives in a later phase. No task has been created.',
     );
   });
+});
 
-  it('says so for chase', async () => {
-    expect(await slashText('chase 01K5S9V6QW3SWCCPVB0N0E301A')).toBe(
-      'The chase command arrives in a later phase. No chase has been drafted.',
+describe('/lance chase', () => {
+  it('enqueues the chase and says a proposal is coming', async () => {
+    const text = await slashText(`chase ${TEST_COMMITMENT_ID}`);
+
+    expect(harness.chased).toEqual([TEST_COMMITMENT_ID]);
+    expect(text).toBe(
+      'Lance is preparing a chase draft for "Send the signed order form". It will arrive here as a proposal for you to approve.',
     );
+  });
+
+  it('asks for an id when none was given', async () => {
+    expect(await slashText('chase')).toBe(
+      'Usage: /lance chase <commitment id>. The id is on the Commitments page.',
+    );
+    expect(harness.chased).toEqual([]);
+  });
+
+  it('says so when the id is not a commitment id at all', async () => {
+    expect(await slashText('chase the order form')).toContain('is not a commitment id');
+    expect(harness.chased).toEqual([]);
+  });
+
+  it('says so when no commitment has that id', async () => {
+    expect(await slashText('chase 01K5S9V6QW3SWCCPVB0N0E301A')).toBe(
+      'No commitment has id 01K5S9V6QW3SWCCPVB0N0E301A. Check the id on the Commitments page and try again.',
+    );
+    expect(harness.chased).toEqual([]);
+  });
+
+  it('refuses a Slack user other than Dom', async () => {
+    const text = await slashText(`chase ${TEST_COMMITMENT_ID}`, 'U0INTRUDER');
+
+    expect(text).toBe('Only Dom may ask Lance to chase a commitment from Slack.');
+    expect(harness.chased).toEqual([]);
   });
 });
 
 describe('an unrecognised slash command', () => {
   it('replies with the usage line', async () => {
     expect(await slashText('sing')).toBe(
-      'Usage: /lance status | pause [reason] | resume | brief | task <text> | chase <commitment id>',
+      'Usage: /lance status | pause [reason] | resume | mode [live|dry_run] | brief | task <text> | chase <commitment id>',
     );
   });
 

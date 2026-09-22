@@ -27,9 +27,6 @@ param postgresEntraAdminObjectId string
 @description('Principal name of the Postgres Entra administrator, normally Dom\'s UPN.')
 param postgresEntraAdminPrincipalName string
 
-@description('Public IPv4 address allowed to reach Postgres from outside Azure for the psql runbook steps. Supply from the shell at deploy time; empty means no rule.')
-param postgresAdminClientIp string = ''
-
 @description('Enable Postgres password authentication alongside Entra. Off by default: the admin password is the one credential that could disable the ledger guard, and nothing in the running system uses it (ADR 0008 keeps it as a fallback only).')
 param postgresPasswordAuthEnabled bool = false
 
@@ -51,6 +48,12 @@ param allowedUpn string
 
 @description('The one Slack user id that may run /lance status, pause and resume. Not a secret.')
 param slackAllowedUserId string
+
+@description('Lets the executor write to Microsoft Graph. Off until the dry-run week is over (spec 6.3).')
+param graphWritesEnabled bool = false
+
+@description('Lets the executor create tasks in the Notion All Tasks database. Off until the dry-run week is over (spec 6.3).')
+param notionWritesEnabled bool = false
 
 // Six characters of subscription-and-group entropy for the three globally unique names
 // (Key Vault, container registry, Postgres server).
@@ -129,7 +132,6 @@ module postgres 'modules/postgres.bicep' = {
     uniqueSuffix: uniqueSuffix
     entraAdminObjectId: postgresEntraAdminObjectId
     entraAdminPrincipalName: postgresEntraAdminPrincipalName
-    adminClientIp: postgresAdminClientIp
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     passwordAuthEnabled: postgresPasswordAuthEnabled
     administratorLogin: postgresAdministratorLogin
@@ -154,6 +156,8 @@ module containerApps 'modules/containerapps.bicep' = {
     useBootstrapImage: useBootstrapImage
     allowedUpn: allowedUpn
     slackAllowedUserId: slackAllowedUserId
+    graphWritesEnabled: graphWritesEnabled
+    notionWritesEnabled: notionWritesEnabled
   }
   // The apps resolve Key Vault references and pull from the registry with their
   // identities. Both role assignments are created inside those modules, and the

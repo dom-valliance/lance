@@ -2,9 +2,10 @@ import { z } from 'zod';
 
 /**
  * Zod schemas for the slice of the Notion API Lance reads, plus the
- * normalisation from a Notion page to a plain `TaskRecord`.
+ * normalisation from a Notion page to a plain `TaskRecord` or `MeetingRecord`.
  *
- * Only the eleven properties ADR 0009 lets Lance write are modelled. Every
+ * On All Tasks, only the eleven properties ADR 0009 lets Lance write are
+ * modelled. Every
  * other property on the All Tasks DB (Hubspot Task ID, rollups, formulas,
  * Completed on, Delegate to Ian and the rest) is read-only to Lance and is
  * deliberately absent here, so nothing downstream can round-trip it into a
@@ -28,6 +29,33 @@ export const TASK_PROPERTY_NAMES = {
 
 /** The input keys of `createTask` and `updateTask`. */
 export type TaskInputKey = keyof typeof TASK_PROPERTY_NAMES;
+
+/**
+ * The Meetings DB property names, in the spelling that database uses. Lance
+ * reads them and never writes them: there is no Meetings write function, the
+ * database is absent from the permitted-property list, and so the guard in
+ * `writes.ts` refuses every name here. `Type` is the one name both databases
+ * use; on All Tasks it is the permitted Type relation, and a write always
+ * names the All Tasks data source, so the two never meet.
+ *
+ * `Created time`, `Last edited time` and `Last edited by` are absent: the
+ * first two arrive on the page envelope and the third is never read.
+ */
+export const MEETING_PROPERTY_NAMES = {
+  name: 'Name',
+  attendeeIds: 'Attendees',
+  ownerIds: 'Owner',
+  type: 'Type',
+  eventTime: 'Event time',
+  date: 'Date',
+  summary: 'Summary',
+  aiSummary: 'AI summary',
+  attendeeNames: 'Attendees 1',
+  projectIds: 'Projects',
+  accountIds: 'Accounts (Clients)',
+  threadTags: 'Thread Tag',
+  threadSessionIds: 'Thread Session',
+} as const satisfies Record<string, string>;
 
 export const TASK_STATUSES = [
   'Not Started',
@@ -139,7 +167,7 @@ const taskPropertiesSchema = z.object({
  * in 2026-03-11. Both are accepted so a recorded fixture from either version
  * parses; neither is required.
  */
-export const notionPageSchema = z.object({
+const pageEnvelopeSchema = z.object({
   object: z.literal('page'),
   id: z.string(),
   url: z.string(),
@@ -147,6 +175,9 @@ export const notionPageSchema = z.object({
   last_edited_time: z.string(),
   in_trash: z.boolean().optional(),
   archived: z.boolean().optional(),
+});
+
+export const notionPageSchema = pageEnvelopeSchema.extend({
   properties: taskPropertiesSchema,
 });
 
@@ -289,5 +320,143 @@ export function fromNotionDataSource(dataSource: NotionDataSource): DataSourceSc
     properties: Object.values(dataSource.properties)
       .map((property) => ({ name: property.name, type: property.type }))
       .sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+/**
+ * The Meetings DB columns Lance reads. Every one is optional for the same
+ * reason the task columns are: a renamed column must not stop an ingestion
+ * run on one page. `Type` here is a select, not the relation of the same
+ * name on All Tasks.
+ */
+const meetingPropertiesSchema = z.object({
+  Name: titleValueSchema.optional(),
+  Attendees: peopleValueSchema.optional(),
+  Owner: peopleValueSchema.optional(),
+  Type: selectValueSchema.optional(),
+  'Event time': dateValueSchema.optional(),
+  Date: dateValueSchema.optional(),
+  Summary: richTextValueSchema.optional(),
+  'AI summary': richTextValueSchema.optional(),
+  'Attendees 1': richTextValueSchema.optional(),
+  Projects: relationValueSchema.optional(),
+  'Accounts (Clients)': relationValueSchema.optional(),
+  'Thread Tag': multiSelectValueSchema.optional(),
+  'Thread Session': relationValueSchema.optional(),
+});
+
+export const notionMeetingPageSchema = pageEnvelopeSchema.extend({
+  properties: meetingPropertiesSchema,
+});
+
+export type NotionMeetingPage = z.infer<typeof notionMeetingPageSchema>;
+
+export const notionMeetingQueryResponseSchema = z.object({
+  object: z.literal('list'),
+  results: z.array(notionMeetingPageSchema),
+  next_cursor: z.string().nullable(),
+  has_more: z.boolean(),
+});
+
+/** One Meetings row, flattened the way `TaskRecord` flattens an All Tasks row. */
+export interface MeetingRecord {
+  readonly id: string;
+  readonly url: string;
+  readonly name: string;
+  readonly attendeeIds: readonly string[];
+  readonly ownerIds: readonly string[];
+  /** A Meetings Type option: Client Meeting, Partner Meeting, Standup and the rest. */
+  readonly type: string | null;
+  /** The start of Event time. Notion stores a range, so the end may differ. */
+  readonly eventTimeStart: string | null;
+  readonly eventTimeEnd: string | null;
+  readonly date: string | null;
+  /** The post-meeting summary Dom writes. */
+  readonly summary: string;
+  readonly aiSummary: string;
+  /** Free text attendees, for people who are not Notion users. */
+  readonly attendeeNames: string;
+  readonly projectIds: readonly string[];
+  readonly accountIds: readonly string[];
+  readonly threadTags: readonly string[];
+  readonly threadSessionIds: readonly string[];
+  readonly createdTime: string;
+  readonly lastEditedTime: string;
+}
+
+/**
+ * The block types `getPageText` renders. Every other type, Notion's Meeting
+ * Notes AI blocks included, is skipped rather than treated as an error.
+ */
+export const TEXT_BLOCK_TYPES = [
+  'paragraph',
+  'heading_1',
+  'heading_2',
+  'heading_3',
+  'bulleted_list_item',
+  'numbered_list_item',
+  'to_do',
+  'quote',
+] as const;
+
+const TEXT_BLOCK_TYPE_NAMES = new Set<string>(TEXT_BLOCK_TYPES);
+
+const textBlockPayloadSchema = z.object({ rich_text: z.array(richTextItemSchema) });
+
+/**
+ * A block, kept loose on purpose: the payload's shape differs per type and
+ * an unfamiliar type must parse and then be skipped, never fail.
+ */
+export const notionBlockSchema = z.looseObject({
+  object: z.literal('block'),
+  id: z.string(),
+  type: z.string(),
+});
+
+export type NotionBlock = z.infer<typeof notionBlockSchema>;
+
+export const notionBlockListSchema = z.object({
+  object: z.literal('list'),
+  results: z.array(notionBlockSchema),
+  next_cursor: z.string().nullable(),
+  has_more: z.boolean(),
+});
+
+/**
+ * The plain text of one block, or `null` when the block carries none Lance
+ * can read: an unsupported type, a payload without rich text, or a block
+ * whose text is blank.
+ */
+export function blockPlainText(block: NotionBlock): string | null {
+  if (!TEXT_BLOCK_TYPE_NAMES.has(block.type)) return null;
+  const payload = textBlockPayloadSchema.safeParse(block[block.type]);
+  if (!payload.success) return null;
+  const text = plainText(payload.data.rich_text).trim();
+  return text === '' ? null : text;
+}
+
+/** Normalises a Notion page into a `MeetingRecord`. Lance never writes these properties. */
+export function fromNotionMeetingPage(page: NotionMeetingPage): MeetingRecord {
+  const properties = page.properties;
+  const eventTime = properties['Event time']?.date ?? null;
+  return {
+    id: page.id,
+    url: page.url,
+    name: plainText(properties.Name?.title),
+    attendeeIds: ids(properties.Attendees?.people),
+    ownerIds: ids(properties.Owner?.people),
+    type: properties.Type?.select?.name ?? null,
+    eventTimeStart: eventTime?.start ?? null,
+    eventTimeEnd: eventTime?.end ?? null,
+    date: properties.Date?.date?.start ?? null,
+    summary: plainText(properties.Summary?.rich_text),
+    aiSummary: plainText(properties['AI summary']?.rich_text),
+    attendeeNames: plainText(properties['Attendees 1']?.rich_text),
+    projectIds: ids(properties.Projects?.relation),
+    accountIds: ids(properties['Accounts (Clients)']?.relation),
+    threadTags: properties['Thread Tag']?.multi_select.map((option) => option.name) ?? [],
+    threadSessionIds: ids(properties['Thread Session']?.relation),
+    createdTime: page.created_time,
+    lastEditedTime: page.last_edited_time,
   };
 }

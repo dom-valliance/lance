@@ -1,0 +1,27 @@
+{
+  "id": "e30-fenwick-end-of-week",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Felix Arundel",
+      "email": "felix.arundel@fenwicklabs.example.test"
+    }
+  ],
+  "text": "Subject: Reference call\nDate: Tuesday 10 November 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Felix Arundel <felix.arundel@fenwicklabs.example.test>\n\nFelix,\n\nI will set up the reference call with our Saltmarsh sponsor by the end of the week.\n\nShe is candid, which is what you want from a reference.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Set up a reference call between Felix Arundel and the Saltmarsh sponsor",
+      "counterpartyName": "Felix Arundel",
+      "counterpartyEmail": "felix.arundel@fenwicklabs.example.test",
+      "dueAt": "2026-11-13",
+      "dueConfidence": 0.5,
+      "evidenceQuote": "I will set up the reference call with our Saltmarsh sponsor by the end of the week."
+    }
+  ],
+  "notes": "End of week phrasing."
+}

@@ -113,6 +113,33 @@ describe('POST /admin/resume', () => {
   });
 });
 
+describe('POST /admin/mode', () => {
+  it('switches to live as user:dom and reports the change', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/admin/mode',
+      headers: BEARER,
+      payload: { mode: 'live' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ changed: true });
+    expect(harness.control.modeCalls).toEqual([{ mode: 'live', actor: 'user:dom' }]);
+  });
+
+  it('rejects a mode that does not exist', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/admin/mode',
+      headers: BEARER,
+      payload: { mode: 'shadow' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(harness.control.modeCalls).toEqual([]);
+  });
+});
+
 describe('GET /admin/status', () => {
   it('returns the status snapshot', async () => {
     harness.status.current = fakeSnapshot({ costTodayGbp: 3.5 });

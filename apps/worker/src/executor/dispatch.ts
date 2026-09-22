@@ -1,6 +1,12 @@
 import type { Db } from '@lance/db';
 import { evaluate } from '@lance/policy';
-import { nowIso, type ActionClass, type PolicyRule, type Proposal } from '@lance/shared';
+import {
+  nowIso,
+  type ActionClass,
+  type Config,
+  type PolicyRule,
+  type Proposal,
+} from '@lance/shared';
 import type { ConnectorWrite } from './index.js';
 
 /** The connector operations the executor may perform, as adapters built in main from the real connectors. */
@@ -38,6 +44,8 @@ export type TargetVerdict = 'unchanged' | 'changed' | 'unknown';
 export interface DispatchDeps {
   db: Db;
   writers: ExecutionWriters;
+  /** `config.featureFlags`: a target system whose flag is off is never written to. */
+  featureFlags: Pick<Config['featureFlags'], 'graphWrites' | 'notionWrites'>;
   loadRules: () => Promise<PolicyRule[]>;
   /** Re-fetches the target and compares its content hash with the provenance (spec 7.5 step 2). */
   verifyTarget: (proposal: Proposal) => Promise<TargetVerdict>;
@@ -55,7 +63,8 @@ export class ExecutionRefusedError extends Error {
       | 'target_changed'
       | 'unsupported_target'
       | 'missing_proposal'
-      | 'bad_payload',
+      | 'bad_payload'
+      | 'writes_disabled',
     message: string,
   ) {
     super(message);
@@ -97,6 +106,24 @@ function executionTarget(
     return str(payload, 'destinationFolderName') ?? str(payload, 'destinationFolderId');
   }
   return null;
+}
+
+function writesEnabled(
+  flags: DispatchDeps['featureFlags'],
+  system: Proposal['targetSystem'],
+): boolean {
+  switch (system) {
+    case 'graph':
+      return flags.graphWrites;
+    case 'notion':
+      return flags.notionWrites;
+    default:
+      return false;
+  }
+}
+
+function flagNameFor(system: Proposal['targetSystem']): string {
+  return `FF_${system.toUpperCase()}_WRITES`;
 }
 
 const UNSUPPORTED: ReadonlySet<ActionClass> = new Set([
@@ -167,6 +194,16 @@ export function createConnectorWrite(deps: DispatchDeps): ConnectorWrite {
         throw new ExecutionRefusedError(
           'unsupported_target',
           `No connector write exists for ${proposal.actionClass} in v1.`,
+        );
+      }
+
+      // The per-system write flag is the last gate before a connector is
+      // touched (CLAUDE.md conventions): off means the approval stands and
+      // the proposal is held until the flag is turned on.
+      if (!writesEnabled(deps.featureFlags, proposal.targetSystem)) {
+        throw new ExecutionRefusedError(
+          'writes_disabled',
+          `Writes to ${proposal.targetSystem} are turned off (${flagNameFor(proposal.targetSystem)}); nothing was written. Turn the flag on and resume to execute.`,
         );
       }
 

@@ -1,0 +1,27 @@
+{
+  "id": "e16-harlow-mixed-case-address",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Priya Nandra",
+      "email": "Priya.Nandra@HarlowBrook.example.test"
+    }
+  ],
+  "text": "Subject: Assumptions log\nDate: Tuesday 20 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Priya Nandra <Priya.Nandra@HarlowBrook.example.test>\n\nPriya,\n\nYour procurement system writes addresses in a different case to ours, so ignore anything odd in the headers.\n\nI will send the assumptions log with the open items highlighted by Thursday.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Priya Nandra the assumptions log with open items highlighted",
+      "counterpartyName": "Priya Nandra",
+      "counterpartyEmail": "priya.nandra@harlowbrook.example.test",
+      "dueAt": "2026-10-22",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the assumptions log with the open items highlighted by Thursday."
+    }
+  ],
+  "notes": "The address in the record is mixed case and the expected address is lower case, so matching must be case insensitive."
+}

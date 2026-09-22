@@ -42,6 +42,12 @@ param allowedUpn string
 @description('The Slack user id allowed to work the kill switch from Slack. Not a secret.')
 param slackAllowedUserId string
 
+@description('Lets the executor write to Microsoft Graph (drafts, categories, moves, holds). Off until the dry-run week is over.')
+param graphWritesEnabled bool = false
+
+@description('Lets the executor create tasks in the Notion All Tasks database. Off until the dry-run week is over.')
+param notionWritesEnabled bool = false
+
 @description('Database name on the Postgres server.')
 param databaseName string = 'lance'
 
@@ -103,6 +109,11 @@ var apiSecretBindings = [
 ]
 
 var workerSecretBindings = [
+  {
+    // Proposal cards, execution updates and the dry-run digest (ADR 0012).
+    secretName: 'slack-bot-token'
+    envName: 'SLACK_BOT_TOKEN'
+  }
   {
     secretName: 'entra-tenant-id'
     envName: 'ENTRA_TENANT_ID'
@@ -309,6 +320,13 @@ resource containerApps 'Microsoft.App/containerApps@2025-01-01' = [
                   value: app.identity.name
                 }
                 {
+                  // Every session acts as the shared application role, so tables
+                  // pg-boss creates at runtime are owned by lance_app and readable
+                  // by the api and the worker alike, whichever created them.
+                  name: 'PG_ROLE'
+                  value: 'lance_app'
+                }
+                {
                   name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
                   value: applicationInsightsConnectionString
                 }
@@ -336,6 +354,20 @@ resource containerApps 'Microsoft.App/containerApps@2025-01-01' = [
                       // Redirect base for the delegated Graph consent flow (spec 4.1).
                       name: 'PUBLIC_API_URL'
                       value: 'https://${app.name}.${managedEnvironment.properties.defaultDomain}'
+                    }
+                  ]
+                : [],
+              app.repository == 'lance-worker'
+                ? [
+                    {
+                      // The executor's last gate before a connector write; the mode
+                      // is switched at runtime with /lance mode, these by redeploying.
+                      name: 'FF_GRAPH_WRITES'
+                      value: string(graphWritesEnabled)
+                    }
+                    {
+                      name: 'FF_NOTION_WRITES'
+                      value: string(notionWritesEnabled)
                     }
                   ]
                 : [],

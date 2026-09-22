@@ -73,6 +73,7 @@ describe('loadConfig defaults', () => {
     expect(config.notion).toEqual({
       tasksDataSourceId: '20257534-6e48-81fe-b4b5-000b69ecace6',
       tasksDatabaseId: '20257534-6e48-8190-9ebb-cfb6997b3bb4',
+      meetingsDataSourceId: '1fc57534-6e48-804e-a193-000bec4176ab',
       domUserId: '1fdd872b-594c-8146-b22f-00028f1f5a41',
       permittedTaskProperties: [
         'Title',
@@ -151,6 +152,7 @@ describe('loadConfig env overrides', () => {
       SLACK_CHANNEL_ID: 'C0OVERRIDE',
       NOTION_TASKS_DATA_SOURCE_ID: 'override-data-source',
       NOTION_TASKS_DATABASE_ID: 'override-database',
+      NOTION_MEETINGS_DATA_SOURCE_ID: 'override-meetings-data-source',
       NOTION_DOM_USER_ID: 'override-user',
       NOTION_PERMITTED_TASK_PROPERTIES: 'Title, Status',
     };
@@ -202,6 +204,7 @@ describe('loadConfig env overrides', () => {
     expect(config.notion).toEqual({
       tasksDataSourceId: 'override-data-source',
       tasksDatabaseId: 'override-database',
+      meetingsDataSourceId: 'override-meetings-data-source',
       domUserId: 'override-user',
       permittedTaskProperties: ['Title', 'Status'],
     });
@@ -265,5 +268,26 @@ describe('getConfig', () => {
         process.env.DATABASE_URL = originalDatabaseUrl;
       }
     }
+  });
+});
+
+describe('dom identity', () => {
+  it('defaults the email to ALLOWED_UPN and the name to Dom Selvon', () => {
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      DATABASE_URL: 'postgres://postgres:postgres@localhost:5432/lance',
+      ALLOWED_UPN: 'dom@example.test',
+    });
+    expect(config.dom).toEqual({ name: 'Dom Selvon', email: 'dom@example.test' });
+  });
+
+  it('takes DOM_EMAIL and DOM_NAME when set', () => {
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      DATABASE_URL: 'postgres://postgres:postgres@localhost:5432/lance',
+      DOM_NAME: 'D. Selvon',
+      DOM_EMAIL: 'd@example.test',
+    });
+    expect(config.dom).toEqual({ name: 'D. Selvon', email: 'd@example.test' });
   });
 });

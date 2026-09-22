@@ -1,0 +1,27 @@
+{
+  "id": "t06-bramley-contract-signature",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Sofia Alvarez",
+      "email": "sofia.alvarez@bramleyfoods.example.test"
+    }
+  ],
+  "text": "# Bramley Foods: contract status\n\n**Date:** Friday 25 September 2026\n\n###### 00:00 - 00:16\n**Dom Selvon**\n\nWhere has the contract landed with your legal team?\n\n###### 00:16 - 00:40\n**Sofia Alvarez**\n\nIt is with the general counsel now. I will have the signed contract over to you next week.\n\n###### 00:40 - 00:52\n**Dom Selvon**\n\nGood. We are holding the start date until it lands.\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Sofia Alvarez to send the signed contract",
+      "counterpartyName": "Sofia Alvarez",
+      "counterpartyEmail": "sofia.alvarez@bramleyfoods.example.test",
+      "dueAt": "2026-10-02",
+      "dueConfidence": 0.5,
+      "evidenceQuote": "I will have the signed contract over to you next week."
+    }
+  ],
+  "notes": "Inbound only. Vague next week phrasing resolved to the Friday of the following week."
+}
