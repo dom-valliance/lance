@@ -410,10 +410,14 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
       },
       job.correlationId,
     );
-    const quoted = new Set(commitmentCandidates.map((candidate) => candidate.evidenceQuote));
-    for (const candidate of extracted) {
-      if (!quoted.has(candidate.evidenceQuote)) commitmentCandidates.push(candidate);
-    }
+    // The extractor read the whole transcript with the commitment rules in
+    // front of it; the triage model saw the same text while doing five other
+    // jobs. Keeping both recorded the same promise twice under two wordings,
+    // so for a record the extractor covered its list is the list.
+    commitmentCandidates = [
+      ...commitmentCandidates.filter((candidate) => candidate.recordId !== newest.recordId),
+      ...extracted,
+    ];
   }
   commitmentCandidates = commitmentCandidates.filter(
     (candidate) => provenanceFor(events, candidate.recordId).length > 0,

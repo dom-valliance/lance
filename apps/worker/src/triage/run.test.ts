@@ -3,6 +3,7 @@ import type { ProposalDraft } from '@lance/agents';
 import { alerts, createDb, runMigrations, seed, type Db } from '@lance/db';
 import { startPostgresContainer } from '@lance/db/testing';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
+import { OntologyRepository } from '@lance/ontology';
 import { hashRecord, idempotencyKey, loadConfig, stableUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { eq } from 'drizzle-orm';
@@ -209,6 +210,87 @@ describe('runTriage', () => {
       'source_get_record',
       'ontology_lookup',
       'create_proposal',
+    ]);
+  });
+
+  it("records the extractor's commitments from a transcript and drops the triage model's own reading of it", async () => {
+    const meetingCorrelationId = stableUlid('jamie:mt-1');
+    const record = {
+      kind: 'meeting',
+      id: 'mt-1',
+      title: 'Ronan / Dom Weekly Catchup',
+      startTime: '2026-09-21T09:00:00.000Z',
+      endTime: '2026-09-21T09:30:00.000Z',
+      participants: [
+        { name: 'Dom Selvon', email: 'dom@valliance.ai' },
+        { name: 'Ronan Forker', email: 'ronan@valliance.ai' },
+      ],
+      attendees: [],
+      transcript: 'Ronan: I will send you the resource plan by Friday. I just need to read Matt’s email first.',
+      transcriptReady: true,
+      domAttended: true,
+    };
+    const hash = hashRecord(record);
+    const observed = await new LedgerWriter(db).append({
+      ts: '2026-09-21T10:00:00.000Z',
+      actor: 'agent:watcher-jamie@0.1.0',
+      kind: 'observed',
+      sourceSystem: 'jamie',
+      sourceRecordId: 'mt-1',
+      sourceRecordHash: hash,
+      idempotencyKey: idempotencyKey('jamie', 'mt-1', hash),
+      correlationId: meetingCorrelationId,
+      payload: { ...record, labels: ['Meeting', 'TranscriptReady', 'DomAttended'], watcher: 'jamie' },
+    });
+    const candidate = (description: string, evidenceQuote: string) => ({
+      direction: 'inbound' as const,
+      description,
+      counterpartyName: 'Ronan Forker',
+      counterpartyEmail: 'ronan@valliance.ai',
+      dueAt: null,
+      dueConfidence: 0,
+      evidenceQuote,
+      recordId: 'mt-1',
+    });
+    const modelOutput = {
+      importance: 0.4,
+      urgency: 0.2,
+      summary: 'Ronan will send the resource plan.',
+      entities: [],
+      commitments: [
+        candidate('Ronan to send the resource plan.', 'I will send you the resource plan'),
+        candidate('Read Matt’s email before the session', 'I just need to read Matt’s email first'),
+      ],
+      taskCandidates: [],
+      proposalsSubmitted: 0,
+      alertCandidates: [],
+    };
+    const runner = new ScriptedRunner([[textMessage(JSON.stringify(modelOutput))]]);
+    const result = await runTriage(
+      {
+        db,
+        config,
+        agent: {
+          runner,
+          recorder: new MemoryRunRecorder(),
+          ledger: new LedgerWriter(db),
+          config: agentConfig,
+          readSpendUsd: () => Promise.resolve(0),
+        },
+        createProposal: () => Promise.reject(new Error('no proposals in this test')),
+        ontology: new OntologyRepository(db),
+        dom: { name: 'Dom Selvon', email: 'dom@valliance.ai' },
+        extractCommitments: (source) => {
+          expect(source.text).toBe(record.transcript);
+          return Promise.resolve([
+            candidate('Send the resource plan', 'I will send you the resource plan by Friday'),
+          ]);
+        },
+      },
+      { watcher: 'jamie', correlationId: meetingCorrelationId, observationEventIds: [observed.id] },
+    );
+    expect(result.commitments.map((commitment) => commitment.description)).toEqual([
+      'Send the resource plan',
     ]);
   });
 
