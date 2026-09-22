@@ -226,7 +226,8 @@ describe('runTriage', () => {
         { name: 'Ronan Forker', email: 'ronan@valliance.ai' },
       ],
       attendees: [],
-      transcript: 'Ronan: I will send you the resource plan by Friday. I just need to read Matt’s email first.',
+      transcript:
+        'Ronan: I will send you the resource plan by Friday. I just need to read Matt’s email first.',
       transcriptReady: true,
       domAttended: true,
     };
@@ -240,7 +241,11 @@ describe('runTriage', () => {
       sourceRecordHash: hash,
       idempotencyKey: idempotencyKey('jamie', 'mt-1', hash),
       correlationId: meetingCorrelationId,
-      payload: { ...record, labels: ['Meeting', 'TranscriptReady', 'DomAttended'], watcher: 'jamie' },
+      payload: {
+        ...record,
+        labels: ['Meeting', 'TranscriptReady', 'DomAttended'],
+        watcher: 'jamie',
+      },
     });
     const candidate = (description: string, evidenceQuote: string) => ({
       direction: 'inbound' as const,
