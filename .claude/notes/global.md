@@ -194,3 +194,10 @@
 **Correction**: Dom asked how to track what was going on and why a brief never arrived.
 **Rule**: After a deploy, query `pgboss.job` for failed states and `agent_runs` for failed runs before calling it verified, and fire one real instance of each new surface (an alert card, a brief) from the deployed system. Every queue handler logs its failure. A model id that a request feature does not support (adaptive thinking on Haiku) is a 400 on every call, so a new agent's first live run is checked in `agent_runs` the same day.
 **Applies to**: apps/worker, docs/runbooks/observing.md, docs/runbooks/deploy.md
+
+### [2026-09-22] Check a data source is still live before asking for access to it
+
+**Context**: Diagnosing the Notion 404, I told Dom to share both the All Tasks and the Meetings databases with the integration, reading the list off spec Q7 and CLAUDE.md.
+**Correction**: Dom shared All Tasks only: the Meetings database no longer captures meetings and is not going to be used. The watcher's meetings partition became optional and unset.
+**Rule**: Before asking Dom to grant access to a source, look at whether it is still live (recent rows, a recent last edit, whether anything downstream depends on it). A source that has gone quiet is a question to put to Dom, not an instruction to relay from the spec. When a source drops out, make its configuration optional rather than leaving a partition that fails every poll.
+**Applies to**: global
