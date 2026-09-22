@@ -18,23 +18,28 @@ export interface RaiseAlertInput {
   provenance?: ProvenanceRef[];
   actor: string;
   correlationId?: string;
+  now?: () => string;
 }
 
 export interface RaiseAlertResult {
   alertId: string;
   count: number;
   created: boolean;
+  /** True when a resolved alert, or a muted one whose mute had lapsed, came back as open. */
+  reopened: boolean;
   eventId: string;
 }
 
 /**
- * Records an alert (spec 11). Repeats with the same dedupe key update the
- * existing row and increment its count rather than creating another. Slack
- * delivery and the interruption budget arrive with the alerts engine in
- * Phase 3; this is the durable record they will drain.
+ * Records an alert (spec 11). The dedupe key names one row for the
+ * condition, whatever its status: repeats raise the count and refresh the
+ * body. An open or acked row stays as it is. A muted row stays muted while
+ * the mute lasts. A resolved row, or a muted row whose mute has lapsed,
+ * reopens with a fresh card, since the condition is back.
  */
 export async function raiseAlert(db: Db, input: RaiseAlertInput): Promise<RaiseAlertResult> {
-  const ts = nowIso();
+  const ts = (input.now ?? nowIso)();
+  const at = new Date(ts);
   const existing = await db
     .select()
     .from(alerts)
@@ -43,21 +48,27 @@ export async function raiseAlert(db: Db, input: RaiseAlertInput): Promise<RaiseA
   const row = existing[0];
   let alertId: string;
   let count: number;
-  let created: boolean;
-  if (row !== undefined && (row.status === 'open' || row.status === 'acked')) {
+  let created = false;
+  let reopened = false;
+  if (row !== undefined) {
+    const muteLapsed = row.mutedUntil === null || row.mutedUntil <= at;
+    reopened = row.status === 'resolved' || (row.status === 'suppressed' && muteLapsed);
     const updated = await db
       .update(alerts)
       .set({
-        lastSeen: new Date(ts),
+        lastSeen: at,
         count: sql`${alerts.count} + 1`,
         body: input.body,
-        updatedAt: new Date(ts),
+        severity: input.severity,
+        updatedAt: at,
+        ...(reopened
+          ? { status: 'open', slackTs: null, batchTs: null, ackedBy: null, ackedAt: null }
+          : {}),
       })
       .where(eq(alerts.id, row.id))
       .returning({ count: alerts.count });
     alertId = row.id;
     count = updated[0]?.count ?? row.count + 1;
-    created = false;
   } else {
     alertId = newUlid();
     await db.insert(alerts).values({
@@ -69,8 +80,8 @@ export async function raiseAlert(db: Db, input: RaiseAlertInput): Promise<RaiseA
       body: input.body,
       provenance: input.provenance ?? [],
       status: 'open',
-      firstSeen: new Date(ts),
-      lastSeen: new Date(ts),
+      firstSeen: at,
+      lastSeen: at,
       count: 1,
     });
     count = 1;
@@ -90,7 +101,8 @@ export async function raiseAlert(db: Db, input: RaiseAlertInput): Promise<RaiseA
       title: input.title,
       count,
       created,
+      reopened,
     },
   });
-  return { alertId, count, created, eventId: event.id };
+  return { alertId, count, created, reopened, eventId: event.id };
 }

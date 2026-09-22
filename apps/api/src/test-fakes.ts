@@ -303,6 +303,7 @@ export const fakeAlert = (overrides: Partial<Alert> = {}): Alert => ({
   ackedAt: null,
   mutedUntil: null,
   slackTs: null,
+  batchTs: null,
   createdAt: new Date('2026-09-20T09:00:00.000Z'),
   updatedAt: new Date('2026-09-21T09:00:00.000Z'),
   ...overrides,
