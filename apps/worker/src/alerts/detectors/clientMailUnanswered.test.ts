@@ -196,7 +196,7 @@ describe('clientMailUnansweredDetector', () => {
     expect(alerts.map((alert) => alert.dedupeKey)).toEqual([]);
   });
 
-  it('treats an external domain the ontology does not know as a client', async () => {
+  it('leaves an external domain the ontology does not know alone', async () => {
     await observe({
       id: 'm-stranger',
       conversationId: 'conv-stranger',
@@ -204,9 +204,7 @@ describe('clientMailUnansweredDetector', () => {
       at: '2026-09-21T09:00:00.000Z',
       from: { name: 'Pat Prospect', address: 'pat@unknown.test' },
     });
-    expect((await clientMailUnansweredDetector.run(context()))[0]?.dedupeKey).toBe(
-      'thread:conv-stranger',
-    );
+    expect(await clientMailUnansweredDetector.run(context())).toEqual([]);
   });
 
   it('leaves vendors, colleagues and public provider addresses alone', async () => {

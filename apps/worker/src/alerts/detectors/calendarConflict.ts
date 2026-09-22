@@ -1,7 +1,6 @@
-import { toLondon } from '@lance/shared';
 import type { DetectedAlert, Detector, DetectorContext } from './types.js';
 import { calendarWindow, domDeclined, type CalendarEventRow } from './calendarWindow.js';
-import { provenanceOf } from './support.js';
+import { localDateTime, provenanceOf } from './support.js';
 
 /**
  * `calendar_conflict` (spec 11): two meetings today or tomorrow whose times
@@ -31,6 +30,7 @@ export const calendarConflictDetector: Detector = {
   schedule: CALENDAR_CONFLICT_SCHEDULE,
 
   async run(context: DetectorContext): Promise<DetectedAlert[]> {
+    const zone = context.config.timeZone;
     const domEmail = context.config.dom.email;
     const windows = (await calendarWindow(context))
       .filter((event) => !domDeclined(event, domEmail))
@@ -57,7 +57,7 @@ export const calendarConflictDetector: Detector = {
           dedupeKey: `events:${first.id}:${second.id}`,
           title: `Calendar clash: ${first.subject} overlaps ${second.subject}`,
           body: [
-            `"${first.subject}" runs from ${toLondon(first.start)}${first.end === null ? '' : ` to ${toLondon(first.end)}`} and "${second.subject}" from ${toLondon(second.start)}${second.end === null ? '' : ` to ${toLondon(second.end)}`}.`,
+            `"${first.subject}" runs from ${localDateTime(first.start, zone)}${first.end === null ? '' : ` to ${localDateTime(first.end, zone)}`} and "${second.subject}" from ${localDateTime(second.start, zone)}${second.end === null ? '' : ` to ${localDateTime(second.end, zone)}`}.`,
             'Suggested action: decline or move one of them, or send someone else to it.',
           ].join(' '),
           provenance: [provenanceOf(first.observation), provenanceOf(second.observation)],

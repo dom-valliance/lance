@@ -136,6 +136,15 @@ function zoneOffsetMs(instantMs: number, timeZone: string): number {
 }
 
 /** The calendar day an instant falls on in `timeZone`, as `YYYY-MM-DD`. */
+/** An instant for alert copy, in the configured zone (CLAUDE.md: stored UTC, displayed in `config.timeZone`). */
+export function localDateTime(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(iso));
+}
+
 export function localDate(iso: string, timeZone: string): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone,

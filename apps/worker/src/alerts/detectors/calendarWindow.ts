@@ -36,18 +36,41 @@ export interface CalendarEventRow {
   attendees: EventAttendee[];
 }
 
+function personOf(entry: unknown, responseStatus: string | null): EventAttendee | null {
+  if (typeof entry !== 'object' || entry === null) return null;
+  const person = entry as Record<string, unknown>;
+  const read = (key: string): string | null => {
+    const value = person[key];
+    return typeof value === 'string' && value !== '' ? value : null;
+  };
+  return { name: read('name'), address: read('address'), responseStatus };
+}
+
+/**
+ * Everyone on the invitation. Graph lists the organiser separately from the
+ * attendees and does not always repeat them in the list, so the organiser is
+ * folded in here; a meeting organised by an unknown external is otherwise
+ * invisible to the unknown attendee detector.
+ */
 function attendeesOf(payload: Record<string, unknown>): EventAttendee[] {
-  return payloadArray(payload, 'attendees').flatMap((entry) => {
-    if (typeof entry !== 'object' || entry === null) return [];
-    const attendee = entry as Record<string, unknown>;
-    const read = (key: string): string | null => {
-      const value = attendee[key];
-      return typeof value === 'string' && value !== '' ? value : null;
-    };
-    return [
-      { name: read('name'), address: read('address'), responseStatus: read('responseStatus') },
-    ];
-  });
+  const people: EventAttendee[] = [];
+  const seen = new Set<string>();
+  const add = (person: EventAttendee | null): void => {
+    if (person === null) return;
+    const key = person.address?.trim().toLowerCase() ?? null;
+    if (key !== null) {
+      if (seen.has(key)) return;
+      seen.add(key);
+    }
+    people.push(person);
+  };
+  for (const entry of payloadArray(payload, 'attendees')) {
+    const attendee = entry as Record<string, unknown> | null;
+    const status = attendee?.['responseStatus'];
+    add(personOf(entry, typeof status === 'string' && status !== '' ? status : null));
+  }
+  add(personOf(payload['organizer'], 'organizer'));
+  return people;
 }
 
 /**

@@ -1,9 +1,9 @@
 import { organisationDomain } from '@lance/ontology';
-import { toLondon } from '@lance/shared';
 import { workingDaysBetween } from '../../triage/run.js';
 import type { DetectedAlert, Detector, DetectorContext } from './types.js';
 import {
   latestObservations,
+  localDateTime,
   payloadRecord,
   payloadString,
   provenanceOf,
@@ -15,11 +15,10 @@ import {
  * has gone back in that conversation, and three working days have passed.
  * Weekends do not count, so a Friday message is not late on Monday.
  *
- * "Client" means an Organisation node of type `client`. When the ontology
- * holds no organisation for the domain at all, the message still counts:
- * an unknown external correspondent left waiting is the case the alert
- * exists for. A domain the ontology knows as something else, a vendor or a
- * partner, is not a client and is left alone.
+ * "Client" means an Organisation node of type `client`, and only that. A
+ * domain the ontology does not know, or knows as something else, a vendor
+ * or a partner, is left alone: the alert is P1 and interrupts Dom, so it
+ * fires for clients and not for every stranger who writes in.
  */
 
 export const CLIENT_MAIL_SCHEDULE = '0 * * * *';
@@ -65,6 +64,7 @@ export const clientMailUnansweredDetector: Detector = {
   schedule: CLIENT_MAIL_SCHEDULE,
 
   async run(context: DetectorContext): Promise<DetectedAlert[]> {
+    const zone = context.config.timeZone;
     const now = context.now();
     const rows = await latestObservations(context.db, {
       sourceSystem: 'graph',
@@ -105,7 +105,7 @@ export const clientMailUnansweredDetector: Detector = {
       let client = isClient.get(domain);
       if (client === undefined) {
         const organisation = await context.ontology.findOrganisationByDomain(domain);
-        client = organisation === null || organisation.properties['type'] === 'client';
+        client = organisation !== null && organisation.properties['type'] === 'client';
         isClient.set(domain, client);
       }
       if (!client) continue;
@@ -120,7 +120,7 @@ export const clientMailUnansweredDetector: Detector = {
         dedupeKey: `thread:${conversationId}`,
         title: `No reply to ${sender} after ${String(days)} working days`,
         body: [
-          `"${message.subject}" arrived from ${sender} (${domain}) on ${toLondon(new Date(message.at).toISOString())} and nothing has been sent back on that thread since.`,
+          `"${message.subject}" arrived from ${sender} (${domain}) on ${localDateTime(new Date(message.at).toISOString(), zone)} and nothing has been sent back on that thread since.`,
           'Suggested action: ask Lance to draft a reply, or close the thread if it was answered elsewhere.',
         ].join(' '),
         provenance: [provenanceOf(message.observation)],

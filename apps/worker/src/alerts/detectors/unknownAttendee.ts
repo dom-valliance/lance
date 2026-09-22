@@ -1,8 +1,7 @@
 import { organisationDomain } from '@lance/ontology';
-import { toLondon } from '@lance/shared';
 import type { DetectedAlert, Detector, DetectorContext } from './types.js';
 import { calendarWindow } from './calendarWindow.js';
-import { provenanceOf } from './support.js';
+import { localDateTime, provenanceOf } from './support.js';
 
 /**
  * `external_meeting_unknown_attendee` (spec 11): a meeting today or
@@ -21,6 +20,7 @@ export const unknownAttendeeDetector: Detector = {
   schedule: UNKNOWN_ATTENDEE_SCHEDULE,
 
   async run(context: DetectorContext): Promise<DetectedAlert[]> {
+    const zone = context.config.timeZone;
     const events = await calendarWindow(context);
     if (events.length === 0) return [];
 
@@ -63,7 +63,7 @@ export const unknownAttendeeDetector: Detector = {
         dedupeKey: `event:${event.id}`,
         title: `Unknown attendee at "${event.subject}"`,
         body: [
-          `${event.subject} at ${toLondon(event.start)} has ${unknown.length === 1 ? 'an attendee' : 'attendees'} Lance does not know: ${who}.`,
+          `${event.subject} at ${localDateTime(event.start, zone)} has ${unknown.length === 1 ? 'an attendee' : 'attendees'} Lance does not know: ${who}.`,
           'Neither the person nor their organisation is in the ontology.',
           'Suggested action: ask Lance for what it does hold on that domain before the meeting, and confirm who they are.',
         ].join(' '),

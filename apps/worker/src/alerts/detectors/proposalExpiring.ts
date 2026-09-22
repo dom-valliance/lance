@@ -1,8 +1,8 @@
 import { proposals } from '@lance/db';
-import { hashRecord, toLondon } from '@lance/shared';
+import { hashRecord } from '@lance/shared';
 import { and, eq, gt, lte } from 'drizzle-orm';
 import type { DetectedAlert, Detector, DetectorContext } from './types.js';
-import { storedProvenance } from './support.js';
+import { localDateTime, storedProvenance } from './support.js';
 
 /**
  * `proposal_expiring` (spec 11): "6 h before expiry, only for client
@@ -22,6 +22,7 @@ export const proposalExpiringDetector: Detector = {
   schedule: PROPOSAL_EXPIRING_SCHEDULE,
 
   async run(context: DetectorContext): Promise<DetectedAlert[]> {
+    const zone = context.config.timeZone;
     const now = context.now();
     const nowMs = Date.parse(now);
     const rows = await context.db
@@ -45,7 +46,7 @@ export const proposalExpiringDetector: Detector = {
         dedupeKey: `proposal:${row.id}`,
         title: `Client proposal expires in ${hours.toFixed(1)} hours`,
         body: [
-          `${row.preview} It expires at ${toLondon(row.expiresAt.toISOString())} and will be dropped unopened after that.`,
+          `${row.preview} It expires at ${localDateTime(row.expiresAt.toISOString(), zone)} and will be dropped unopened after that.`,
           'Suggested action: approve, edit or reject it in Slack or on the Proposals page before it lapses.',
         ].join(' '),
         provenance:
