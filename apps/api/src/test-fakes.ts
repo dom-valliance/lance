@@ -1,5 +1,5 @@
 import type { SlackSurface } from '@lance/connectors';
-import type { Commitment, SystemState } from '@lance/db';
+import type { Alert, Commitment, SystemState } from '@lance/db';
 import type {
   DecisionResult,
   InterruptionBudget,
@@ -29,6 +29,7 @@ import type {
   SystemControlLike,
   TokenVerifier,
 } from './deps.js';
+import type { AlertQuery, AlertStoreLike, SetAlertStatusInput } from './alerts/store.js';
 import type { BriefRecord, BriefStoreLike } from './briefs/store.js';
 import type { CommitmentQuery, CommitmentStoreLike } from './commitments/store.js';
 import type { TaskQuery, TaskStoreLike } from './tasks/store.js';
@@ -282,6 +283,68 @@ export class FakeCommitmentStore implements CommitmentStoreLike {
   }
 }
 
+export const TEST_ALERT_ID = '01K5S9V6QW3SWCCPVB0N0E304A';
+
+export const fakeAlert = (overrides: Partial<Alert> = {}): Alert => ({
+  id: TEST_ALERT_ID,
+  severity: 'P1',
+  kind: 'client_mail_unanswered',
+  dedupeKey: 'thread:AAMk3',
+  title: 'No reply to Ann Example in three working days',
+  body: 'The thread "the pilot" has had no reply since Tuesday.',
+  provenance: [
+    { system: 'graph', recordId: 'AAMk3', hash: 'h3', observedAt: '2026-09-20T09:00:00.000Z' },
+  ],
+  status: 'open',
+  firstSeen: new Date('2026-09-20T09:00:00.000Z'),
+  lastSeen: new Date('2026-09-21T09:00:00.000Z'),
+  count: 2,
+  ackedBy: null,
+  ackedAt: null,
+  mutedUntil: null,
+  slackTs: null,
+  createdAt: new Date('2026-09-20T09:00:00.000Z'),
+  updatedAt: new Date('2026-09-21T09:00:00.000Z'),
+  ...overrides,
+});
+
+/** The alerts table without a database: filters, cursors and one status write. */
+export class FakeAlertStore implements AlertStoreLike {
+  rows: Alert[] = [fakeAlert()];
+  readonly queries: AlertQuery[] = [];
+
+  list(query: AlertQuery): Promise<Alert[]> {
+    this.queries.push(query);
+    const matched = this.rows
+      .filter((row) => query.status === undefined || row.status === query.status)
+      .filter((row) => query.severity === undefined || row.severity === query.severity)
+      .filter((row) => query.kind === undefined || row.kind === query.kind)
+      .filter((row) => query.cursor === undefined || row.id < query.cursor)
+      .sort((left, right) => (left.id < right.id ? 1 : -1));
+    return Promise.resolve(matched.slice(0, query.limit));
+  }
+
+  get(id: string): Promise<Alert | null> {
+    return Promise.resolve(this.rows.find((row) => row.id === id) ?? null);
+  }
+
+  setStatus(input: SetAlertStatusInput): Promise<Alert | null> {
+    const index = this.rows.findIndex(
+      (row) => row.id === input.id && input.from.includes(row.status),
+    );
+    if (index === -1) return Promise.resolve(null);
+    const updated: Alert = {
+      ...this.rows[index]!,
+      status: input.to,
+      updatedAt: input.at,
+      ...(input.ackedBy === undefined ? {} : { ackedBy: input.ackedBy, ackedAt: input.at }),
+      ...(input.mutedUntil === undefined ? {} : { mutedUntil: input.mutedUntil }),
+    };
+    this.rows[index] = updated;
+    return Promise.resolve(updated);
+  }
+}
+
 export const fakeNotionTaskObservation = (
   overrides: Partial<ObservationRecord> = {},
 ): ObservationRecord => ({
@@ -489,7 +552,10 @@ export interface FakeDeps {
   commitments: FakeCommitmentStore;
   tasks: FakeTaskStore;
   briefs: FakeBriefStore;
+  alerts: FakeAlertStore;
   ontology: FakeOntology;
+  /** Alert ids whose Slack card could not be redrawn, in order. */
+  slackFailures: string[];
   /** Proposal ids handed to `enqueueExecute`, in order. */
   enqueued: string[];
   /** Commitment ids handed to `enqueueChase`, in order. */
@@ -512,7 +578,9 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
   const commitments = new FakeCommitmentStore();
   const tasks = new FakeTaskStore();
   const briefs = new FakeBriefStore();
+  const alerts = new FakeAlertStore();
   const ontology = new FakeOntology();
+  const slackFailures: string[] = [];
 
   const deps: ApiDeps = {
     config: overrides.config ?? testConfig(),
@@ -528,6 +596,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     commitments,
     tasks,
     briefs,
+    alerts,
     ontology,
     enqueueChase: (commitmentId) => {
       chased.push(commitmentId);
@@ -543,6 +612,9 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
           : overrides.allowedSlackUserId,
     },
     slackSurface: overrides.withoutSlackSurface === true ? null : slack.surface,
+    onAlertSlackFailure: (_error, alertId) => {
+      slackFailures.push(alertId);
+    },
     notify: (event) => {
       feed.notify(event);
     },
@@ -565,7 +637,9 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     commitments,
     tasks,
     briefs,
+    alerts,
     ontology,
+    slackFailures,
     enqueued,
     chased,
   };

@@ -1,8 +1,20 @@
 import { ACTION, CALLBACK } from '@lance/connectors';
 import { ProposalTransitionError } from '@lance/ledger';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { fakeDeps, fakeProposal, TEST_SLACK_USER_ID, type FakeDeps } from '../test-fakes.js';
-import { handleInteraction, SNOOZE_HOURS, type InteractionOutcome } from './interactions.js';
+import {
+  fakeAlert,
+  fakeDeps,
+  fakeProposal,
+  TEST_ALERT_ID,
+  TEST_SLACK_USER_ID,
+  type FakeDeps,
+} from '../test-fakes.js';
+import {
+  handleInteraction,
+  MUTE_HOURS,
+  SNOOZE_HOURS,
+  type InteractionOutcome,
+} from './interactions.js';
 
 let harness: FakeDeps;
 const PROPOSAL_ID = '01K5S9V6QW3SWCCPVB0N0E301A';
@@ -73,18 +85,6 @@ describe('a proposal card button', () => {
     expect(harness.decider.requests).toHaveLength(0);
   });
 
-  it('says acknowledging an alert arrives in a later phase', async () => {
-    const outcome = await handleInteraction(harness.deps, blockAction(ACTION.alertAck));
-
-    expect(text(outcome)).toContain('arrives in a later phase');
-  });
-
-  it('says muting an alert arrives in a later phase', async () => {
-    const outcome = await handleInteraction(harness.deps, blockAction(ACTION.alertMute));
-
-    expect(text(outcome)).toContain('arrives in a later phase');
-  });
-
   it('names an action id it does not answer', async () => {
     const outcome = await handleInteraction(harness.deps, blockAction('proposal:teleport'));
 
@@ -109,6 +109,49 @@ describe('a proposal card button', () => {
     const outcome = await handleInteraction(harness.deps, blockAction(ACTION.proposalApprove));
 
     expect(text(outcome)).toContain('it is rejected');
+  });
+});
+
+describe('an alert card button', () => {
+  const alertAction = (actionId: string, id: string = TEST_ALERT_ID): unknown =>
+    blockAction(actionId, { actions: [{ action_id: actionId, value: id }] });
+
+  it('acknowledges the alert the button names, as Dom', async () => {
+    const outcome = await handleInteraction(harness.deps, alertAction(ACTION.alertAck));
+
+    expect(outcome).toEqual({ kind: 'empty' });
+    expect(harness.alerts.rows[0]?.status).toBe('acked');
+    expect(harness.alerts.rows[0]?.ackedBy).toBe('user:dom');
+    expect(harness.writer.appended[0]?.kind).toBe('alert_acked');
+  });
+
+  it('mutes for the twenty-four hours the button label promises', async () => {
+    await handleInteraction(harness.deps, alertAction(ACTION.alertMute));
+
+    const mutedUntil = harness.alerts.rows[0]?.mutedUntil?.getTime() ?? 0;
+    const lastSeen = harness.alerts.rows[0]?.updatedAt.getTime() ?? 0;
+
+    expect(harness.alerts.rows[0]?.status).toBe('suppressed');
+    expect((mutedUntil - lastSeen) / (60 * 60 * 1000)).toBe(MUTE_HOURS);
+    expect(MUTE_HOURS).toBe(24);
+  });
+
+  it('explains a refused change instead of failing the request', async () => {
+    harness.alerts.rows = [fakeAlert({ status: 'resolved' })];
+
+    const outcome = await handleInteraction(harness.deps, alertAction(ACTION.alertAck));
+
+    expect(text(outcome)).toContain('it cannot be acknowledged');
+  });
+
+  it('refuses a button with a value that is not an alert id', async () => {
+    const outcome = await handleInteraction(
+      harness.deps,
+      blockAction(ACTION.alertMute, { actions: [{ action_id: ACTION.alertMute }] }),
+    );
+
+    expect(text(outcome)).toContain('carried no alert id');
+    expect(harness.writer.appended).toHaveLength(0);
   });
 });
 

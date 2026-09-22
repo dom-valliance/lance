@@ -9,15 +9,18 @@ import {
   type SubmittedView,
 } from '@lance/connectors';
 import { ProposalTransitionError } from '@lance/ledger';
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { ackAlert, muteAlert } from '../alerts/service.js';
 import { DOM_ACTOR, type ApiDeps } from '../deps.js';
 
 /**
  * Slack's interactivity payloads (spec 9.1): the four buttons on a proposal
- * card and the two modals two of them open. Everything here is pure
- * mapping and delegation; the decision itself goes through
- * `deps.decide`, which is `applyDecision`, which is the ledger's state
- * machine. Nothing in this file writes a proposal status.
+ * card, the two on an alert card, and the two modals two of them open.
+ * Everything here is pure mapping and delegation; the decision itself goes
+ * through `deps.decide`, which is `applyDecision`, which is the ledger's
+ * state machine, and an alert change goes through the same service the
+ * Alerts page calls. Nothing in this file writes a status of its own.
  *
  * Slack gives an interaction handler three seconds. Approve and Snooze do
  * one decision and one card update, Edit and Reject open a modal, so none
@@ -26,6 +29,9 @@ import { DOM_ACTOR, type ApiDeps } from '../deps.js';
 
 /** The card's button says "Snooze 4h"; the handler must mean the same thing. */
 export const SNOOZE_HOURS = 4;
+
+/** The alert card's button says "Mute 24h"; the handler must mean the same thing. */
+export const MUTE_HOURS = 24;
 
 const EPHEMERAL = 'ephemeral' as const;
 
@@ -141,9 +147,9 @@ async function handleBlockAction(
     case ACTION.executedUndo:
       return laterPhase('Undo');
     case ACTION.alertAck:
-      return laterPhase('Acknowledging an alert');
+      return await actOnAlert(deps, action.value, 'ack');
     case ACTION.alertMute:
-      return laterPhase('Muting an alert');
+      return await actOnAlert(deps, action.value, 'mute');
     default:
       return ephemeral(
         `That button (${actionId}) is not one ${deps.config.agentDisplayName} answers.`,
@@ -165,7 +171,7 @@ async function decide(
   value: string | undefined,
   shape: DecisionShape,
 ): Promise<InteractionOutcome> {
-  const proposalId = readProposalId(value);
+  const proposalId = readRecordId(value);
   if (proposalId === null) {
     return ephemeral('That button carried no proposal id, so nothing was decided.');
   }
@@ -179,7 +185,8 @@ async function decide(
   return { kind: 'empty' };
 }
 
-function readProposalId(value: string | undefined): string | null {
+/** The ULID a card button carries, or null when it carries none or a malformed one. */
+function readRecordId(value: string | undefined): string | null {
   if (value === undefined) return null;
   try {
     return parseActionValue(value).id;
@@ -188,13 +195,40 @@ function readProposalId(value: string | undefined): string | null {
   }
 }
 
+/**
+ * Acks or mutes the alert the card names. Both go through the same service
+ * functions the Alerts page calls, so a Slack click and a click in the web
+ * app leave the same ledger trail. The actor is Dom either way: nothing
+ * reaches here until the Dom-only check above has passed.
+ */
+async function actOnAlert(
+  deps: ApiDeps,
+  value: string | undefined,
+  which: 'ack' | 'mute',
+): Promise<InteractionOutcome> {
+  const alertId = readRecordId(value);
+  if (alertId === null) {
+    return ephemeral('That button carried no alert id, so nothing was changed.');
+  }
+
+  try {
+    await (which === 'ack'
+      ? ackAlert(deps, { id: alertId, actor: DOM_ACTOR })
+      : muteAlert(deps, { id: alertId, hours: MUTE_HOURS, actor: DOM_ACTOR }));
+  } catch (error) {
+    if (error instanceof TRPCError) return ephemeral(error.message);
+    throw error;
+  }
+  return { kind: 'empty' };
+}
+
 async function openModal(
   deps: ApiDeps,
   payload: BlockActions,
   value: string | undefined,
   which: 'edit' | 'reject',
 ): Promise<InteractionOutcome> {
-  const proposalId = readProposalId(value);
+  const proposalId = readRecordId(value);
   if (proposalId === null) {
     return ephemeral('That button carried no proposal id, so no modal was opened.');
   }
