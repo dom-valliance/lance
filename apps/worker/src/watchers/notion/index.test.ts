@@ -115,6 +115,7 @@ describe('createNotionWatcher', () => {
     expect(watcher.sourceSystem).toBe('notion');
     expect(watcher.schedules).toEqual([...NOTION_SCHEDULES]);
     expect(await watcher.partitions()).toEqual([TASK_PARTITION, MEETING_PARTITION]);
+    expect(watcher.triage).toBe(false);
   });
 
   it('watches only the tasks partition when no meetings data source is configured', async () => {

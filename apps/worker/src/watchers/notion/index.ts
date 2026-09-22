@@ -123,6 +123,12 @@ export function createNotionWatcher(options: NotionWatcherOptions): Watcher {
     name: NOTION_WATCHER_NAME,
     sourceSystem: 'notion',
     schedules: [...(options.schedules ?? NOTION_SCHEDULES)],
+    // A Notion task is already a task: the Tasks page and the briefs read
+    // the observations directly, and a Sonnet triage call per edit found
+    // nothing to propose. The first poll over the database would have
+    // queued three thousand of them. Revisit if the Meetings partition
+    // comes back, since its debriefs travelled through triage.
+    triage: false,
 
     partitions: () =>
       Promise.resolve(
