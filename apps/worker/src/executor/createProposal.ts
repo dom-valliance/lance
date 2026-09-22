@@ -12,6 +12,7 @@ import {
   type ProposalStatus,
 } from '@lance/shared';
 import { eq } from 'drizzle-orm';
+import { recordPush } from '../alerts/engine/budget.js';
 import type { CriticVerdict } from '../critic/index.js';
 
 export interface ProposalContext {
@@ -201,6 +202,14 @@ export function createProposalHandler(
           .update(proposals)
           .set({ slackChannel: posted.channel, slackTs: posted.ts, updatedAt: new Date(now()) })
           .where(eq(proposals.id, proposalId));
+        // A card is an unsolicited post and counts against the hourly push budget (spec 9.4).
+        await recordPush(deps.db, {
+          reason: 'proposal_card',
+          correlationId: context.correlationId,
+          slackTs: posted.ts,
+          ids: [proposalId],
+          now,
+        });
       }
     }
 

@@ -103,6 +103,6 @@ Opened 2026-09-22 on branch `feat/phase-3-briefs-alerts` after Phase 2 was deplo
 | Criterion | Evidence | Date |
 |---|---|---|
 | Five consecutive weekday briefs delivered by 06:35 with no missing meeting | pending | |
-| Stale watermark in the inbox agent's channel raises an alert in test | pending | |
-| Push budget test passes | pending | |
+| Stale watermark in the inbox agent's channel raises an alert in test | `apps/worker/src/watchers/agent-logs/detect.test.ts`: a watermark older than the threshold raises one P1 `stale_watermark` alert, a fresh one none; the watcher's Slack partition parses watermark lines from the channel history. | 2026-09-22 |
+| Push budget test passes | `apps/worker/src/alerts/engine/deliver.test.ts`: a P0 posts in quiet hours while a P1 waits for working hours, a P2 is never pushed, pushes beyond the hourly budget fold into one batch post with a link, repeats redraw the card, a muted alert is not delivered; proposal cards record a push too. | 2026-09-22 |
 
