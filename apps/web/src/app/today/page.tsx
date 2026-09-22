@@ -1,8 +1,5 @@
-import { RefreshCw } from 'lucide-react';
-import { ActionForm } from '@/components/action-form';
 import { LiveRefresh } from '@/components/live-refresh';
 import { PageHeader } from '@/components/page-header';
-import { SubmitButton } from '@/components/submit-button';
 import {
   asAfternoonBoard,
   asMorningBrief,
@@ -18,7 +15,6 @@ import { AgentHealthSection } from './agent-health';
 import { DayShapeSection } from './day-shape';
 import { MeetingsSection } from './meetings';
 import { OvernightSection } from './overnight';
-import { regenerateBrief } from './actions';
 import { TasksSection } from './tasks';
 import { WaitingForSection } from './waiting-for';
 
@@ -56,29 +52,31 @@ export default async function TodayPage() {
         title={formatDayTitle(now)}
         summary={summary}
         actions={
-          <>
-            {brief === null ? null : (
-              <span className="text-xs text-muted-foreground">
-                {generatedLabel(brief.generatedAt, now)}
-              </span>
-            )}
-            <ActionForm action={regenerateBrief} className="flex flex-col items-end gap-1">
-              <input type="hidden" name="kind" value="morning_brief" />
-              <SubmitButton variant="outline" pendingLabel="Regenerating">
-                <RefreshCw aria-hidden className="size-4" />
-                Regenerate
-              </SubmitButton>
-            </ActionForm>
-          </>
+          brief === null ? null : (
+            <span className="text-xs text-muted-foreground">
+              {generatedLabel(brief.generatedAt, now)}
+            </span>
+          )
         }
       />
+
+      {/*
+       * There is no `briefs.regenerate` mutation yet, so the page cannot
+       * offer a working button for it. A web regenerate control arrives
+       * with the Settings page's controls (spec 12, Settings row); until
+       * then this sentence is the whole story, on both the empty state
+       * below and once a brief has rendered.
+       */}
+      <p className="text-xs text-muted-foreground">
+        Regenerate this brief with <span className="font-mono">/lance brief</span> in Slack.
+      </p>
 
       {brief === null ? (
         <section className="rounded-xl bg-card p-6">
           <p className="text-sm text-muted-foreground">
             {isBeforeBriefTime(now)
-              ? "Today's brief arrives at 06:30. Regenerate to build it now."
-              : 'No brief was generated today. Regenerate to build it now.'}
+              ? 'No brief has been generated yet today. The morning brief is due at 06:30 on weekdays.'
+              : 'No brief was generated today. The next morning brief is due at 06:30 on weekdays.'}
           </p>
         </section>
       ) : (
