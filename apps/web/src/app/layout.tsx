@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { signOutAction } from '@/app/actions';
 import { AppShell } from '@/components/shell/app-shell';
 import { loadShellData } from '@/lib/shell-data';
 import './globals.css';
@@ -20,7 +19,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en" className="dark">
       <body className="min-h-screen bg-background text-foreground">
-        <AppShell agentName={agentDisplayName()} data={data} signOut={signOutAction}>
+        <AppShell agentName={agentDisplayName()} data={data}>
           {children}
         </AppShell>
       </body>

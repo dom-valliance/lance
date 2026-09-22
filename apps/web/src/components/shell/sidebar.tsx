@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { NAV_ITEMS, type NavCounts } from '@/components/shell/nav';
+import { NAV_ITEMS, SIGN_OUT_PATH, type NavCounts } from '@/components/shell/nav';
 import { NavLink } from '@/components/shell/nav-link';
 import { StatusLine } from '@/components/shell/status-line';
 import { Wordmark } from '@/components/shell/wordmark';
@@ -13,12 +13,10 @@ export function Sidebar({
   agentName,
   counts,
   status,
-  signOut,
 }: {
   agentName: string;
   counts: NavCounts;
   status: ShellStatusLine | null;
-  signOut: () => Promise<void>;
 }) {
   return (
     <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col gap-5 border-r border-sidebar-border bg-sidebar px-4 py-6 lg:flex">
@@ -44,7 +42,7 @@ export function Sidebar({
       </nav>
       <div className="flex flex-col gap-3 border-t border-sidebar-border pt-4">
         <StatusLine line={status} />
-        <form action={signOut}>
+        <form action={SIGN_OUT_PATH} method="post">
           <Button type="submit" variant="outline" className="w-full">
             Sign out
           </Button>
