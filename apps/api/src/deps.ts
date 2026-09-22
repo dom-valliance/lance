@@ -11,6 +11,7 @@ import type {
   ResumeResult,
 } from '@lance/ledger';
 import type { Config, LedgerEventInputCandidate, Proposal, SystemMode } from '@lance/shared';
+import type { AgentsStoreLike } from './agents/store.js';
 import type { AlertStoreLike } from './alerts/store.js';
 import type { BriefStoreLike } from './briefs/store.js';
 import type { CommitmentStoreLike } from './commitments/store.js';
@@ -127,6 +128,8 @@ export interface ApiDeps {
   briefs: BriefStoreLike;
   /** Reads and the three status writes behind the Alerts page. */
   alerts: AlertStoreLike;
+  /** Cursors, agent runs and pushes behind the Agents page. */
+  agents: AgentsStoreLike;
   /** Person nodes, for the owner and counterparty of a commitment. */
   ontology: OntologyLike;
   /**

@@ -329,53 +329,111 @@ describe('settings.retention', () => {
 });
 
 describe('briefs.latest', () => {
-  it('returns null when no brief of that kind has been generated', async () => {
-    expect(await caller.briefs.latest({ kind: 'morning_brief' })).toBeNull();
+  it('returns nothing when that local day has no brief of that kind', async () => {
+    expect(await caller.briefs.latest({ kind: 'morning_brief', date: '2026-09-22' })).toBeNull();
   });
 
-  it('returns the newest brief of that kind with its content parsed', async () => {
+  it('returns the newest brief of that kind on the day, with its content as stored', async () => {
     harness.briefs.rows = [
       fakeBrief({
         id: '01K5S9V6QW3SWCCPVB0N0E305A',
         content: morningBriefContent,
-        generatedAt: '2026-09-21T05:30:00.000Z',
+        generatedAt: '2026-09-22T04:00:00.000Z',
       }),
       fakeBrief({
         id: '01K5S9V6QW3SWCCPVB0N0E305C',
-        content: { ...morningBriefContent, date: '2026-09-22' },
+        content: { ...morningBriefContent, date: '2026-09-22', slackTs: '1758351600.000100' },
         generatedAt: '2026-09-22T05:30:00.000Z',
       }),
     ];
 
-    const brief = await caller.briefs.latest({ kind: 'morning_brief' });
+    const brief = await caller.briefs.latest({ kind: 'morning_brief', date: '2026-09-22' });
 
     expect(brief?.id).toBe('01K5S9V6QW3SWCCPVB0N0E305C');
     expect((brief?.content as MorningBriefContent).date).toBe('2026-09-22');
+    expect(brief?.slackTs).toBe('1758351600.000100');
   });
 
-  it('fails with a message naming the brief and the field when the content is stale', async () => {
-    const { agentHealth, ...withoutHealth } = morningBriefContent;
-    void agentHealth;
-    harness.briefs.rows = [fakeBrief({ id: '01K5S9V6QW3SWCCPVB0N0E305D', content: withoutHealth })];
-
-    await expect(caller.briefs.latest({ kind: 'morning_brief' })).rejects.toThrow(
-      /01K5S9V6QW3SWCCPVB0N0E305D.*agentHealth/s,
-    );
-  });
-
-  it('returns a kind the Today page does not parse as it was stored', async () => {
+  it('returns a kind the Today page renders itself as it was stored', async () => {
     harness.briefs.rows = [
-      fakeBrief({ id: '01K5S9V6QW3SWCCPVB0N0E305E', kind: 'debrief', content: { any: 'shape' } }),
+      fakeBrief({
+        id: '01K5S9V6QW3SWCCPVB0N0E305E',
+        kind: 'meeting_prep',
+        content: { eventId: 'AAMk1', section: { subject: 'The pilot' }, slackTs: null },
+      }),
     ];
 
-    const brief = await caller.briefs.latest({ kind: 'debrief' });
+    const brief = await caller.briefs.latest({ kind: 'meeting_prep', date: '2026-09-22' });
 
-    expect(brief?.content).toEqual({ any: 'shape' });
+    expect(brief?.content).toEqual({
+      eventId: 'AAMk1',
+      section: { subject: 'The pilot' },
+      slackTs: null,
+    });
+    expect(brief?.slackTs).toBeNull();
   });
 
   it('rejects a kind the schema does not know', async () => {
     await expect(
       caller.briefs.latest({ kind: 'daydream' } as unknown as { kind: 'morning_brief' }),
     ).rejects.toThrow();
+  });
+
+  it('rejects a date that is not a calendar date', async () => {
+    await expect(
+      caller.briefs.latest({ kind: 'morning_brief', date: '22-09-2026' }),
+    ).rejects.toThrow(/YYYY-MM-DD/);
+  });
+});
+
+describe('briefs.list', () => {
+  beforeEach(() => {
+    harness.briefs.rows = [
+      fakeBrief({ id: '01K5S9V6QW3SWCCPVB0N0E305A' }),
+      fakeBrief({ id: '01K5S9V6QW3SWCCPVB0N0E305B', kind: 'afternoon_board' }),
+    ];
+  });
+
+  it('returns every kind newest first when it is given no filter', async () => {
+    const page = await caller.briefs.list({});
+
+    expect(page.items.map((item) => item.id)).toEqual([
+      '01K5S9V6QW3SWCCPVB0N0E305B',
+      '01K5S9V6QW3SWCCPVB0N0E305A',
+    ]);
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it('returns the cursor for the next page when one exists', async () => {
+    const page = await caller.briefs.list({ limit: 1 });
+
+    expect(page.nextCursor).toBe('01K5S9V6QW3SWCCPVB0N0E305B');
+  });
+});
+
+describe('briefs.get', () => {
+  it('returns nothing for an id that has no brief', async () => {
+    expect(await caller.briefs.get({ id: '01K5S9V6QW3SWCCPVB0N0E305A' })).toBeNull();
+  });
+
+  it('returns the brief and its markdown', async () => {
+    harness.briefs.rows = [fakeBrief({ id: '01K5S9V6QW3SWCCPVB0N0E305A' })];
+
+    expect((await caller.briefs.get({ id: '01K5S9V6QW3SWCCPVB0N0E305A' }))?.markdown).toBe(
+      '# Morning brief',
+    );
+  });
+});
+
+describe('agents.status', () => {
+  it('returns the watchers, the agents, the cost and the breakers in one read', async () => {
+    const status = await caller.agents.status();
+
+    expect(status.system).toMatchObject({ paused: false, mode: 'dry_run' });
+    expect(status.watchers.map((watcher) => watcher.name)).toEqual(['graph-mail']);
+    expect(status.agents.map((agent) => agent.name)).toEqual(['triage']);
+    expect(status.costToday.ceilingGbp).toBe(harness.deps.config.cost.dailyCeilingGbp);
+    expect(status.costByDay).toHaveLength(14);
+    expect(status.breakers).toEqual([]);
   });
 });

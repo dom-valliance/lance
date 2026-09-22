@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { renderStatus, startOfLocalDay } from './status.js';
+import {
+  ageMinutesBetween,
+  localDateOf,
+  renderStatus,
+  shiftLocalDays,
+  startOfLocalDay,
+  startOfNamedLocalDay,
+} from './status.js';
 import { fakeSnapshot } from './test-fakes.js';
 
 describe('renderStatus', () => {
@@ -113,5 +120,62 @@ describe('startOfLocalDay', () => {
   it('handles an instant that is already the local midnight', () => {
     const start = startOfLocalDay(new Date('2026-09-19T23:00:00.000Z'), 'Europe/London');
     expect(start.toISOString()).toBe('2026-09-19T23:00:00.000Z');
+  });
+});
+
+describe('shiftLocalDays', () => {
+  it('moves forward to the start of the next local day', () => {
+    const next = shiftLocalDays(new Date('2026-09-22T08:00:00.000Z'), 1, 'Europe/London');
+    expect(next.toISOString()).toBe('2026-09-22T23:00:00.000Z');
+  });
+
+  it('moves back a fortnight to the start of that local day', () => {
+    const back = shiftLocalDays(new Date('2026-09-22T08:00:00.000Z'), -13, 'Europe/London');
+    expect(back.toISOString()).toBe('2026-09-08T23:00:00.000Z');
+  });
+
+  it('counts days across the clocks going back, not hours', () => {
+    // The clocks go back on 25 October 2026, so the week is 169 hours long
+    // and 22 October is still British Summer Time.
+    const back = shiftLocalDays(new Date('2026-10-28T09:00:00.000Z'), -6, 'Europe/London');
+    expect(back.toISOString()).toBe('2026-10-21T23:00:00.000Z');
+  });
+});
+
+describe('startOfNamedLocalDay', () => {
+  it('starts a British Summer Time day at 23:00 UTC the evening before', () => {
+    expect(startOfNamedLocalDay('2026-09-22', 'Europe/London').toISOString()).toBe(
+      '2026-09-21T23:00:00.000Z',
+    );
+  });
+
+  it('starts a Greenwich Mean Time day at midnight UTC', () => {
+    expect(startOfNamedLocalDay('2026-01-15', 'Europe/London').toISOString()).toBe(
+      '2026-01-15T00:00:00.000Z',
+    );
+  });
+
+  it('refuses anything that is not a calendar date', () => {
+    expect(() => startOfNamedLocalDay('22-09-2026', 'Europe/London')).toThrow(/YYYY-MM-DD/);
+  });
+});
+
+describe('localDateOf', () => {
+  it('reads the local date, not the UTC one', () => {
+    expect(localDateOf(new Date('2026-09-21T23:30:00.000Z'), 'Europe/London')).toBe('2026-09-22');
+  });
+});
+
+describe('ageMinutesBetween', () => {
+  it('rounds down to whole minutes', () => {
+    expect(
+      ageMinutesBetween(new Date('2026-09-22T08:00:00.000Z'), new Date('2026-09-22T07:48:30.000Z')),
+    ).toBe(11);
+  });
+
+  it('reads a cursor written in the future as no age at all', () => {
+    expect(
+      ageMinutesBetween(new Date('2026-09-22T08:00:00.000Z'), new Date('2026-09-22T08:10:00.000Z')),
+    ).toBe(0);
   });
 });

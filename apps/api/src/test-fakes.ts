@@ -12,7 +12,6 @@ import type {
 import {
   loadConfig,
   newUlid,
-  type BriefKind,
   type Config,
   type LedgerEventInputCandidate,
   type Proposal,
@@ -29,8 +28,9 @@ import type {
   SystemControlLike,
   TokenVerifier,
 } from './deps.js';
+import type { AgentLastRun, AgentRunRow, AgentsStoreLike, CursorRow } from './agents/store.js';
 import type { AlertQuery, AlertStoreLike, SetAlertStatusInput } from './alerts/store.js';
-import type { BriefRecord, BriefStoreLike } from './briefs/store.js';
+import type { BriefQuery, BriefRecord, BriefStoreLike, LatestBriefQuery } from './briefs/store.js';
 import type { CommitmentQuery, CommitmentStoreLike } from './commitments/store.js';
 import type { TaskQuery, TaskStoreLike } from './tasks/store.js';
 import { toTaskView, type ObservationRecord } from './tasks/view.js';
@@ -395,15 +395,103 @@ export const fakeBrief = (overrides: Partial<BriefRecord> = {}): BriefRecord => 
   ...overrides,
 });
 
-/** The briefs table without a database; `latest` picks the newest of a kind. */
+/** The briefs table without a database: one local day, a page, or one row. */
 export class FakeBriefStore implements BriefStoreLike {
   rows: BriefRecord[] = [];
+  readonly latestQueries: LatestBriefQuery[] = [];
 
-  latest(kind: BriefKind): Promise<BriefRecord | null> {
+  latest(query: LatestBriefQuery): Promise<BriefRecord | null> {
+    this.latestQueries.push(query);
     const matched = [...this.rows]
-      .filter((row) => row.kind === kind)
-      .sort((left, right) => (left.generatedAt < right.generatedAt ? 1 : -1));
+      .filter((row) => row.kind === query.kind)
+      .filter((row) => {
+        const at = new Date(row.generatedAt);
+        return at >= query.from && at < query.to;
+      })
+      .sort((left, right) =>
+        left.generatedAt === right.generatedAt
+          ? right.id.localeCompare(left.id)
+          : right.generatedAt.localeCompare(left.generatedAt),
+      );
     return Promise.resolve(matched[0] ?? null);
+  }
+
+  list(query: BriefQuery): Promise<BriefRecord[]> {
+    const matched = [...this.rows]
+      .filter((row) => query.kind === undefined || row.kind === query.kind)
+      .filter((row) => query.cursor === undefined || row.id < query.cursor)
+      .sort((left, right) => right.id.localeCompare(left.id));
+    return Promise.resolve(matched.slice(0, query.limit));
+  }
+
+  get(id: string): Promise<BriefRecord | null> {
+    return Promise.resolve(this.rows.find((row) => row.id === id) ?? null);
+  }
+}
+
+export const fakeCursorRow = (overrides: Partial<CursorRow> = {}): CursorRow => ({
+  watcher: 'graph-mail',
+  key: 'inbox',
+  value: 'delta-token',
+  updatedAt: new Date('2026-09-22T08:48:00.000Z'),
+  ...overrides,
+});
+
+export const fakeAgentRun = (overrides: Partial<AgentRunRow> = {}): AgentRunRow => ({
+  agent: 'triage',
+  startedAt: new Date('2026-09-22T08:00:00.000Z'),
+  status: 'succeeded',
+  costUsd: 0.1,
+  error: null,
+  ...overrides,
+});
+
+/**
+ * The cursors, agent runs and pushes behind the Agents page, without a
+ * database. `lastRuns` is derived from `runs`, as the distinct-on query is.
+ */
+export class FakeAgentsStore implements AgentsStoreLike {
+  cursorRows: CursorRow[] = [fakeCursorRow()];
+  runs: AgentRunRow[] = [fakeAgentRun()];
+  pushes = 0;
+  /** The `since` of every push count asked for, in order. */
+  readonly pushWindows: Date[] = [];
+
+  listCursors(): Promise<CursorRow[]> {
+    return Promise.resolve(
+      [...this.cursorRows].sort(
+        (left, right) =>
+          left.watcher.localeCompare(right.watcher) || left.key.localeCompare(right.key),
+      ),
+    );
+  }
+
+  runsSince(since: Date): Promise<AgentRunRow[]> {
+    return Promise.resolve(
+      this.runs
+        .filter((run) => run.startedAt >= since)
+        .sort((left, right) => left.startedAt.getTime() - right.startedAt.getTime()),
+    );
+  }
+
+  lastRuns(): Promise<AgentLastRun[]> {
+    const newest = new Map<string, AgentRunRow>();
+    for (const run of this.runs) {
+      const seen = newest.get(run.agent);
+      if (seen === undefined || run.startedAt > seen.startedAt) newest.set(run.agent, run);
+    }
+    return Promise.resolve(
+      [...newest.values()].map((run) => ({
+        agent: run.agent,
+        startedAt: run.startedAt,
+        error: run.error,
+      })),
+    );
+  }
+
+  pushesSince(since: Date): Promise<number> {
+    this.pushWindows.push(since);
+    return Promise.resolve(this.pushes);
   }
 }
 
@@ -553,6 +641,7 @@ export interface FakeDeps {
   tasks: FakeTaskStore;
   briefs: FakeBriefStore;
   alerts: FakeAlertStore;
+  agents: FakeAgentsStore;
   ontology: FakeOntology;
   /** Alert ids whose Slack card could not be redrawn, in order. */
   slackFailures: string[];
@@ -582,6 +671,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
   const tasks = new FakeTaskStore();
   const briefs = new FakeBriefStore();
   const alerts = new FakeAlertStore();
+  const agents = new FakeAgentsStore();
   const ontology = new FakeOntology();
   const slackFailures: string[] = [];
 
@@ -600,6 +690,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     tasks,
     briefs,
     alerts,
+    agents,
     ontology,
     enqueueBrief: () => {
       briefRequests.push(1);
@@ -645,6 +736,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     tasks,
     briefs,
     alerts,
+    agents,
     ontology,
     slackFailures,
     enqueued,

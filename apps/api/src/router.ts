@@ -25,7 +25,13 @@ import {
   MAX_MUTE_HOURS,
   MIN_MUTE_HOURS,
 } from './alerts/service.js';
-import { latestBrief } from './briefs/service.js';
+import { agentsStatus } from './agents/service.js';
+import {
+  getBrief,
+  latestBrief,
+  listBriefs,
+  MAX_PAGE_SIZE as MAX_BRIEF_PAGE_SIZE,
+} from './briefs/service.js';
 import { resumeAndRequeue } from './deps.js';
 import {
   chaseCommitment,
@@ -178,6 +184,19 @@ export const AlertListInputSchema = z
   .default({});
 export type AlertListInput = z.infer<typeof AlertListInputSchema>;
 
+/** `YYYY-MM-DD`, the local day the Today page is showing. */
+const LocalDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a date as "YYYY-MM-DD"');
+
+/** The Today page's brief history (spec 12, Today row). */
+export const BriefListInputSchema = z
+  .object({
+    kind: BriefKindSchema.optional(),
+    limit: z.int().positive().max(MAX_BRIEF_PAGE_SIZE).optional(),
+    cursor: UlidSchema.optional(),
+  })
+  .default({});
+export type BriefListInput = z.infer<typeof BriefListInputSchema>;
+
 export const appRouter = router({
   systemState: router({
     get: procedure.query(({ ctx }) => ctx.deps.control.read()),
@@ -206,9 +225,21 @@ export const appRouter = router({
     retention: procedure.query(({ ctx }) => ctx.deps.config.retention),
   }),
   briefs: router({
+    /** The newest brief of a kind generated on a local day, today by default. */
     latest: procedure
-      .input(z.object({ kind: BriefKindSchema }))
-      .query(({ ctx, input }) => latestBrief(ctx.deps, input.kind)),
+      .input(z.object({ kind: BriefKindSchema, date: LocalDateSchema.optional() }))
+      .query(({ ctx, input }) =>
+        latestBrief(ctx.deps, {
+          kind: input.kind,
+          ...(input.date === undefined ? {} : { date: input.date }),
+        }),
+      ),
+    list: procedure
+      .input(BriefListInputSchema)
+      .query(({ ctx, input }) => listBriefs(ctx.deps, input)),
+    get: procedure
+      .input(z.object({ id: UlidSchema }))
+      .query(({ ctx, input }) => getBrief(ctx.deps, input.id)),
   }),
   proposals: router({
     list: procedure
@@ -278,6 +309,10 @@ export const appRouter = router({
       .mutation(({ ctx, input }) =>
         resolveAlert(ctx.deps, { id: input.id, actor: actorFromUpn(ctx.upn) }),
       ),
+  }),
+  agents: router({
+    /** Watchers, agents, cost and breakers in one read (spec 12, Agents row). */
+    status: procedure.query(({ ctx }) => agentsStatus(ctx.deps)),
   }),
   tasks: router({
     list: procedure

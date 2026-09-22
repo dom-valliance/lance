@@ -13,6 +13,7 @@ import { OntologyRepository } from '@lance/ontology';
 import { getConfig, readSecret, type Config } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { pathToFileURL } from 'node:url';
+import { createAgentsStore } from './agents/store.js';
 import { createAlertStore } from './alerts/store.js';
 import { createEntraVerifier } from './auth/entra.js';
 import { createBriefStore } from './briefs/store.js';
@@ -87,6 +88,7 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
     tasks: createTaskStore(options.db),
     briefs: createBriefStore(options.db),
     alerts: createAlertStore(options.db),
+    agents: createAgentsStore(options.db),
     ontology: new OntologyRepository(options.db),
     enqueueChase: (commitmentId) => executeQueue.enqueueChase(commitmentId),
     enqueueBrief: () => executeQueue.enqueueBrief(),
