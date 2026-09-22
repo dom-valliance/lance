@@ -223,13 +223,26 @@ export const fakeProposal = (overrides: Partial<Proposal> = {}): Proposal => ({
   ...overrides,
 });
 
+/** The proposals table without a database: filters, cursors and the page limit. */
 export class FakeProposalStore implements ProposalStoreLike {
   rows: Proposal[] = [fakeProposal()];
   readonly filters: (ProposalFilter | undefined)[] = [];
 
   list(filter?: ProposalFilter): Promise<Proposal[]> {
     this.filters.push(filter);
-    return Promise.resolve(this.rows);
+    const query = filter ?? {};
+    const matched = this.rows
+      .filter((row) => query.status === undefined || row.status === query.status)
+      .filter((row) => query.actionClass === undefined || row.actionClass === query.actionClass)
+      .filter(
+        (row) =>
+          query.counterpartyClass === undefined ||
+          row.counterpartyClass === query.counterpartyClass,
+      )
+      .filter((row) => query.targetSystem === undefined || row.targetSystem === query.targetSystem)
+      .filter((row) => query.cursor === undefined || row.id < query.cursor)
+      .sort((left, right) => (left.id < right.id ? 1 : -1));
+    return Promise.resolve(query.limit === undefined ? matched : matched.slice(0, query.limit));
   }
 
   get(id: string): Promise<Proposal | null> {

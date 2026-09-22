@@ -93,6 +93,9 @@ const text = (value: string | string[] | undefined): string | undefined => {
 const CALENDAR_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
 
+/** A full ISO instant, the shape the ledger's "Show older" link carries. */
+export const isIsoInstant = (value: string): boolean => ISO_INSTANT.test(value);
+
 /**
  * A date the filter form supplies as `YYYY-MM-DD`, widened to the instant
  * the api wants. `from` starts the day, `to` ends it, both in UTC, so a
@@ -108,7 +111,7 @@ const instant = (
 ): string | undefined => {
   const day = text(value);
   if (day === undefined) return undefined;
-  if (ISO_INSTANT.test(day)) {
+  if (isIsoInstant(day)) {
     const parsed = new Date(day);
     return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
   }
@@ -124,9 +127,11 @@ const instant = (
  */
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
+export const isUlid = (value: string): boolean => ULID.test(value);
+
 const ulid = (value: string | string[] | undefined): string | undefined => {
   const first = Array.isArray(value) ? value[0] : value;
-  return first !== undefined && ULID.test(first) ? first : undefined;
+  return first !== undefined && isUlid(first) ? first : undefined;
 };
 
 export interface ProposalFilter {

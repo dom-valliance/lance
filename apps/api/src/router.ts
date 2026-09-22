@@ -41,6 +41,7 @@ import {
   resolveCommitment,
   MAX_PAGE_SIZE,
 } from './commitments/service.js';
+import { listProposals } from './proposals/service.js';
 import { listTasks } from './tasks/service.js';
 import { procedure, router } from './trpc.js';
 
@@ -251,7 +252,7 @@ export const appRouter = router({
   proposals: router({
     list: procedure
       .input(ProposalFilterInputSchema)
-      .query(({ ctx, input }) => ctx.deps.proposals.list(toProposalFilter(input))),
+      .query(({ ctx, input }) => listProposals(ctx.deps, toProposalFilter(input))),
     get: procedure
       .input(z.object({ proposalId: UlidSchema }))
       .query(({ ctx, input }) => ctx.deps.proposals.get(input.proposalId)),

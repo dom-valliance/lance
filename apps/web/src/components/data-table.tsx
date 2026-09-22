@@ -81,7 +81,7 @@ export function TableFooterBar({
   className,
 }: {
   children: ReactNode;
-  className?: string;
+  className?: string | undefined;
 }) {
   return (
     <div
