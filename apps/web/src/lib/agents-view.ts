@@ -134,3 +134,77 @@ export function pushesLabel(pushesLastHour: number): string {
 export function isBreakerConcerning(state: string): boolean {
   return state !== 'closed';
 }
+
+/* Cost by day graph geometry --------------------------------------------
+ * The graph is an inline SVG, no charting library (task brief). These are
+ * the pure scaling functions; `cost-by-day.tsx` turns them into markup.
+ */
+
+export interface CostChartPoint {
+  x: number;
+  y: number;
+  date: string;
+  gbp: number;
+}
+
+export interface CostChartGeometry {
+  points: CostChartPoint[];
+  /** The largest daily cost in the series, 0 when the series is empty or every day cost nothing. */
+  maxGbp: number;
+  /** The y coordinate of the plot's top edge (where `maxGbp` is drawn). */
+  top: number;
+  /** The y coordinate of the plot's bottom edge (where 0 is drawn). */
+  bottom: number;
+}
+
+/**
+ * Scales `days` into an SVG viewBox of `width` by `height`, keeping
+ * `padding` clear on every side for axis labels. A single day sits in the
+ * horizontal middle rather than dividing by a zero day count; an empty or
+ * all-zero series still returns a valid, flat geometry rather than
+ * dividing by a zero range.
+ */
+export function costChartPoints(
+  days: readonly CostByDay[],
+  width: number,
+  height: number,
+  padding: number,
+): CostChartGeometry {
+  const top = padding;
+  const bottom = height - padding;
+  const maxGbp = Math.max(0, ...days.map((day) => day.gbp));
+  const plotWidth = width - padding * 2;
+  const points = days.map((day, index) => ({
+    x: days.length <= 1 ? width / 2 : padding + (plotWidth * index) / (days.length - 1),
+    y: costChartYFor(day.gbp, maxGbp, top, bottom),
+    date: day.date,
+    gbp: day.gbp,
+  }));
+  return { points, maxGbp, top, bottom };
+}
+
+/** The y coordinate for a cost value against the chart's own 0 to `maxGbp` scale. */
+export function costChartYFor(gbp: number, maxGbp: number, top: number, bottom: number): number {
+  if (maxGbp <= 0) return bottom;
+  return bottom - (gbp / maxGbp) * (bottom - top);
+}
+
+/**
+ * The indices of the first, middle and last day to label on the x axis,
+ * deduplicated so a series of one or two days does not repeat a label.
+ */
+export function costChartLabelIndices(count: number): number[] {
+  if (count <= 0) return [];
+  const middle = Math.floor((count - 1) / 2);
+  return Array.from(new Set([0, middle, count - 1])).sort((a, b) => a - b);
+}
+
+/**
+ * True once the ceiling sits inside the plotted 0 to `maxGbp` range. A
+ * ceiling far above the costliest day would flatten the line against the
+ * bottom of the chart if the plot stretched to reach it, so it is left
+ * off instead.
+ */
+export function costChartShowsCeiling(ceilingGbp: number, maxGbp: number): boolean {
+  return maxGbp > 0 && ceilingGbp > 0 && ceilingGbp <= maxGbp;
+}
