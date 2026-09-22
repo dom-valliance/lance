@@ -281,6 +281,24 @@ export class OntologyRepository {
       .map(vertexToNode);
   }
 
+  /** Every person with an email at `domain`: the people of one organisation, whether or not a `WORKS_AT` edge exists yet. */
+  async findPersonsByEmailDomain(domain: string): Promise<Node[]> {
+    const rows = await runCypher(
+      this.runner,
+      'MATCH (p:Person) UNWIND p.emails AS e WITH p, e WHERE e ENDS WITH $suffix RETURN p',
+      { suffix: `@${domain.toLowerCase()}` },
+    );
+    // A person with two addresses at the domain comes back twice from UNWIND.
+    const byId = new Map<string, Node>();
+    for (const row of rows) {
+      const vertex = row[0];
+      if (!isVertex(vertex)) continue;
+      const node = vertexToNode(vertex);
+      byId.set(node.id, node);
+    }
+    return [...byId.values()];
+  }
+
   async findOrganisationByDomain(domain: string): Promise<Node | null> {
     const rows = await runCypher(
       this.runner,

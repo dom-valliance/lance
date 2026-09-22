@@ -262,6 +262,18 @@ export async function runAfternoonBoard(deps: BriefDeps): Promise<BriefResult> {
   return { briefId, correlationId, slackTs };
 }
 
+/** One prep line per open commitment: who owes it, what it is, how late it is. */
+function commitmentLine(
+  commitment: MorningBriefContent['meetings'][number]['commitments'][number],
+): string {
+  const owes = commitment.direction === 'outbound' ? 'You owe' : 'Owed to you';
+  const late =
+    commitment.overdueDays === null || commitment.overdueDays <= 0
+      ? ''
+      : ` (${String(commitment.overdueDays)} ${commitment.overdueDays === 1 ? 'day' : 'days'} overdue)`;
+  return `- ${owes}: ${commitment.description}${late}`;
+}
+
 /**
  * Meeting prep (spec 10.3): the meeting's section from the morning brief,
  * the last transcript with the same people, and open commitments. Posted
@@ -308,7 +320,7 @@ export async function runMeetingPrep(deps: BriefDeps): Promise<BriefResult[]> {
       ...(section.objectives.length === 0 ? [] : [`Objectives: ${section.objectives.join(' ')}`]),
       ...(section.commitments.length === 0
         ? []
-        : [`Open: ${section.commitments.map((c) => c.description).join('; ')}`]),
+        : ['Open:', ...section.commitments.map(commitmentLine)]),
       ...(transcript === null
         ? []
         : [
