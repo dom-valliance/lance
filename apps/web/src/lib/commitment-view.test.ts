@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   ageingLabel,
+  chaseLabel,
+  chasePhrase,
+  commitmentBadgeFor,
   commitmentDirectionFrom,
   commitmentSort,
   commitmentStatusFilterFrom,
   commitmentStatusSelected,
+  evidenceLine,
+  firstName,
   isCommitmentOpenForAction,
+  isCommitmentOverdue,
+  openCount,
+  overdueCount,
   sortCommitments,
   type CommitmentView,
 } from './commitment-view';
@@ -167,5 +175,97 @@ describe('commitmentStatusSelected / commitmentStatusFilterFrom', () => {
   it('falls back to open for an unrecognised status', () => {
     expect(commitmentStatusSelected({ status: 'archived' })).toBe('open');
     expect(commitmentStatusFilterFrom({ status: 'archived' })).toBe('open');
+  });
+});
+
+describe('isCommitmentOverdue', () => {
+  it('is overdue once a day has passed the due date', () => {
+    expect(isCommitmentOverdue(view({ overdueDays: 3 }))).toBe(true);
+  });
+
+  it('is not overdue on the day it falls due', () => {
+    expect(isCommitmentOverdue(view({ overdueDays: 0 }))).toBe(false);
+  });
+
+  it('is not overdue when the api recorded no ageing', () => {
+    expect(isCommitmentOverdue(view({ overdueDays: null }))).toBe(false);
+  });
+});
+
+describe('openCount and overdueCount', () => {
+  const list = [
+    view({ id: 'a', status: 'open', overdueDays: 4 }),
+    view({ id: 'b', status: 'chased', overdueDays: null }),
+    view({ id: 'c', status: 'done', overdueDays: null }),
+    view({ id: 'd', status: 'dropped', overdueDays: null }),
+  ];
+
+  it('counts the open and chased rows as open', () => {
+    expect(openCount(list)).toBe(2);
+  });
+
+  it('counts only the rows past their due date as overdue', () => {
+    expect(overdueCount(list)).toBe(1);
+  });
+});
+
+describe('commitmentBadgeFor', () => {
+  it('shows nothing for an open row that is on time', () => {
+    expect(commitmentBadgeFor(view())).toBeNull();
+  });
+
+  it('shows overdue ahead of the stored status', () => {
+    expect(commitmentBadgeFor(view({ status: 'chased', overdueDays: 2 }))).toBe('overdue');
+  });
+
+  it('shows chased for a chased row that is not overdue', () => {
+    expect(commitmentBadgeFor(view({ status: 'chased' }))).toBe('chased');
+  });
+
+  it('shows done for a resolved row', () => {
+    expect(commitmentBadgeFor(view({ status: 'done' }))).toBe('done');
+  });
+
+  it('shows nothing for a dropped row', () => {
+    expect(commitmentBadgeFor(view({ status: 'dropped' }))).toBeNull();
+  });
+});
+
+describe('chaseLabel and chasePhrase', () => {
+  it('says a commitment has not been chased yet', () => {
+    expect(chaseLabel(0)).toBe('not yet');
+    expect(chasePhrase(0)).toBeNull();
+  });
+
+  it('keeps one chase singular', () => {
+    expect(chaseLabel(1)).toBe('1 time');
+    expect(chasePhrase(1)).toBe('chased once');
+  });
+
+  it('names two chases in words and more in figures', () => {
+    expect(chaseLabel(2)).toBe('2 times');
+    expect(chasePhrase(2)).toBe('chased twice');
+    expect(chaseLabel(4)).toBe('4 times');
+    expect(chasePhrase(4)).toBe('chased 4 times');
+  });
+});
+
+describe('evidenceLine', () => {
+  it('names who the promise was made to on the "I owe" tab', () => {
+    expect(evidenceLine(view())).toBe('"I\'ll send that over by Friday." to Sam Ellis');
+  });
+
+  it('quotes the evidence alone on the "owed to me" tab', () => {
+    expect(evidenceLine(view({ direction: 'inbound' }))).toBe('"I\'ll send that over by Friday."');
+  });
+});
+
+describe('firstName', () => {
+  it('takes the first word of a full name', () => {
+    expect(firstName('Marcus Reid')).toBe('Marcus');
+  });
+
+  it('keeps a single-word name as it is', () => {
+    expect(firstName('Marcus')).toBe('Marcus');
   });
 });

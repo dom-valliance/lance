@@ -1,7 +1,6 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { commitmentsRouter } from '@/lib/commitment-view';
 import { apiClient } from '@/lib/trpc';
 
 /**
@@ -41,7 +40,7 @@ export async function markCommitmentDone(
 ): Promise<string | null> {
   const id = requiredField(form, 'commitmentId');
   const client = await apiClient();
-  return run(() => commitmentsRouter(client).markDone.mutate({ id }));
+  return run(() => client.commitments.markDone.mutate({ id }));
 }
 
 export async function dropCommitment(
@@ -51,7 +50,7 @@ export async function dropCommitment(
   const id = requiredField(form, 'commitmentId');
   const reason = requiredField(form, 'reason');
   const client = await apiClient();
-  return run(() => commitmentsRouter(client).drop.mutate({ id, reason }));
+  return run(() => client.commitments.drop.mutate({ id, reason }));
 }
 
 export async function chaseCommitment(
@@ -60,5 +59,5 @@ export async function chaseCommitment(
 ): Promise<string | null> {
   const id = requiredField(form, 'commitmentId');
   const client = await apiClient();
-  return run(() => commitmentsRouter(client).chase.mutate({ id }));
+  return run(() => client.commitments.chase.mutate({ id }));
 }
