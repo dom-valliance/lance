@@ -106,3 +106,25 @@ Opened 2026-09-22 on branch `feat/phase-3-briefs-alerts` after Phase 2 was deplo
 | Stale watermark in the inbox agent's channel raises an alert in test | `apps/worker/src/watchers/agent-logs/detect.test.ts`: a watermark older than the threshold raises one P1 `stale_watermark` alert, a fresh one none; the watcher's Slack partition parses watermark lines from the channel history. | 2026-09-22 |
 | Push budget test passes | `apps/worker/src/alerts/engine/deliver.test.ts`: a P0 posts in quiet hours while a P1 waits for working hours, a P2 is never pushed, pushes beyond the hourly budget fold into one batch post with a link, repeats redraw the card, a muted alert is not delivered; proposal cards record a push too. | 2026-09-22 |
 
+
+### Phase 3 review, 2026-09-22
+
+An Opus 5 review of the phase diff found fifteen issues; all are fixed on the branch.
+
+| Finding | Fix |
+|---|---|
+| The worker's brief shapes diverged from `MorningBriefContentSchema` and `AfternoonBoardContentSchema` in `@lance/shared`, which the api and the Today page read | The assembly, planner and renderers emit the shared shapes; both briefs are parsed against the shared schemas before insert, with Slack ts and thread ids stored beside the content |
+| `raiseAlert` inserted a second row for a resolved or suppressed dedupe key, and the unique key made that a crash | One row per key whatever its status; resolved rows and lapsed mutes reopen with a fresh card, live mutes stay muted |
+| `authTest()` at boot was unguarded, so a Slack outage stopped the worker starting | The agent-logs watcher is skipped and a P1 `watcher_failed` is raised when Slack will not identify the bot |
+| Batched alerts shared the overflow post's ts in `slack_ts`, so a repeat tried to redraw the batch post as a card | Migration 0007 adds `batch_ts`; batched rows carry it instead and are neither re-posted nor redrawn |
+| Proposal cards posted regardless of the push budget | `createProposal` checks the remaining budget first; delivery posts held cards once the hour allows |
+| Nothing was delivered while paused | P0 goes out paused or not; P1 and proposal cards wait |
+| The planner's `getSourceRecord` returned mail bodies | body, bodyPreview, bodyText and transcript are stripped before the record reaches the model |
+| `client_mail_unanswered` treated an unknown domain as a client | Only an Organisation of type `client` counts |
+| The calendar window ignored the organiser | The organiser is folded into the attendee list |
+| Repeats on acked alerts were not redrawn | Acked cards are redrawn with the new count |
+| Detectors formatted times with `toLondon` rather than `config.timeZone` | `localDateTime(iso, zone)` in the detector support module |
+| The morning queue had two workers | One, from `registerBriefs` |
+| Planner objectives skipped the voice checks | `applyPlan` drops objectives and reasons that fail `checkVoice` |
+| Two delivery ticks could post the same alert | Rows are claimed with a token before the post and released if it fails |
+| The budget guard's use of `cost_spike` was undocumented | ADR 0013 |
