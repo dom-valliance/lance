@@ -1,4 +1,4 @@
-import type { AgentDeps, ReadToolDeps } from '@lance/agents';
+import { BudgetExceededError, type AgentDeps, type ReadToolDeps } from '@lance/agents';
 import type { SlackSurface } from '@lance/connectors';
 import { briefs, proposals, type Db } from '@lance/db';
 import { LedgerWriter } from '@lance/ledger';
@@ -13,6 +13,7 @@ import {
 } from '@lance/shared';
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
+import { work } from '../scheduler/boss.js';
 import type { createProposalHandler } from '../executor/createProposal.js';
 import {
   PREP_LEAD_MINUTES,
@@ -110,22 +111,31 @@ export async function runMorningBrief(deps: BriefDeps): Promise<BriefResult> {
   const assembled = await assembleMorningBrief(dataDeps(deps, now));
   let brief = assembled.content;
 
+  let plannerNote: string | null = null;
   if (deps.agent !== null) {
     const context = { correlationId, actor: PLANNER_ACTOR };
-    const plan = await planMorningBrief(
-      {
-        agent: deps.agent,
-        model: deps.config.models.planner,
-        displayName: deps.config.agentDisplayName,
-        minFreeBlockHours: deps.config.briefs.minFreeBlockHours,
-        reads: deps.reads,
-        createProposal: (draft) => deps.createProposal(draft, context),
-      },
-      brief,
-      assembled.freeTimeShort,
-      correlationId,
-    );
-    brief = applyPlan(brief, plan.output);
+    let plan: Awaited<ReturnType<typeof planMorningBrief>> | null = null;
+    try {
+      plan = await planMorningBrief(
+        {
+          agent: deps.agent,
+          model: deps.config.models.planner,
+          displayName: deps.config.agentDisplayName,
+          minFreeBlockHours: deps.config.briefs.minFreeBlockHours,
+          reads: deps.reads,
+          createProposal: (draft) => deps.createProposal(draft, context),
+        },
+        brief,
+        assembled.freeTimeShort,
+        correlationId,
+      );
+    } catch (error) {
+      // Spec 13: at the ceiling the planner waits, the brief does not. The
+      // facts go out on their own and say why the judgement is missing.
+      if (!(error instanceof BudgetExceededError)) throw error;
+      plannerNote = `The planner did not run: ${error.message}`;
+    }
+    if (plan !== null) brief = applyPlan(brief, plan.output);
     const holds = await deps.db
       .select({ id: proposals.id, preview: proposals.preview })
       .from(proposals)
@@ -146,7 +156,21 @@ export async function runMorningBrief(deps: BriefDeps): Promise<BriefResult> {
   }
 
   // The contract the api and the Today page read; a shape error fails the run rather than storing junk.
-  const content = MorningBriefContentSchema.parse(brief);
+  const content = MorningBriefContentSchema.parse(
+    plannerNote === null ? brief : { ...brief, headline: `${brief.headline} ${plannerNote}` },
+  );
+
+  // Stored before Slack sees it, so a failed post leaves the brief on the
+  // Today page and a retry does not run the planner again.
+  const briefId = await recordBrief(
+    deps,
+    'morning_brief',
+    correlationId,
+    { ...content, slackTs: null } satisfies StoredMorningBrief,
+    renderMorningBriefMarkdown(content, deps.config.timeZone),
+    null,
+    now,
+  );
 
   let delivery: SlackDelivery = { slackTs: null };
   if (deps.slack !== null) {
@@ -166,18 +190,11 @@ export async function runMorningBrief(deps: BriefDeps): Promise<BriefResult> {
         threads[section.key.slice('meeting:'.length)] = reply.ts;
     }
     delivery = { slackTs: parent.ts, slackThreads: threads };
+    await deps.db
+      .update(briefs)
+      .set({ content: { ...content, ...delivery } satisfies StoredMorningBrief })
+      .where(eq(briefs.id, briefId));
   }
-
-  const stored: StoredMorningBrief = { ...content, ...delivery };
-  const briefId = await recordBrief(
-    deps,
-    'morning_brief',
-    correlationId,
-    stored,
-    renderMorningBriefMarkdown(content, deps.config.timeZone),
-    delivery.slackTs,
-    now,
-  );
   return { briefId, correlationId, slackTs: delivery.slackTs };
 }
 
@@ -332,17 +349,17 @@ export async function registerBriefs(boss: PgBoss, deps: BriefDeps): Promise<voi
   const tz = deps.config.timeZone;
   await boss.createQueue(QUEUE_MORNING);
   await boss.schedule(QUEUE_MORNING, '30 6 * * 1-5', {}, { tz, key: QUEUE_MORNING });
-  await boss.work(QUEUE_MORNING, async () => {
+  await work(boss, QUEUE_MORNING, async () => {
     await runMorningBrief(deps);
   });
   await boss.createQueue(QUEUE_BOARD);
   await boss.schedule(QUEUE_BOARD, '0 16 * * 1-5', {}, { tz, key: QUEUE_BOARD });
-  await boss.work(QUEUE_BOARD, async () => {
+  await work(boss, QUEUE_BOARD, async () => {
     await runAfternoonBoard(deps);
   });
   await boss.createQueue(QUEUE_PREP);
   await boss.schedule(QUEUE_PREP, '*/5 7-19 * * 1-5', {}, { tz, key: QUEUE_PREP });
-  await boss.work(QUEUE_PREP, async () => {
+  await work(boss, QUEUE_PREP, async () => {
     await runMeetingPrep(deps);
   });
 }
