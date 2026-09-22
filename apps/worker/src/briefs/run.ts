@@ -48,7 +48,10 @@ export const QUEUE_PREP = 'brief-meeting-prep';
 
 export interface BriefDeps {
   db: Db;
-  config: Pick<Config, 'timeZone' | 'dom' | 'briefs' | 'cost' | 'models' | 'agentDisplayName'>;
+  config: Pick<
+    Config,
+    'timeZone' | 'dom' | 'briefs' | 'cost' | 'models' | 'agentDisplayName' | 'notion'
+  >;
   ontology: OntologyRepository;
   /** Null means no model: the brief is posted from the assembled facts alone. */
   agent: AgentDeps | null;

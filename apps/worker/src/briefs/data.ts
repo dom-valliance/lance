@@ -8,6 +8,7 @@ import {
   proposals,
   type Db,
 } from '@lance/db';
+import { TASK_CLOSED_STATUSES } from '@lance/connectors';
 import type { OntologyRepository } from '@lance/ontology';
 import { organisationDomain } from '@lance/ontology';
 import type {
@@ -32,7 +33,7 @@ import { addDays, instantOf, localDate, startOfLocalDay } from './local.js';
 export interface BriefDataDeps {
   db: Db;
   ontology: OntologyRepository;
-  config: Pick<Config, 'timeZone' | 'dom' | 'briefs' | 'cost'>;
+  config: Pick<Config, 'timeZone' | 'dom' | 'briefs' | 'cost' | 'notion'>;
   now: () => string;
 }
 
@@ -448,6 +449,34 @@ export function dayShapeOf(
 }
 
 /** Tasks due today or overdue across Notion and Jamie, newest observation per record, not done. */
+type TaskSource = 'notion' | 'jamie';
+
+/**
+ * Whether one task observation belongs to the principal the brief is for
+ * and still exists. The All Tasks DB holds every task in the company, so
+ * the brief keeps the rows whose Assignee includes the principal's Notion
+ * user; the Jamie watcher stamps its action items with `assignedToDom`
+ * from the assignee's email. A page the Notion watcher recorded as removed
+ * has left the database and is never a task. Dom is the only principal in
+ * v1; the principal's identifiers come from config, never from this file.
+ */
+export function isPrincipalsLiveTask(
+  source: TaskSource,
+  payload: Record<string, unknown>,
+  principalNotionUserId: string,
+): boolean {
+  if (payload['removed'] === true) return false;
+  if (source === 'jamie') return payload['assignedToDom'] === true;
+  const assignees = payload['assigneeIds'];
+  return Array.isArray(assignees) && assignees.includes(principalNotionUserId);
+}
+
+function isTaskDone(source: TaskSource, payload: Record<string, unknown>): boolean {
+  if (source === 'jamie') return payload['completed'] === true;
+  return (TASK_CLOSED_STATUSES as readonly string[]).includes(str(payload['status']) ?? '');
+}
+
+/** The principal's Notion and Jamie tasks due today or earlier and not yet done (spec 10.1 item 3). */
 export async function tasksDue(
   deps: BriefDataDeps,
   today: string,
@@ -466,12 +495,9 @@ export async function tasksDue(
   const todayMs = new Date(`${today}T00:00:00.000Z`).getTime();
   for (const row of rows) {
     const p = (row.payload ?? {}) as Record<string, unknown>;
-    const source = row.sourceSystem as 'notion' | 'jamie';
-    const done =
-      source === 'jamie'
-        ? p['completed'] === true
-        : ['Done', 'Cancelled', 'Archived'].includes(str(p['status']) ?? '');
-    if (done) continue;
+    const source = row.sourceSystem as TaskSource;
+    if (!isPrincipalsLiveTask(source, p, deps.config.notion.domUserId)) continue;
+    if (isTaskDone(source, p)) continue;
     const due = (str(p['due']) ?? str(p['dueDate']))?.slice(0, 10) ?? null;
     if (due === null || due > today) continue;
     const dueMs = new Date(`${due}T00:00:00.000Z`).getTime();
@@ -715,11 +741,9 @@ export async function assembleAfternoonBoard(
     const p = (row.payload ?? {}) as Record<string, unknown>;
     if (seen.has(row.sourceRecordId)) continue;
     seen.add(row.sourceRecordId);
-    const done =
-      row.sourceSystem === 'jamie'
-        ? p['completed'] === true
-        : ['Done', 'Cancelled', 'Archived'].includes(str(p['status']) ?? '');
-    if (!done) continue;
+    const source = row.sourceSystem as TaskSource;
+    if (!isPrincipalsLiveTask(source, p, deps.config.notion.domUserId)) continue;
+    if (!isTaskDone(source, p)) continue;
     tasksCompleted.push({
       taskId: `${row.sourceSystem}:${row.sourceRecordId}`,
       title: str(p['title']) ?? str(p['text']) ?? '(untitled)',
