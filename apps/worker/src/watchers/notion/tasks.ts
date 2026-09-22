@@ -19,6 +19,16 @@ const MAX_SUMMARY_CHARS = 200;
  */
 export type NotionTaskRecord = Omit<TaskRecord, 'lastEditedTime'> & { kind: 'task' };
 
+/**
+ * What the ledger holds once a task page has left the database: moved to
+ * the trash, archived, or shared away from the integration. Notion returns
+ * none of those from a query, so the watcher infers the removal by
+ * comparing the open tasks it knows against the open tasks Notion still
+ * returns. Live records carry no `removed` field at all, so recording the
+ * first removal does not change the hash of every live task.
+ */
+export type NotionTaskRemovedRecord = { kind: 'task'; id: string; removed: true };
+
 function cap(text: string, limit: number): string {
   return text.length > limit ? text.slice(0, limit) : text;
 }
@@ -41,6 +51,34 @@ export function taskOf(record: SourceRecord): TaskRecord {
     );
   }
   return record.raw;
+}
+
+/** The removal of one All Tasks row as a ledger observation. */
+export function taskRemovedObservation(record: SourceRecord): Observation {
+  const canonical: NotionTaskRemovedRecord = { kind: 'task', id: record.id, removed: true };
+  return {
+    sourceSystem: 'notion',
+    recordId: record.id,
+    observedAt: record.observedAt,
+    record: canonical,
+    correlationKey: record.id,
+    summary: 'Task removed from Notion',
+    labels: ['Notion', 'Task', 'Removed'],
+  };
+}
+
+/**
+ * The ids of known open tasks that neither the edit window nor the open
+ * sweep returned. A page closed since the last poll arrives through the
+ * edit window, so what is left is a page Notion no longer returns at all.
+ */
+export function removedTaskIds(
+  knownOpenIds: readonly string[],
+  editedIds: readonly string[],
+  openIds: readonly string[],
+): string[] {
+  const seen = new Set([...editedIds, ...openIds]);
+  return knownOpenIds.filter((id) => !seen.has(id));
 }
 
 /** One All Tasks row as a ledger observation. No model call. */

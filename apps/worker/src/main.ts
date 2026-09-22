@@ -60,7 +60,11 @@ import { registerBriefs } from './briefs/run.js';
 import { registerWeeklyReview } from './briefs/weekly.js';
 import { createAgentLogsDetector, createAgentLogsWatcher } from './watchers/agent-logs/index.js';
 import { createJamieWatcher } from './watchers/jamie/index.js';
-import { createNotionWatcher, notionWatcherReads } from './watchers/notion/index.js';
+import {
+  createNotionWatcher,
+  notionWatcherReads,
+  openNotionTaskIds,
+} from './watchers/notion/index.js';
 import { pgBossTriageEnqueuer, registerWatcher, type TriageJob } from './watchers/runner.js';
 import {
   createGraphCalendarWatcher,
@@ -608,6 +612,7 @@ async function main(): Promise<void> {
         reads: notionWatcherReads(notion.connector),
         tasksDataSourceId: config.notion.tasksDataSourceId,
         meetingsDataSourceId: config.notion.meetingsDataSourceId,
+        knownOpenTaskIds: () => openNotionTaskIds(db),
       }),
       config.timeZone,
     );

@@ -14,6 +14,8 @@ import {
   notionQueryResponseSchema,
   notionUserListSchema,
   notionUserSchema,
+  TASK_CLOSED_STATUSES,
+  TASK_PROPERTY_NAMES,
   type DataSourceSchema,
   type MeetingRecord,
   type NotionUserSummary,
@@ -73,23 +75,34 @@ interface QueryPageResult<T> {
 /** Turns one raw query response into records and the paging state. */
 type ReadQueryPage<T> = (raw: unknown) => QueryPageResult<T>;
 
+/** The filter and sort half of a data source query body; paging is added per call. */
+type QueryBody = Record<string, unknown>;
+
+interface QueryPagesArgs {
+  dataSourceId: string;
+  body: QueryBody;
+  /** What the ledger records about the request, beside the data source id and cursor. */
+  request: Record<string, unknown>;
+  startCursor: string | null;
+  adviceOnRunaway: string;
+}
+
 async function queryOnePage<T>(
   notion: NotionConnector,
   operation: string,
-  args: QueryTasksArgs,
+  args: QueryPagesArgs,
   cursor: string | null,
   readPage: ReadQueryPage<T>,
   context: CallContext,
 ): Promise<QueryPageResult<T>> {
   const body = {
-    filter: { timestamp: 'last_edited_time', last_edited_time: { after: args.since } },
-    sorts: [{ timestamp: 'last_edited_time', direction: 'ascending' }],
+    ...args.body,
     page_size: QUERY_PAGE_SIZE,
     ...(cursor === null ? {} : { start_cursor: cursor }),
   };
   const raw = await notion.connector.read(
     operation,
-    { ...context, request: { dataSourceId: args.dataSourceId, since: args.since, cursor } },
+    { ...context, request: { dataSourceId: args.dataSourceId, ...args.request, cursor } },
     () =>
       notionSendAccess(notion)(operation, `/data_sources/${args.dataSourceId}/query`, {
         method: 'POST',
@@ -100,19 +113,18 @@ async function queryOnePage<T>(
 }
 
 /**
- * Every page of a data source edited after `since`, oldest edit first,
- * following `next_cursor` to the end of the window. Each page is its own
- * rate-limited call.
+ * Every page of one data source query, following `next_cursor` to the end.
+ * Each page is its own rate-limited call.
  */
-async function queryEditedSince<T>(
+async function queryPages<T>(
   notion: NotionConnector,
   operation: string,
-  args: QueryTasksArgs,
+  args: QueryPagesArgs,
   readPage: ReadQueryPage<T>,
   context: CallContext,
 ): Promise<{ records: T[]; cursor: string | null }> {
   const records: T[] = [];
-  let cursor: string | null = args.cursor ?? null;
+  let cursor: string | null = args.startCursor;
   for (let page = 1; page <= MAX_QUERY_PAGES; page += 1) {
     const result: QueryPageResult<T> = await queryOnePage(
       notion,
@@ -126,10 +138,81 @@ async function queryEditedSince<T>(
     cursor = result.nextCursor;
     if (!result.hasMore || cursor === null) return { records, cursor };
   }
-  throw pagingDidNotFinish(
+  throw pagingDidNotFinish(operation, args.adviceOnRunaway);
+}
+
+/** Every page of a data source edited after `since`, oldest edit first. */
+function queryEditedSince<T>(
+  notion: NotionConnector,
+  operation: string,
+  args: QueryTasksArgs,
+  readPage: ReadQueryPage<T>,
+  context: CallContext,
+): Promise<{ records: T[]; cursor: string | null }> {
+  return queryPages(
+    notion,
     operation,
-    'Narrow the window by moving the watcher cursor forward, then resume from the cursor the last run returned.',
+    {
+      dataSourceId: args.dataSourceId,
+      body: {
+        filter: { timestamp: 'last_edited_time', last_edited_time: { after: args.since } },
+        sorts: [{ timestamp: 'last_edited_time', direction: 'ascending' }],
+      },
+      request: { since: args.since },
+      startCursor: args.cursor ?? null,
+      adviceOnRunaway:
+        'Narrow the window by moving the watcher cursor forward, then resume from the cursor the last run returned.',
+    },
+    readPage,
+    context,
   );
+}
+
+export interface QueryOpenTasksArgs {
+  /** The All Tasks data source, as for `queryTasksEditedSince`. */
+  dataSourceId: string;
+}
+
+/**
+ * Every task whose Status is not one of `TASK_CLOSED_STATUSES`, whole. The
+ * watcher compares this against the open tasks the ledger knows: a page
+ * Notion no longer returns has been moved to the trash, and no edit-time
+ * query can say so, because Notion leaves trashed pages out of every query.
+ */
+export async function queryOpenTasks(
+  notion: NotionConnector,
+  args: QueryOpenTasksArgs,
+  context: CallContext = {},
+): Promise<readonly TaskRecord[]> {
+  const result = await queryPages(
+    notion,
+    'queryOpenTasks',
+    {
+      dataSourceId: args.dataSourceId,
+      body: {
+        filter: {
+          and: TASK_CLOSED_STATUSES.map((status) => ({
+            property: TASK_PROPERTY_NAMES.status,
+            status: { does_not_equal: status },
+          })),
+        },
+      },
+      request: { openOnly: true },
+      startCursor: null,
+      adviceOnRunaway:
+        'Check the All Tasks database for a status option that never closes, or archive the open tasks nobody owns.',
+    },
+    (raw) => {
+      const response = notionQueryResponseSchema.parse(raw);
+      return {
+        records: response.results.map(fromNotionPage),
+        nextCursor: response.next_cursor,
+        hasMore: response.has_more,
+      };
+    },
+    context,
+  );
+  return result.records;
 }
 
 /** Every task edited after `since`, oldest edit first. */

@@ -1,5 +1,5 @@
 import { runAgent, type AgentDeps } from '@lance/agents';
-import type { SlackSurface } from '@lance/connectors';
+import { TASK_CLOSED_STATUSES, type SlackSurface } from '@lance/connectors';
 import {
   agentRuns,
   alerts,
@@ -113,11 +113,13 @@ export async function assembleWeeklyReview(
   const completion = new Map<string, { completed: Set<string>; opened: Set<string> }>();
   for (const row of taskRows) {
     const p = (row.payload ?? {}) as Record<string, unknown>;
+    // A removal is the page leaving Notion, not a task opening or closing.
+    if (p['removed'] === true) continue;
     const entry = completion.get(row.sourceSystem) ?? { completed: new Set(), opened: new Set() };
     const done =
       row.sourceSystem === 'jamie'
         ? p['completed'] === true
-        : ['Done', 'Cancelled', 'Archived'].includes(
+        : (TASK_CLOSED_STATUSES as readonly string[]).includes(
             typeof p['status'] === 'string' ? p['status'] : '',
           );
     (done ? entry.completed : entry.opened).add(row.sourceRecordId);
