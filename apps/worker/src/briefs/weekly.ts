@@ -13,6 +13,7 @@ import { LedgerWriter } from '@lance/ledger';
 import { BANNED_PHRASES, newUlid, nowIso, type Config } from '@lance/shared';
 import { and, desc, gte, inArray, lt, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
+import { work } from '../scheduler/boss.js';
 import { z } from 'zod';
 import { addDays, localDate, startOfLocalDay } from './local.js';
 
@@ -375,7 +376,7 @@ export async function registerWeeklyReview(boss: PgBoss, deps: WeeklyDeps): Prom
     {},
     { tz: deps.config.timeZone, key: QUEUE_WEEKLY },
   );
-  await boss.work(QUEUE_WEEKLY, async () => {
+  await work(boss, QUEUE_WEEKLY, async () => {
     await runWeeklyReview(deps);
   });
 }

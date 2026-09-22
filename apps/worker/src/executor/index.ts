@@ -3,6 +3,7 @@ import { LedgerWriter, SystemControl } from '@lance/ledger';
 import { newUlid, nowIso } from '@lance/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
+import { work } from '../scheduler/boss.js';
 import type { PauseGate } from '../scheduler/gate.js';
 import { QUEUES, type ExecuteJob } from '../scheduler/queues.js';
 
@@ -173,7 +174,7 @@ export function registerExecutor(
   deps: ExecutorDeps,
   afterEach?: (proposalId: string, outcome: ExecuteOutcome) => Promise<void>,
 ): Promise<string> {
-  return boss.work<ExecuteJob>(QUEUES.execute, async (jobs) => {
+  return work<ExecuteJob>(boss, QUEUES.execute, async (jobs) => {
     for (const job of jobs) {
       const outcome = await executeProposal(deps, job.data);
       await afterEach?.(job.data.proposalId, outcome);
