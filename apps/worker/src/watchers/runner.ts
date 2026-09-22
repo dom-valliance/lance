@@ -3,6 +3,7 @@ import { LedgerWriter, type SystemControl } from '@lance/ledger';
 import { hashRecord, idempotencyKey, nowIso, stableUlid } from '@lance/shared';
 import { and, eq } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
+import { work } from '../scheduler/boss.js';
 import { raiseAlert } from '../alerts/raise.js';
 import type { PauseGate } from '../scheduler/gate.js';
 import { QUEUES } from '../scheduler/queues.js';
@@ -145,8 +146,10 @@ async function runPartition(
         firstFailure ??= error instanceof Error ? error : new Error(String(error));
       }
     }
-    for (const [correlationId, observationEventIds] of byCorrelation) {
-      await deps.enqueueTriage({ watcher: watcher.name, correlationId, observationEventIds });
+    if (watcher.triage !== false) {
+      for (const [correlationId, observationEventIds] of byCorrelation) {
+        await deps.enqueueTriage({ watcher: watcher.name, correlationId, observationEventIds });
+      }
     }
     if (firstFailure !== null) throw firstFailure;
     if (polled.nextCursor !== null) {
@@ -228,7 +231,7 @@ export async function registerWatcher(
       { tz: timeZone, key: `${queue}-${String(index)}` },
     );
   }
-  await boss.work(queue, async () => {
+  await work(boss, queue, async () => {
     await runWatcher(deps, watcher);
   });
 }

@@ -43,3 +43,4 @@ export type {
   CommitmentExtraction,
   CommitmentSource,
 } from './commitments/schema.js';
+export { supportsAdaptiveThinking } from './models.js';

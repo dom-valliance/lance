@@ -6,6 +6,7 @@ import {
   BriefKindSchema,
   CommitmentDirectionSchema,
   CommitmentStatusSchema,
+  CostCeilingInputSchema,
   CounterpartyClassSchema,
   LedgerKindSchema,
   ProposalStatusSchema,
@@ -40,6 +41,7 @@ import {
   resolveCommitment,
   MAX_PAGE_SIZE,
 } from './commitments/service.js';
+import { listProposals } from './proposals/service.js';
 import { listTasks } from './tasks/service.js';
 import { procedure, router } from './trpc.js';
 
@@ -219,6 +221,12 @@ export const appRouter = router({
       .mutation(({ ctx, input }) =>
         ctx.deps.control.setInterruptionBudget(input, { actor: actorFromUpn(ctx.upn) }),
       ),
+    /** Spec 13: the daily model spend ceiling; model-backed agents stop at it until midnight or until it is raised. */
+    setCostCeiling: procedure
+      .input(CostCeilingInputSchema)
+      .mutation(({ ctx, input }) =>
+        ctx.deps.control.setCostCeiling(input, { actor: actorFromUpn(ctx.upn) }),
+      ),
   }),
   settings: router({
     /** The retention windows the Settings page shows (spec 16, Q3). */
@@ -244,7 +252,7 @@ export const appRouter = router({
   proposals: router({
     list: procedure
       .input(ProposalFilterInputSchema)
-      .query(({ ctx, input }) => ctx.deps.proposals.list(toProposalFilter(input))),
+      .query(({ ctx, input }) => listProposals(ctx.deps, toProposalFilter(input))),
     get: procedure
       .input(z.object({ proposalId: UlidSchema }))
       .query(({ ctx, input }) => ctx.deps.proposals.get(input.proposalId)),

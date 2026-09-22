@@ -71,17 +71,20 @@ describe('actorFromUpn', () => {
 });
 
 describe('proposals.list', () => {
-  it('passes only the filters it was given', async () => {
+  it('passes only the filters it was given, with one row beyond the page', async () => {
     await caller.proposals.list({ status: 'pending', targetSystem: 'graph' });
 
-    expect(harness.proposals.filters).toEqual([{ status: 'pending', targetSystem: 'graph' }]);
+    expect(harness.proposals.filters).toEqual([
+      { status: 'pending', targetSystem: 'graph', limit: 51 },
+    ]);
   });
 
-  it('defaults to no filter at all', async () => {
-    const rows = await caller.proposals.list();
+  it('defaults to no filter at all and answers with a page', async () => {
+    const page = await caller.proposals.list();
 
-    expect(harness.proposals.filters).toEqual([{}]);
-    expect(rows).toHaveLength(1);
+    expect(harness.proposals.filters).toEqual([{ limit: 51 }]);
+    expect(page.items).toHaveLength(1);
+    expect(page.nextCursor).toBeNull();
   });
 
   it('rejects a status the schema does not know', async () => {
@@ -319,6 +322,20 @@ describe('systemState.setInterruptionBudget', () => {
     await expect(
       caller.systemState.setInterruptionBudget({ ...budget, pushBudgetPerHour: 51 }),
     ).rejects.toThrow();
+  });
+});
+
+describe('systemState.setCostCeiling', () => {
+  it('stores the daily spend ceiling as the verified caller', async () => {
+    const result = await caller.systemState.setCostCeiling({ costCeilingGbp: 25 });
+    expect(harness.control.ceilingCalls).toEqual([
+      { ceiling: { costCeilingGbp: 25 }, actor: 'user:dom' },
+    ]);
+    expect(result.changed).toBe(true);
+  });
+
+  it('rejects a ceiling of zero or below', async () => {
+    await expect(caller.systemState.setCostCeiling({ costCeilingGbp: 0 })).rejects.toThrow();
   });
 });
 

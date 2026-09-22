@@ -32,13 +32,22 @@ const slack = {
   },
 };
 
-const WORKING = '2026-09-22T13:00:00.000Z';
-const NIGHT = '2026-09-22T21:00:00.000Z';
+/**
+ * Tuesday 22 September 2026. Every instant in this file runs forward:
+ * alerts are raised at 06:00 BST, the quiet-hours delivery is at 06:45 BST,
+ * the working-hours one at 07:30 BST, and the repeats follow minute by
+ * minute. A clock that ran backwards would confuse the repeat check, which
+ * compares last_seen with updated_at.
+ */
+const RAISED = '2026-09-22T05:00:00.000Z';
+const NIGHT = '2026-09-22T05:45:00.000Z';
+const WORKING = '2026-09-22T06:30:00.000Z';
 
 async function raise(
   kind: 'watcher_failed' | 'token_refresh_failed' | 'proposal_expiring',
   severity: 'P0' | 'P1' | 'P2',
   key: string,
+  at = RAISED,
 ) {
   return raiseAlert(db, {
     kind,
@@ -48,6 +57,7 @@ async function raise(
     body: 'body',
     actor: 'system:test',
     provenance: [{ system: 'lance', recordId: key, hash: 'h', observedAt: WORKING }],
+    now: () => at,
   });
 }
 
@@ -103,13 +113,13 @@ describe('deliverAlerts', () => {
   });
 
   it('updates the existing card when a delivered alert repeats', async () => {
-    await raise('token_refresh_failed', 'P0', 'token:graph');
+    await raise('token_refresh_failed', 'P0', 'token:graph', '2026-09-22T06:34:00.000Z');
     const result = await deliverAlerts({
       db,
       config,
       slack,
       webUrl: null,
-      now: () => '2026-09-22T13:05:00.000Z',
+      now: () => '2026-09-22T06:35:00.000Z',
     });
     expect(result.updated).toHaveLength(1);
     expect(updates).toHaveLength(1);
@@ -117,13 +127,13 @@ describe('deliverAlerts', () => {
 
   it('does not redraw an alert that was folded into a batch post when it repeats', async () => {
     const before = updates.length;
-    await raise('watcher_failed', 'P1', 'watcher:b');
+    await raise('watcher_failed', 'P1', 'watcher:b', '2026-09-22T06:35:30.000Z');
     const result = await deliverAlerts({
       db,
       config,
       slack,
       webUrl: null,
-      now: () => '2026-09-22T13:06:00.000Z',
+      now: () => '2026-09-22T06:36:00.000Z',
     });
     const row = (await db.select().from(alerts).where(eq(alerts.dedupeKey, 'watcher:b')))[0];
     expect(row?.count).toBe(2);
@@ -140,13 +150,13 @@ describe('deliverAlerts', () => {
       .update(alerts)
       .set({ status: 'acked', ackedBy: 'user:dom', ackedAt: new Date(WORKING) })
       .where(eq(alerts.id, row.id));
-    await raise('token_refresh_failed', 'P0', 'token:graph');
+    await raise('token_refresh_failed', 'P0', 'token:graph', '2026-09-22T06:36:30.000Z');
     const result = await deliverAlerts({
       db,
       config,
       slack,
       webUrl: null,
-      now: () => '2026-09-22T13:07:00.000Z',
+      now: () => '2026-09-22T06:37:00.000Z',
     });
     expect(result.updated).toContain(row.id);
     expect(updates.at(-1)).toBe(row.slackTs);

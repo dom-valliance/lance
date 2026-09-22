@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, integer, pgTable, text } from 'drizzle-orm/pg-core';
+import { boolean, check, integer, numeric, pgTable, text } from 'drizzle-orm/pg-core';
 import { systemMode } from '../enums.js';
 import { timestamptz, updatedAt } from './columns.js';
 
@@ -21,6 +21,10 @@ export const systemState = pgTable(
     quietHoursStart: text('quiet_hours_start').notNull().default('19:00'),
     quietHoursEnd: text('quiet_hours_end').notNull().default('07:00'),
     pushBudgetPerHour: integer('push_budget_per_hour').notNull().default(3),
+    /** Spec 13: daily model spend ceiling in GBP, changed from Settings. */
+    costCeilingGbp: numeric('cost_ceiling_gbp', { precision: 10, scale: 2, mode: 'number' })
+      .notNull()
+      .default(15),
     updatedAt: updatedAt(),
   },
   () => [check('system_state_single_row', sql.raw('"id" = 1'))],

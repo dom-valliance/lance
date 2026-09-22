@@ -153,6 +153,22 @@ describe('runWatcher', () => {
     resetPartitionBreaker('partial-mail', 'inbox');
   });
 
+  it('records observations without enqueuing triage for a watcher that opts out', async () => {
+    const before = triaged.length;
+    const summary = await runWatcher(
+      deps(),
+      fakeWatcher({
+        name: 'fake-logs',
+        triage: false,
+        records: [
+          { id: 'log-1', observedAt: '2026-09-21T09:00:00.000Z', raw: { conversationId: 'l1' } },
+        ],
+      }),
+    );
+    expect(summary.partitions[0]).toMatchObject({ status: 'ok', inserted: 1 });
+    expect(triaged).toHaveLength(before);
+  });
+
   it('does nothing while paused', async () => {
     await control.pause({ reason: 'drill', actor: 'user:dom' });
     const summary = await runWatcher(deps(), fakeWatcher({ name: 'paused-watcher', records }));

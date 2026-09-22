@@ -1,10 +1,10 @@
 import Link from 'next/link';
 import { Download } from 'lucide-react';
-import { Table, TableCard, TableFooterBar, Td, Th, Tr } from '@/components/data-table';
+import { TableCard } from '@/components/data-table';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
+import { Pagination } from '@/components/pagination';
 import { TextLink } from '@/components/text-link';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -17,24 +17,22 @@ import {
   selected,
   SOURCE_SYSTEMS,
 } from '@/lib/filters';
-import { humanise, LEDGER_KIND_LABELS, shortId, SYSTEM_LABELS } from '@/lib/humanise';
-import {
-  formatInstantWithSeconds,
-  formatTimeWithSeconds,
-  ledgerDetail,
-  sourceSystemLabel,
-  sourceSystemOf,
-} from '@/lib/ledger-view';
-import { LEDGER_KIND_TONES, SYSTEM_TONES, TONE_DOT_CLASS } from '@/lib/tones';
+import { humanise, LEDGER_KIND_LABELS, SYSTEM_LABELS } from '@/lib/humanise';
+import { sourceSystemLabel } from '@/lib/ledger-view';
+import { pageLinks, PAGE_SIZES, shownLabel } from '@/lib/pagination';
 import { apiClient } from '@/lib/trpc';
+import { LedgerTable } from './ledger-table';
 
 export const dynamic = 'force-dynamic';
 
-/** One screenful. A full page means there is probably more behind it. */
-const PAGE_SIZE = 100;
-
 /** The filter parameters the page and the export share, in form order. */
 const FILTER_NAMES = ['kind', 'actor', 'sourceSystem', 'from', 'to'] as const;
+
+/**
+ * The ledger has no row cursor: it pages by the timestamp of the oldest
+ * event shown, in the same `to` parameter the filter form writes.
+ */
+const CURSOR_PARAM = 'to';
 
 const queryFrom = (params: SearchParams): URLSearchParams => {
   const query = new URLSearchParams();
@@ -141,14 +139,27 @@ export default async function LedgerPage({
   const params = await searchParams;
   const filter = ledgerFilterFrom(params);
   const client = await apiClient();
-  const events = await client.ledger.query.query({ ...filter, limit: PAGE_SIZE });
+  const events = await client.ledger.query.query({ ...filter, limit: PAGE_SIZES.ledger });
 
-  const query = queryFrom(params);
-  const exportHref = href('/ledger/export', query);
-  const oldest = events[events.length - 1];
-  const olderQuery = new URLSearchParams(query);
-  if (oldest !== undefined) olderQuery.set('to', new Date(oldest.ts).toISOString());
-  const olderHref = href('/ledger', olderQuery);
+  const exportHref = href('/ledger/export', queryFrom(params));
+
+  // A full page means there is probably more behind it, and the oldest
+  // event shown is where the next page starts.
+  const oldest = events.at(-1);
+  const nextCursor =
+    events.length === PAGE_SIZES.ledger && oldest !== undefined
+      ? new Date(oldest.ts).toISOString()
+      : null;
+  const links = pageLinks({
+    path: '/ledger',
+    params,
+    keep: FILTER_NAMES,
+    nextCursor,
+    cursorParam: CURSOR_PARAM,
+  });
+  const footer = (
+    <Pagination summary={shownLabel(events.length)} {...links} nextLabel="Show older" />
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -176,83 +187,17 @@ export default async function LedgerPage({
         </details>
       </div>
 
-      <TableCard>
-        {events.length === 0 ? (
+      {events.length === 0 ? (
+        <TableCard>
           <EmptyState>
             No events match these filters. <TextLink href="/ledger">Clear them</TextLink> to see the
             whole ledger.
           </EmptyState>
-        ) : (
-          <>
-            <Table caption="Ledger events, newest first" className="text-[13px] tabular-nums">
-              <thead>
-                <tr>
-                  <Th className="sticky left-0 bg-card">When</Th>
-                  <Th>Kind</Th>
-                  <Th>Actor</Th>
-                  <Th>Source system</Th>
-                  <Th className="hidden lg:table-cell">Detail</Th>
-                  <Th>Correlation id</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {events.map((event) => {
-                  const system = sourceSystemOf(event.sourceSystem);
-                  return (
-                    <Tr key={event.id}>
-                      <Td className="sticky left-0 bg-card py-2.5 whitespace-nowrap">
-                        <span className="hidden lg:inline">
-                          {formatInstantWithSeconds(event.ts)}
-                        </span>
-                        <span className="lg:hidden">{formatTimeWithSeconds(event.ts)}</span>
-                      </Td>
-                      <Td className="py-2.5 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-2">
-                          <span
-                            aria-hidden
-                            className={`size-2 shrink-0 rounded-full ${TONE_DOT_CLASS[LEDGER_KIND_TONES[event.kind]]}`}
-                          />
-                          {LEDGER_KIND_LABELS[event.kind]}
-                        </span>
-                      </Td>
-                      <Td className="py-2.5 font-mono text-xs whitespace-nowrap">{event.actor}</Td>
-                      <Td className="py-2.5">
-                        {system === null ? (
-                          <span className="text-muted-foreground">none</span>
-                        ) : (
-                          <Badge tone={SYSTEM_TONES[system]} size="sm">
-                            {SYSTEM_LABELS[system]}
-                          </Badge>
-                        )}
-                      </Td>
-                      <Td className="hidden py-2.5 text-muted-foreground lg:table-cell">
-                        {ledgerDetail(event)}
-                      </Td>
-                      <Td className="py-2.5">
-                        <TextLink
-                          href={`/ledger/${event.correlationId}`}
-                          mono
-                          title={event.correlationId}
-                        >
-                          {shortId(event.correlationId, 12)}
-                        </TextLink>
-                      </Td>
-                    </Tr>
-                  );
-                })}
-              </tbody>
-            </Table>
-            <TableFooterBar>
-              <span>{events.length} shown</span>
-              {events.length < PAGE_SIZE ? (
-                <span>The whole range is here</span>
-              ) : (
-                <TextLink href={olderHref}>Show older</TextLink>
-              )}
-            </TableFooterBar>
-          </>
-        )}
-      </TableCard>
+          {footer}
+        </TableCard>
+      ) : (
+        <LedgerTable events={events} footer={footer} />
+      )}
 
       <p className="text-xs text-muted-foreground lg:hidden">
         Dates are today, Europe/London. Scroll the table sideways for actor and system.

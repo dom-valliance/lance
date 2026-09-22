@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   ageLabel,
   costBarWidthPercent,
+  costChartLabelIndices,
+  costChartPoints,
+  costChartShowsCeiling,
+  costChartYFor,
   costPercentLabel,
   isBreakerConcerning,
   isOverCeiling,
@@ -99,5 +103,109 @@ describe('isBreakerConcerning', () => {
     expect(isBreakerConcerning('closed')).toBe(false);
     expect(isBreakerConcerning('open')).toBe(true);
     expect(isBreakerConcerning('half_open')).toBe(true);
+  });
+});
+
+describe('costChartPoints', () => {
+  it('scales the maximum to the top of the plot', () => {
+    const { points, top } = costChartPoints(
+      [
+        { date: '2026-09-20', gbp: 1 },
+        { date: '2026-09-21', gbp: 5 },
+      ],
+      480,
+      200,
+      32,
+    );
+    expect(points[1]?.y).toBe(top);
+  });
+
+  it('places a single day in the horizontal middle', () => {
+    const { points } = costChartPoints([{ date: '2026-09-21', gbp: 3 }], 480, 200, 32);
+    expect(points[0]?.x).toBe(240);
+  });
+
+  it('returns no points for no days', () => {
+    const geometry = costChartPoints([], 480, 200, 32);
+    expect(geometry.points).toEqual([]);
+    expect(geometry.maxGbp).toBe(0);
+  });
+
+  it('rests every point on the baseline when every day cost nothing', () => {
+    const { points, bottom } = costChartPoints(
+      [
+        { date: '2026-09-20', gbp: 0 },
+        { date: '2026-09-21', gbp: 0 },
+      ],
+      480,
+      200,
+      32,
+    );
+    expect(points.every((point) => point.y === bottom)).toBe(true);
+  });
+
+  it('spreads days evenly between the left and right padding', () => {
+    const { points } = costChartPoints(
+      [
+        { date: '2026-09-19', gbp: 1 },
+        { date: '2026-09-20', gbp: 1 },
+        { date: '2026-09-21', gbp: 1 },
+      ],
+      480,
+      200,
+      32,
+    );
+    expect(points[0]?.x).toBe(32);
+    expect(points[2]?.x).toBe(448);
+  });
+});
+
+describe('costChartYFor', () => {
+  it('places zero at the bottom of the plot', () => {
+    expect(costChartYFor(0, 10, 20, 180)).toBe(180);
+  });
+
+  it('places the maximum at the top of the plot', () => {
+    expect(costChartYFor(10, 10, 20, 180)).toBe(20);
+  });
+
+  it('sits on the baseline when the series has no spend to scale against', () => {
+    expect(costChartYFor(5, 0, 20, 180)).toBe(180);
+  });
+});
+
+describe('costChartLabelIndices', () => {
+  it('labels the first, middle and last day across a full fortnight', () => {
+    expect(costChartLabelIndices(14)).toEqual([0, 6, 13]);
+  });
+
+  it('collapses to one label for a single day', () => {
+    expect(costChartLabelIndices(1)).toEqual([0]);
+  });
+
+  it('labels both ends without a duplicate middle for two days', () => {
+    expect(costChartLabelIndices(2)).toEqual([0, 1]);
+  });
+
+  it('labels nothing for no days', () => {
+    expect(costChartLabelIndices(0)).toEqual([]);
+  });
+});
+
+describe('costChartShowsCeiling', () => {
+  it('draws the ceiling when it falls inside the plotted range', () => {
+    expect(costChartShowsCeiling(5, 10)).toBe(true);
+  });
+
+  it('hides the ceiling when it sits above the plotted maximum', () => {
+    expect(costChartShowsCeiling(15, 10)).toBe(false);
+  });
+
+  it('hides the ceiling when nothing was spent to scale against', () => {
+    expect(costChartShowsCeiling(5, 0)).toBe(false);
+  });
+
+  it('hides a zero ceiling', () => {
+    expect(costChartShowsCeiling(0, 10)).toBe(false);
   });
 });

@@ -103,7 +103,7 @@ export function renderProposalCard(proposal: Proposal, options: RenderOptions): 
     },
     { type: 'section', text: { type: 'mrkdwn', text: preview } },
     { type: 'section', text: { type: 'mrkdwn', text: rationale } },
-    provenanceContext(proposal.provenance),
+    ...provenanceContext(proposal.provenance),
     proposal.status === 'pending'
       ? approveRejectActions(proposal.id)
       : {

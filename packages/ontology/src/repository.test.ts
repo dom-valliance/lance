@@ -106,6 +106,33 @@ describe('OntologyRepository', () => {
     expect(sameAs).toHaveLength(1);
   });
 
+  it('updates a meeting seen again, keeping its end under a key cypher accepts in SET', async () => {
+    const first = await repo.upsertMeeting(
+      {
+        title: 'Viavi DPIA',
+        start: '2026-09-22T08:00:00.000Z',
+        end: '2026-09-22T09:00:00.000Z',
+        jamieId: 'mt-end',
+        sourceRef: ref('jamie', 'mt-end'),
+      },
+      context,
+    );
+    const again = await repo.upsertMeeting(
+      {
+        title: 'Viavi DPIA (renamed)',
+        start: '2026-09-22T08:00:00.000Z',
+        end: null,
+        jamieId: 'mt-end',
+        sourceRef: ref('jamie', 'mt-end'),
+      },
+      context,
+    );
+    expect(again.id).toBe(first.id);
+    const node = await repo.getNode(first.id);
+    expect(node?.properties['title']).toBe('Viavi DPIA (renamed)');
+    expect(node?.properties['end_at']).toBe('2026-09-22T09:00:00.000Z');
+  });
+
   it('never auto-merges two people who attended the same meeting as distinct attendees', async () => {
     const meeting = await repo.upsertMeeting(
       {

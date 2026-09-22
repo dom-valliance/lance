@@ -175,6 +175,25 @@ describe('getUser', () => {
 });
 
 describe('the paging cap', () => {
+  it('tells the operator to share the database when Notion answers 404', async () => {
+    server.use(
+      http.post(QUERY_URL, () =>
+        HttpResponse.json(
+          { object: 'error', status: 404, code: 'object_not_found', message: 'secret detail' },
+          { status: 404 },
+        ),
+      ),
+    );
+    const error = (await queryTasksEditedSince(connector(), {
+      dataSourceId: DATA_SOURCE_ID,
+      since: '2026-09-01T00:00:00.000Z',
+    }).catch((e: unknown) => e)) as ConnectorError;
+    expect(error.status).toBe(404);
+    expect(error.retryable).toBe(false);
+    expect(error.message).toContain('shared with the integration');
+    expect(error.message).not.toContain('secret detail');
+  });
+
   it('stops a task query that never converges and says what to do', async () => {
     let pages = 0;
     server.use(

@@ -2,6 +2,7 @@ import type { SlackSurface } from '@lance/connectors';
 import type { Alert, Commitment, SystemState } from '@lance/db';
 import type {
   DecisionResult,
+  CostCeiling,
   InterruptionBudget,
   LedgerEventRow,
   LedgerQuery,
@@ -67,6 +68,7 @@ export const fakeSystemState = (overrides: Partial<SystemState> = {}): SystemSta
   quietHoursStart: '19:00',
   quietHoursEnd: '07:00',
   pushBudgetPerHour: 3,
+  costCeilingGbp: 15,
   updatedAt: new Date('2026-09-20T09:00:00.000Z'),
   ...overrides,
 });
@@ -132,6 +134,18 @@ export class FakeSystemControl implements SystemControlLike {
   }
 
   readonly budgetCalls: { budget: InterruptionBudget; actor: string }[] = [];
+
+  readonly ceilingCalls: { ceiling: CostCeiling; actor: string }[] = [];
+
+  setCostCeiling(
+    ceiling: CostCeiling,
+    options: { actor: string },
+  ): Promise<{ changed: boolean; eventId: string }> {
+    this.ceilingCalls.push({ ceiling, actor: options.actor });
+    const changed = this.state.costCeilingGbp !== ceiling.costCeilingGbp;
+    this.state = { ...this.state, costCeilingGbp: ceiling.costCeilingGbp };
+    return Promise.resolve({ changed, eventId: '01K5S9V6QW3SWCCPVB0N0E30E5' });
+  }
 
   setInterruptionBudget(
     budget: InterruptionBudget,
@@ -209,13 +223,26 @@ export const fakeProposal = (overrides: Partial<Proposal> = {}): Proposal => ({
   ...overrides,
 });
 
+/** The proposals table without a database: filters, cursors and the page limit. */
 export class FakeProposalStore implements ProposalStoreLike {
   rows: Proposal[] = [fakeProposal()];
   readonly filters: (ProposalFilter | undefined)[] = [];
 
   list(filter?: ProposalFilter): Promise<Proposal[]> {
     this.filters.push(filter);
-    return Promise.resolve(this.rows);
+    const query = filter ?? {};
+    const matched = this.rows
+      .filter((row) => query.status === undefined || row.status === query.status)
+      .filter((row) => query.actionClass === undefined || row.actionClass === query.actionClass)
+      .filter(
+        (row) =>
+          query.counterpartyClass === undefined ||
+          row.counterpartyClass === query.counterpartyClass,
+      )
+      .filter((row) => query.targetSystem === undefined || row.targetSystem === query.targetSystem)
+      .filter((row) => query.cursor === undefined || row.id < query.cursor)
+      .sort((left, right) => (left.id < right.id ? 1 : -1));
+    return Promise.resolve(query.limit === undefined ? matched : matched.slice(0, query.limit));
   }
 
   get(id: string): Promise<Proposal | null> {

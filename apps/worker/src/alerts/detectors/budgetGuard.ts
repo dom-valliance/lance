@@ -36,7 +36,9 @@ export const budgetGuardDetector: Detector = {
     const now = context.now();
     const zone = context.config.timeZone;
     const today = localDate(now, zone);
-    const { dailyCeilingGbp, usdToGbp } = context.config.cost;
+    const { usdToGbp } = context.config.cost;
+    const dailyCeilingGbp =
+      (await context.control?.read())?.costCeilingGbp ?? context.config.cost.dailyCeilingGbp;
 
     const rows = await context.db
       .select({ cost: agentRuns.estimatedCostUsd })

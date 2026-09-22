@@ -28,7 +28,7 @@ export function renderExecutedCard(proposal: Proposal, options: RenderOptions): 
       ],
     },
     { type: 'section', text: { type: 'mrkdwn', text: preview } },
-    provenanceContext(proposal.provenance),
+    ...provenanceContext(proposal.provenance),
     {
       type: 'context',
       elements: [

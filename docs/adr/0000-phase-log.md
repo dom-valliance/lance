@@ -128,3 +128,20 @@ An Opus 5 review of the phase diff found fifteen issues; all are fixed on the br
 | Planner objectives skipped the voice checks | `applyPlan` drops objectives and reasons that fail `checkVoice` |
 | Two delivery ticks could post the same alert | Rows are claimed with a token before the post and released if it fails |
 | The budget guard's use of `cost_spike` was undocumented | ADR 0013 |
+
+### First day of Phase 3 in dev, 2026-09-22
+
+Dom asked for a brief with `/lance brief`; nothing arrived, and a P0 said the spend ceiling was reached with no way to change it in Settings. Read from `pgboss.job`, `agent_runs` and `alerts` in dev:
+
+| Found | Cause | Fix |
+|---|---|---|
+| Every Slack post failing since 11:43, breaker open, brief job failed three times after three planner runs | Five alerts raised from the worker's own boot path carry no provenance; the card rendered an empty context block, which Slack rejects as `invalid_blocks` | No provenance block when there is no provenance; the Block Kit limit check now covers context element counts |
+| Detector jobs failing after writing their alert, counts rising by three | Ledger actors allow letters and hyphens; detector names carry underscores | `detectorActor` hyphenates; a test parses every detector's actor |
+| 15,064 failed `mail-label` runs at zero cost | Haiku 4.5 rejects adaptive thinking and the effort parameter with a 400; every message was retried on every poll | Neither is sent to a model that rejects them |
+| Triage USD 40 in 18 hours, 1,748 runs | The first poll over the mailbox triaged every message in the window, then the agent-logs watcher fed every Slack log line to triage | Watchers can opt out of triage; agent-logs does. The backfill cost is one-off and stays |
+| Two triage jobs failing on a cypher syntax error | `SET m.end = $end`: `end` is a keyword on the SET path though not in a map literal | Property renamed `end_at` on both paths; a test exercises the update |
+| Nothing in the worker console log while all this failed | pg-boss records a failure on the job row and says nothing | Every queue handler goes through `work()`, which logs `job failed` with the queue, job ids and error before rethrowing |
+| The ceiling alert says "raise the ceiling in Settings" and Settings had no such control; the quiet hours and push budget Settings saves were never read | Both lived in config only | Migration 0008 adds `system_state.cost_ceiling_gbp`; `SystemControl.setCostCeiling`, the api procedure and a Settings card set it; the agents, the budget guard, delivery and proposal cards read the row on every run |
+| The brief ran the planner three times and stored nothing | The brief was stored after the Slack post | Stored first, Slack second, and the planner is skipped with a note when the budget is spent |
+
+Still open from the same look: the Notion connector gets HTTP 404 from `data_sources/20257534-6e48-81fe-b4b5-000b69ecace6/query` (the id is right; the integration must be shared with the All Tasks and Meetings databases), and `watcher_failed` alerts from before consent stay open although the watchers recovered. `docs/runbooks/observing.md` says where to look first.

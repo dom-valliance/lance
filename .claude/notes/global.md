@@ -180,3 +180,17 @@
 **Correction**: Dom pasted the CI log.
 **Rule**: Before calling a branch done, run every command the workflow runs, read from `.github/workflows/ci.yml` rather than from memory; today that is lint, format:check, typecheck, test, build and the image builds. A subagent's "prettier was run over my files" is not evidence; the root `pnpm format:check` is.
 **Applies to**: global
+
+### [2026-09-22] Built-in role ids come from the CLI, never from memory
+
+**Context**: The first Phase 3 deploy failed with RoleDefinitionDoesNotExist: the Log Analytics Reader role assignment in containerapps.bicep carried a GUID recalled from memory, right in its first segment and wrong after that. The three apps had already moved to the new image when the assignment failed, so the deploy left dev half applied until the template was fixed and rerun.
+**Correction**: Self-found on reading the deployment error; fixed in the template and redeployed rather than assigning the role by hand.
+**Rule**: Every built-in role definition id in Bicep is read with `az role definition list --name "<role>"` at the time it is written, and the command that yields it goes in the comment above the variable. Role assignments come last in a module, so a failing one does not strand the apps on a new image while the rest of the deploy is unverified.
+**Applies to**: infra/modules/*.bicep
+
+### [2026-09-22] A deploy is verified by the jobs it runs, not by the start-up line
+
+**Context**: Phase 3 went to dev with the worker's start-up block clean and every endpoint answering. Within the hour every Slack post was failing, every detector job was failing after writing its alert, the Haiku labeller had failed 15,000 times and the spend ceiling had been reached. None of it reached the console log because pg-boss keeps job failures on the job row.
+**Correction**: Dom asked how to track what was going on and why a brief never arrived.
+**Rule**: After a deploy, query `pgboss.job` for failed states and `agent_runs` for failed runs before calling it verified, and fire one real instance of each new surface (an alert card, a brief) from the deployed system. Every queue handler logs its failure. A model id that a request feature does not support (adaptive thinking on Haiku) is a 400 on every call, so a new agent's first live run is checked in `agent_runs` the same day.
+**Applies to**: apps/worker, docs/runbooks/observing.md, docs/runbooks/deploy.md

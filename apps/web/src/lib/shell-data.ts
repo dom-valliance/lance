@@ -59,7 +59,7 @@ export async function loadShellData(): Promise<ShellData> {
 
   return {
     signedIn: true,
-    counts: { pendingProposals: pending === null ? null : pending.length, openAlerts: null },
+    counts: { pendingProposals: pending === null ? null : pending.items.length, openAlerts: null },
     statusLine: status === null ? null : shellStatusLine(status),
     paused:
       status === null || !status.paused

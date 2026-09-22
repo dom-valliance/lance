@@ -136,14 +136,18 @@ export function createNotionConnector(options: NotionConnectorOptions): NotionCo
       },
     };
     if (request.body !== undefined) init.body = request.body;
-    const response = await fetchJson<unknown>(
-      'notion',
-      operation,
-      buildUrl(path, request.query),
-      init,
-      options.fetchImpl,
-    );
-    return response.body;
+    try {
+      const response = await fetchJson<unknown>(
+        'notion',
+        operation,
+        buildUrl(path, request.query),
+        init,
+        options.fetchImpl,
+      );
+      return response.body;
+    } catch (error) {
+      throw explainNotFound(error, operation, path);
+    }
   };
 
   const send = async (
@@ -164,6 +168,21 @@ export function createNotionConnector(options: NotionConnectorOptions): NotionCo
   const notion: NotionConnector = { connector, send };
   sendAccess.set(notion, sendAny);
   return notion;
+}
+
+/**
+ * Notion answers 404 `object_not_found` for a page or database its
+ * integration has not been shared with, which is indistinguishable from a
+ * wrong id and the most common cause of a silent connector. The message
+ * says what to do, without repeating Notion's body (spec 4.3 keeps remote
+ * content out of logs and alerts).
+ */
+function explainNotFound(error: unknown, operation: string, path: string): unknown {
+  if (!(error instanceof ConnectorError) || error.status !== 404) return error;
+  return new ConnectorError(
+    `notion ${operation}: HTTP 404 for ${path}. Notion cannot see this object: either the id is wrong or the database has not been shared with the integration. In Notion open the database, choose Connections and add the integration (docs/runbooks/deploy.md, step 4).`,
+    { connector: 'notion', operation, status: 404, retryable: false, cause: error },
+  );
 }
 
 /**

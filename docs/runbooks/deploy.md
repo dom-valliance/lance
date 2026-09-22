@@ -133,6 +133,13 @@ az keyvault secret set --vault-name $KV --name jamie-api-key           --value '
 az keyvault secret set --vault-name $KV --name agent-log-ingest-secret --value "$(openssl rand -hex 32)"
 ```
 
+The Notion token alone reaches nothing. In Notion, open the All Tasks database and the Meetings database, choose the three dots, Connections, and add the integration the token belongs to (`Dom's Lance`). Until both are shared, every query returns `object_not_found` and the notion watcher raises a breaker alert on each poll. Check with:
+
+```
+curl -s https://api.notion.com/v1/data_sources/<tasks data source id> \
+  -H "Authorization: Bearer $NOTION_TOKEN" -H "Notion-Version: 2025-09-03" | head -c 300
+```
+
 `graph-refresh-token` is the exception. The api writes it after Dom's first delegated consent, step 7 of `entra-setup.md`. Create a placeholder now so the api starts:
 
 ```

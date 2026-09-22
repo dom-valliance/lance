@@ -64,12 +64,16 @@ function provenanceText(ref: ProvenanceRef): string {
 /**
  * Provenance as a context block of links: `<url|system:recordId>` when a
  * url is present, plain `system:recordId` otherwise (spec 9.1, non-negotiable 5).
+ * Returns no block at all when there is no provenance: Slack rejects a
+ * context block with no elements as `invalid_blocks`, and one such card
+ * opens the connector's breaker for every card behind it.
  */
-export function provenanceContext(provenance: readonly ProvenanceRef[]): ContextBlock {
+export function provenanceContext(provenance: readonly ProvenanceRef[]): ContextBlock[] {
+  if (provenance.length === 0) return [];
   const elements: MrkdwnElement[] = provenance
     .slice(0, MAX_CONTEXT_ELEMENTS)
     .map((ref) => ({ type: 'mrkdwn', text: provenanceText(ref) }));
-  return { type: 'context', elements };
+  return [{ type: 'context', elements }];
 }
 
 /** `HH:MM` in `timeZone`, 24-hour, e.g. `09:14`. */

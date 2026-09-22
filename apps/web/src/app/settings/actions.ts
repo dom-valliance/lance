@@ -74,6 +74,28 @@ export async function resumeAction(): Promise<string | null> {
   });
 }
 
+const MAX_COST_CEILING_GBP = 1000;
+
+export async function setCostCeilingAction(
+  _previous: string | null,
+  form: FormData,
+): Promise<string | null> {
+  const costCeilingGbp = Number(readField(form, 'costCeilingGbp'));
+  if (
+    !Number.isFinite(costCeilingGbp) ||
+    costCeilingGbp <= 0 ||
+    costCeilingGbp > MAX_COST_CEILING_GBP
+  ) {
+    return `The daily ceiling must be between 0.01 and ${String(MAX_COST_CEILING_GBP)} pounds. Nothing was saved.`;
+  }
+  return run(async () => {
+    const client = await apiClient();
+    await client.systemState.setCostCeiling.mutate({
+      costCeilingGbp: Math.round(costCeilingGbp * 100) / 100,
+    });
+  });
+}
+
 export async function setInterruptionBudgetAction(
   _previous: string | null,
   form: FormData,

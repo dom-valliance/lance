@@ -12,6 +12,7 @@ import {
 import { ATTR_AGENT, ATTR_CORRELATION_ID, currentTraceIds, withSpan } from '@lance/telemetry';
 import type { z } from 'zod';
 import { BudgetExceededError, checkDailyBudget, type SpendReader } from './budget.js';
+import { supportsAdaptiveThinking } from './models.js';
 import type { BetaMessage, BetaToolRunnerParams, ModelRunner } from './client.js';
 import { addUsage, estimateCostUsd, ZERO_USAGE, type TokenUsage } from './cost.js';
 import type { RunRecorder } from './runs.js';
@@ -54,6 +55,8 @@ export interface AgentDeps {
   ledger: LedgerLike;
   config: Pick<Config, 'prices' | 'cost'>;
   readSpendUsd: SpendReader;
+  /** Today's ceiling in GBP as Settings last set it; the config value is the fallback. */
+  readCeilingGbp?: () => Promise<number>;
   now?: () => string;
 }
 
@@ -115,7 +118,8 @@ export async function runAgent<TOutput>(
 ): Promise<AgentRunResult<TOutput>> {
   const now = deps.now ?? nowIso;
   const budget = await checkDailyBudget(deps.readSpendUsd, {
-    ceilingGbp: deps.config.cost.dailyCeilingGbp,
+    ceilingGbp: await (deps.readCeilingGbp?.() ??
+      Promise.resolve(deps.config.cost.dailyCeilingGbp)),
     usdToGbp: deps.config.cost.usdToGbp,
   });
   if (budget.state === 'exceeded') throw new BudgetExceededError(budget);
@@ -154,11 +158,15 @@ export async function runAgent<TOutput>(
           system: [{ type: 'text', text: definition.system, cache_control: { type: 'ephemeral' } }],
           messages,
           tools: definition.tools,
-          thinking: { type: 'adaptive' },
-          output_config: {
-            effort: definition.model.effort,
-            format: betaZodOutputFormat(definition.outputSchema),
-          },
+          ...(supportsAdaptiveThinking(definition.model.id)
+            ? {
+                thinking: { type: 'adaptive' },
+                output_config: {
+                  effort: definition.model.effort,
+                  format: betaZodOutputFormat(definition.outputSchema),
+                },
+              }
+            : { output_config: { format: betaZodOutputFormat(definition.outputSchema) } }),
           max_iterations: definition.maxIterations ?? 8,
         });
         let last: BetaMessage | null = null;

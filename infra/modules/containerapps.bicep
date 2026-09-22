@@ -204,7 +204,7 @@ resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09
 
 // Log Analytics Reader, so the worker's identity can run the telemetry query
 // the agent-logs watcher issues. Read-only on the workspace, nothing else.
-var logAnalyticsReaderRoleId = '73c42c96-874c-4d5f-b4ea-93de3d4ce7e0'
+var logAnalyticsReaderRoleId = '73c42c96-874c-492b-b04d-ab87d138a893'
 
 resource workerLogReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: logAnalyticsWorkspace
