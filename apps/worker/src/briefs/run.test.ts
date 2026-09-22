@@ -136,8 +136,48 @@ beforeAll(async () => {
     kind: 'task',
     title: 'Send the SOW',
     status: 'In progress',
+    assigneeIds: [config.notion.domUserId],
     due: '2026-09-21',
     url: 'https://notion.test/page-1',
+  });
+  // A colleague's overdue task: the All Tasks DB holds the whole company's
+  // work and the brief shows only Dom's.
+  await observe('notion', 'notion', 'page-2', {
+    kind: 'task',
+    title: 'Legal review',
+    status: 'Not Started',
+    assigneeIds: ['00000000-0000-4000-8000-000000000002'],
+    due: '2026-07-09',
+    url: 'https://notion.test/page-2',
+  });
+  // Dom's overdue task whose page was later moved to the trash.
+  await observe(
+    'notion',
+    'notion',
+    'page-3',
+    {
+      kind: 'task',
+      title: 'Draft the agenda',
+      status: 'Not Started',
+      assigneeIds: [config.notion.domUserId],
+      due: '2026-09-22',
+      url: 'https://notion.test/page-3',
+    },
+    '2026-09-20T09:00:00.000Z',
+  );
+  await observe(
+    'notion',
+    'notion',
+    'page-3',
+    { kind: 'task', id: 'page-3', removed: true },
+    '2026-09-21T09:00:00.000Z',
+  );
+  // A delegated Jamie item that is not Dom's.
+  await observe('jamie', 'jamie', 'jt-1', {
+    kind: 'task',
+    text: 'Provide the source data',
+    completed: false,
+    assignedToDom: false,
   });
   await observe(
     'graph-mail',
@@ -266,6 +306,7 @@ describe('assembleMorningBrief', () => {
     ]);
     expect(meeting.provenance).toMatchObject({ system: 'graph', recordId: 'evt-1' });
     expect(meeting.prepExpandsAt).toBe('2026-09-22T08:30:00.000Z');
+    // Only Dom's live tasks: not the colleague's, not the trashed page, not the delegated Jamie item.
     expect(brief.tasks.items.map((t) => [t.title, t.overdueDays])).toEqual([['Send the SOW', 1]]);
     expect(brief.tasks.total).toBe(1);
     expect(brief.waitingFor[0]).toMatchObject({

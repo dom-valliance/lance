@@ -101,6 +101,7 @@ Promoted here when the same lesson appears more than twice in `.claude/notes/`.
 - Runtime database objects (pg-boss tables, partitions) belong to the shared `lance_app` role: every app session starts with `PG_ROLE=lance_app`. A member identity owning an object locks the other apps out.
 - Nothing user-facing travels in a query string. A server action returns its failure through `useActionState`; a redirect never carries a message.
 - Each Dockerfile enumerates the workspace sources it copies. Adding a `workspace:*` dependency or a cross-app type import means updating that Dockerfile and building the image locally in the same change; CI builds all three images on every pull request.
+- New identifiers name the role, `principal`, never the person. Dom is the only principal in v1 and his identifiers come from config; a new function, parameter, type or column that filters or speaks for him says `principal` (`isPrincipalsLiveTask`, not `isDomsLiveTask`). Existing `dom*` names (`config.dom`, `domUserId`, `assignedToDom`) stay until a deliberate wider rename.
 
 ## Memory
 

@@ -1,17 +1,26 @@
 import {
   getPageText,
   queryMeetingsEditedSince,
+  queryOpenTasks,
   queryTasksEditedSince,
   type GetPageTextOptions,
   type NotionConnector,
   type QueryMeetingsArgs,
   type QueryMeetingsResult,
+  type QueryOpenTasksArgs,
   type QueryTasksArgs,
   type QueryTasksResult,
+  type TaskRecord,
 } from '@lance/connectors';
 import { nowIso } from '@lance/shared';
 import type { Observation, PollResult, SourceRecord, Watcher } from '../types.js';
-import { TASK_PARTITION, taskObservation, taskOf } from './tasks.js';
+import {
+  TASK_PARTITION,
+  removedTaskIds,
+  taskObservation,
+  taskOf,
+  taskRemovedObservation,
+} from './tasks.js';
 import { MEETING_PARTITION, meetingObservation, meetingOf } from './meetings.js';
 
 /**
@@ -50,6 +59,7 @@ export const INITIAL_SINCE = '1970-01-01T00:00:00.000Z';
 /** The connector reads the watcher needs, injected so tests need no HTTP. */
 export interface NotionWatcherReads {
   queryTasksEditedSince(args: QueryTasksArgs): Promise<QueryTasksResult>;
+  queryOpenTasks(args: QueryOpenTasksArgs): Promise<readonly TaskRecord[]>;
   queryMeetingsEditedSince(args: QueryMeetingsArgs): Promise<QueryMeetingsResult>;
   getPageText(pageId: string, options?: GetPageTextOptions): Promise<string>;
 }
@@ -60,6 +70,14 @@ export interface NotionWatcherOptions {
   tasksDataSourceId: string;
   /** `notion.meetingsDataSourceId` from config; null leaves the meetings partition out entirely. */
   meetingsDataSourceId: string | null;
+  /**
+   * The ids of the tasks whose latest ledger observation is open and not
+   * removed (`openNotionTaskIds`). Every tasks poll compares them against
+   * the open tasks Notion still returns and records a removal for each one
+   * that has gone: Notion leaves trashed pages out of every query, so no
+   * cursor can see a deletion.
+   */
+  knownOpenTaskIds: () => Promise<readonly string[]>;
   now?: () => string;
   schedules?: readonly string[];
 }
@@ -68,6 +86,7 @@ export interface NotionWatcherOptions {
 export function notionWatcherReads(notion: NotionConnector): NotionWatcherReads {
   return {
     queryTasksEditedSince: (args) => queryTasksEditedSince(notion, args),
+    queryOpenTasks: (args) => queryOpenTasks(notion, args),
     queryMeetingsEditedSince: (args) => queryMeetingsEditedSince(notion, args),
     getPageText: (pageId, options) => getPageText(notion, pageId, options),
   };
@@ -119,6 +138,23 @@ function pollResultFor(
 export function createNotionWatcher(options: NotionWatcherOptions): Watcher {
   const now = options.now ?? nowIso;
 
+  /**
+   * The removal sweep: one status-filtered read of the open tasks per poll
+   * (a few hundred rows, so a handful of calls), against the open tasks the
+   * ledger knows. The cursor is untouched; a removal is dated by the poll.
+   */
+  async function removedTaskRecords(edited: readonly TaskRecord[]): Promise<SourceRecord[]> {
+    const known = await options.knownOpenTaskIds();
+    if (known.length === 0) return [];
+    const open = await options.reads.queryOpenTasks({ dataSourceId: options.tasksDataSourceId });
+    const observedAt = now();
+    return removedTaskIds(
+      known,
+      edited.map((task) => task.id),
+      open.map((task) => task.id),
+    ).map((id) => ({ id, observedAt, raw: { id }, removed: true }));
+  }
+
   return {
     name: NOTION_WATCHER_NAME,
     sourceSystem: 'notion',
@@ -143,7 +179,9 @@ export function createNotionWatcher(options: NotionWatcherOptions): Watcher {
           dataSourceId: options.tasksDataSourceId,
           since,
         });
-        return pollResultFor(result.tasks);
+        const edited = pollResultFor(result.tasks);
+        const removed = await removedTaskRecords(result.tasks);
+        return { records: [...edited.records, ...removed], nextCursor: edited.nextCursor };
       }
       if (options.meetingsDataSourceId === null) {
         throw new Error(
@@ -159,6 +197,7 @@ export function createNotionWatcher(options: NotionWatcherOptions): Watcher {
 
     async normalise(record: SourceRecord, partition: string): Promise<Observation> {
       if (partitionOf(partition) === TASK_PARTITION) {
+        if (record.removed === true) return taskRemovedObservation(record);
         return taskObservation(taskOf(record));
       }
       return meetingObservation(meetingOf(record), { reads: options.reads, now: now() });
@@ -166,8 +205,15 @@ export function createNotionWatcher(options: NotionWatcherOptions): Watcher {
   };
 }
 
-export { TASK_PARTITION, taskObservation, taskOf } from './tasks.js';
-export type { NotionTaskRecord } from './tasks.js';
+export {
+  TASK_PARTITION,
+  removedTaskIds,
+  taskObservation,
+  taskOf,
+  taskRemovedObservation,
+} from './tasks.js';
+export type { NotionTaskRecord, NotionTaskRemovedRecord } from './tasks.js';
+export { openNotionTaskIds } from './known.js';
 export {
   MAX_NOTES_CHARS,
   MEETING_PARTITION,

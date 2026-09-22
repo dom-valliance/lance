@@ -26,12 +26,14 @@ export {
   MAX_QUERY_PAGES,
   PAGE_TEXT_MAX_BLOCKS,
   queryMeetingsEditedSince,
+  queryOpenTasks,
   queryTasksEditedSince,
   QUERY_PAGE_SIZE,
 } from './reads.js';
 export type {
   GetPageTextOptions,
   QueryMeetingsArgs,
+  QueryOpenTasksArgs,
   QueryMeetingsResult,
   QueryTasksArgs,
   QueryTasksResult,
@@ -52,6 +54,7 @@ export {
   notionPageSchema,
   notionQueryResponseSchema,
   notionUserSchema,
+  TASK_CLOSED_STATUSES,
   TASK_PRIORITIES,
   TASK_PROPERTY_NAMES,
   TASK_STATUSES,

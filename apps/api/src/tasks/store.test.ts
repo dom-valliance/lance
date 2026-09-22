@@ -79,6 +79,18 @@ beforeAll(async () => {
     ts: '2026-09-20T12:30:00.000Z',
     payload: { kind: 'meeting', title: 'Kick-off with Client Ltd' },
   });
+  await observe({
+    system: 'notion',
+    recordId: 'page-3',
+    ts: '2026-09-20T13:00:00.000Z',
+    payload: { kind: 'task', title: 'Draft the agenda', status: 'Not Started' },
+  });
+  await observe({
+    system: 'notion',
+    recordId: 'page-3',
+    ts: '2026-09-21T13:00:00.000Z',
+    payload: { kind: 'task', id: 'page-3', removed: true },
+  });
 }, 300000);
 
 afterAll(async () => {
@@ -96,6 +108,16 @@ describe('createTaskStore', () => {
       'task-1',
       'task-2',
     ]);
+  });
+
+  it('leaves out a page whose latest observation says Notion removed it, under every filter', async () => {
+    const all = await store.list({ limit: 50 });
+    const open = await store.list({ limit: 50, status: 'open' });
+    const done = await store.list({ limit: 50, status: 'done' });
+
+    expect(all.map((row) => row.sourceRecordId)).not.toContain('page-3');
+    expect(open.map((row) => row.sourceRecordId)).not.toContain('page-3');
+    expect(done.map((row) => row.sourceRecordId)).not.toContain('page-3');
   });
 
   it('keeps the latest observation of a record that changed', async () => {

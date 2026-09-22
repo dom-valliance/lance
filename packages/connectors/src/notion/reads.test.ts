@@ -13,6 +13,7 @@ import {
   listUsers,
   MAX_QUERY_PAGES,
   queryMeetingsEditedSince,
+  queryOpenTasks,
   queryTasksEditedSince,
 } from './reads.js';
 
@@ -108,6 +109,37 @@ describe('queryTasksEditedSince', () => {
       cursor: 'cursor-page-2',
     });
     expect(seen).toBe('cursor-page-2');
+  });
+});
+
+describe('queryOpenTasks', () => {
+  it('asks for every task whose Status is not Done, Cancelled or Archived, and follows the paging to the end', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.post(QUERY_URL, async ({ request }) => {
+        const payload = (await request.json()) as Record<string, unknown>;
+        bodies.push(payload);
+        return HttpResponse.json(
+          fixture(payload['start_cursor'] === undefined ? 'query-page-1' : 'query-page-2'),
+        );
+      }),
+    );
+    const tasks = await queryOpenTasks(connector(), { dataSourceId: DATA_SOURCE_ID });
+    expect(bodies[0]).toEqual({
+      filter: {
+        and: [
+          { property: 'Status', status: { does_not_equal: 'Done' } },
+          { property: 'Status', status: { does_not_equal: 'Cancelled' } },
+          { property: 'Status', status: { does_not_equal: 'Archived' } },
+        ],
+      },
+      page_size: 100,
+    });
+    expect(bodies[1]?.['start_cursor']).toBe('cursor-page-2');
+    expect(tasks.map((task) => task.id)).toEqual([
+      'aa11bb22-cc33-4dd4-8ee5-ff6600112233',
+      'bb22cc33-dd44-4ee5-9ff6-001122334455',
+    ]);
   });
 });
 

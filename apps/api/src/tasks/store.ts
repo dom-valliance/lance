@@ -59,7 +59,9 @@ export function createTaskStore(db: Db): TaskStoreLike {
         .orderBy(observations.sourceRecordId, desc(observations.ts), desc(observations.id))
         .as('latest');
 
-      const outer: SQL[] = [];
+      // A page the watcher recorded as removed has left Notion: it is not
+      // open, not done, just gone, whichever filter the page sends.
+      const outer: SQL[] = [sql`coalesce(${latest.payload}->>'removed', 'false') <> 'true'`];
       if (query.cursor !== undefined) outer.push(lt(latest.id, query.cursor));
       if (query.status === 'done') outer.push(doneCondition(latest.sourceSystem, latest.payload));
       if (query.status === 'open') {
@@ -69,7 +71,7 @@ export function createTaskStore(db: Db): TaskStoreLike {
       const rows = await db
         .select()
         .from(latest)
-        .where(outer.length === 0 ? undefined : and(...outer))
+        .where(and(...outer))
         .orderBy(desc(latest.id))
         .limit(query.limit);
 

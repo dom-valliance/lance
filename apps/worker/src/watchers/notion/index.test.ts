@@ -1,6 +1,7 @@
 import type {
   MeetingRecord,
   QueryMeetingsArgs,
+  QueryOpenTasksArgs,
   QueryTasksArgs,
   TaskRecord,
 } from '@lance/connectors';
@@ -70,23 +71,36 @@ function meeting(overrides: Partial<MeetingRecord> = {}): MeetingRecord {
 
 interface FakeReads extends NotionWatcherReads {
   taskCalls: QueryTasksArgs[];
+  openCalls: QueryOpenTasksArgs[];
   meetingCalls: QueryMeetingsArgs[];
   pageTextCalls: string[];
 }
 
 function fakeReads(
-  result: { tasks?: TaskRecord[]; meetings?: MeetingRecord[]; pageText?: string } = {},
+  result: {
+    tasks?: TaskRecord[];
+    /** What the open sweep returns; defaults to the edited tasks. */
+    open?: TaskRecord[];
+    meetings?: MeetingRecord[];
+    pageText?: string;
+  } = {},
 ): FakeReads {
   const taskCalls: QueryTasksArgs[] = [];
+  const openCalls: QueryOpenTasksArgs[] = [];
   const meetingCalls: QueryMeetingsArgs[] = [];
   const pageTextCalls: string[] = [];
   return {
     taskCalls,
+    openCalls,
     meetingCalls,
     pageTextCalls,
     queryTasksEditedSince: (args: QueryTasksArgs) => {
       taskCalls.push(args);
       return Promise.resolve({ tasks: result.tasks ?? [], cursor: null });
+    },
+    queryOpenTasks: (args: QueryOpenTasksArgs) => {
+      openCalls.push(args);
+      return Promise.resolve(result.open ?? result.tasks ?? []);
     },
     queryMeetingsEditedSince: (args: QueryMeetingsArgs) => {
       meetingCalls.push(args);
@@ -99,12 +113,16 @@ function fakeReads(
   };
 }
 
-function watcherWith(reads: NotionWatcherReads, now: string = NOW) {
+function watcherWith(
+  reads: NotionWatcherReads,
+  options: { now?: string; knownOpen?: readonly string[] } = {},
+) {
   return createNotionWatcher({
     reads,
     tasksDataSourceId: TASKS_DATA_SOURCE_ID,
     meetingsDataSourceId: MEETINGS_DATA_SOURCE_ID,
-    now: () => now,
+    knownOpenTaskIds: () => Promise.resolve(options.knownOpen ?? []),
+    now: () => options.now ?? NOW,
   });
 }
 
@@ -124,6 +142,7 @@ describe('createNotionWatcher', () => {
       reads,
       tasksDataSourceId: TASKS_DATA_SOURCE_ID,
       meetingsDataSourceId: null,
+      knownOpenTaskIds: () => Promise.resolve([]),
       now: () => NOW,
     });
     expect(await watcher.partitions()).toEqual([TASK_PARTITION]);
@@ -174,6 +193,57 @@ describe('createNotionWatcher', () => {
     await expect(watcherWith(fakeReads()).poll('projects', null)).rejects.toThrow(
       'Remove the stale cursor row',
     );
+  });
+});
+
+describe('the removal sweep', () => {
+  const GONE = 'dd44ee55-ff66-4a07-8b18-223344556677';
+  const STILL_OPEN = 'ee55ff66-0a17-4b28-9c39-334455667788';
+
+  it('does not read the open tasks when the ledger knows no open task yet', async () => {
+    const reads = fakeReads();
+    await watcherWith(reads).poll(TASK_PARTITION, null);
+    expect(reads.openCalls).toEqual([]);
+  });
+
+  it('records a removal, dated by the poll, for a known open task Notion no longer returns', async () => {
+    const reads = fakeReads({ tasks: [], open: [task({ id: STILL_OPEN })] });
+    const result = await watcherWith(reads, { knownOpen: [STILL_OPEN, GONE] }).poll(
+      TASK_PARTITION,
+      '2026-09-21T08:00:00.000Z',
+    );
+    expect(reads.openCalls).toEqual([{ dataSourceId: TASKS_DATA_SOURCE_ID }]);
+    expect(result.records).toEqual([
+      { id: GONE, observedAt: NOW, raw: { id: GONE }, removed: true },
+    ]);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it('does not report a task removed when the same poll saw it edited', async () => {
+    const closed = task({ id: GONE, status: 'Done' });
+    const reads = fakeReads({ tasks: [closed], open: [] });
+    const result = await watcherWith(reads, { knownOpen: [GONE] }).poll(
+      TASK_PARTITION,
+      '2026-09-21T08:00:00.000Z',
+    );
+    expect(result.records.map((record) => [record.id, record.removed === true])).toEqual([
+      [GONE, false],
+    ]);
+  });
+
+  it('normalises a removal into a task record that says only that the page is gone', async () => {
+    const watcher = watcherWith(fakeReads());
+    const observation = await watcher.normalise(
+      { id: GONE, observedAt: NOW, raw: { id: GONE }, removed: true },
+      TASK_PARTITION,
+    );
+    expect(observation.sourceSystem).toBe('notion');
+    expect(observation.recordId).toBe(GONE);
+    expect(observation.correlationKey).toBe(GONE);
+    expect(observation.observedAt).toBe(NOW);
+    expect(observation.record).toEqual({ kind: 'task', id: GONE, removed: true });
+    expect(observation.labels).toEqual(['Notion', 'Task', 'Removed']);
+    expect(observation.summary).toBe('Task removed from Notion');
   });
 });
 

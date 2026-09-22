@@ -201,3 +201,17 @@
 **Correction**: Dom shared All Tasks only: the Meetings database no longer captures meetings and is not going to be used. The watcher's meetings partition became optional and unset.
 **Rule**: Before asking Dom to grant access to a source, look at whether it is still live (recent rows, a recent last edit, whether anything downstream depends on it). A source that has gone quiet is a question to put to Dom, not an instruction to relay from the spec. When a source drops out, make its configuration optional rather than leaving a partition that fails every poll.
 **Applies to**: global
+
+### [2026-09-22] A shared source is filtered to the principal before it reaches Dom
+
+**Context**: The first morning brief listed five overdue tasks, none of them Dom's: the All Tasks DB holds the whole company's work and `tasksDue` read every task observation without looking at the Assignee. One of the five was a page already in Notion's trash, which no edit-time query ever returns, so the ledger's last observation kept it alive.
+**Correction**: Dom: "I'm not mentioned in any of them so why are they showing up in my list or at all in fact? It looks like you've pulled the entirety of the tasks db and not filtered on the principal."
+**Rule**: Anything that speaks to Dom about a shared source (a brief line, an alert, a page default) filters to Dom's own records first, by the identifier the source uses for him (`notion.domUserId`, `dom.email`), and the test fixture holds at least one record that is somebody else's. A watcher over a source whose deletions are invisible to its cursor (Notion, where trashed pages leave every query) reconciles the open records it knows against what the source still returns and records a removal, as the Graph delta watchers do from `@removed`. Before a brief goes to Dom, read one real instance of each section against the live data and ask of every line whose it is.
+**Applies to**: global
+
+### [2026-09-22] Name the principal, not Dom, in code
+
+**Context**: The brief's task filter was written as `isDomsLiveTask`, taking a `domNotionUserId`.
+**Correction**: Dom: "The predicate cannot be isDomsLiveTask. It needs to be isPrincipalsLiveTask as this will probably become a multi user system very soon."
+**Rule**: New identifiers (functions, parameters, types, columns) name the role, `principal`, never the person. Dom is the only principal in v1 and his identifiers live in config; code that reads them says `principal`. Existing `dom*` names in config and payloads (`config.dom`, `domUserId`, `assignedToDom`) stay until a deliberate rename, but nothing new joins them.
+**Applies to**: global

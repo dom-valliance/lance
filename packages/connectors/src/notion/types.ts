@@ -66,6 +66,13 @@ export const TASK_STATUSES = [
   'Archived',
 ] as const;
 
+/**
+ * The statuses under which All Tasks no longer treats a row as open. Every
+ * reader (the Tasks page, the briefs, the watcher's removal sweep) shares
+ * this list so a status added in Notion is handled in one place.
+ */
+export const TASK_CLOSED_STATUSES = ['Done', 'Cancelled', 'Archived'] as const;
+
 export const TASK_PRIORITIES = ['Low', 'Medium', 'High', 'Critical Milestone'] as const;
 
 export const TASK_SUB_TYPES = ['External', 'Internal', 'Deliverables', 'Client Task'] as const;

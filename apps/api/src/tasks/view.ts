@@ -8,6 +8,8 @@
  * action. Completing a Notion task is a proposal, and arrives later.
  */
 
+import { TASK_CLOSED_STATUSES } from '@lance/connectors';
+
 export type TaskSource = 'notion' | 'jamie';
 
 export interface TaskView {
@@ -35,7 +37,7 @@ export interface TaskView {
  * as done so an open filter shows only live work. The store filters in SQL
  * with this same list.
  */
-export const NOTION_CLOSED_STATUSES = ['Done', 'Cancelled', 'Archived'] as const;
+export const NOTION_CLOSED_STATUSES = TASK_CLOSED_STATUSES;
 
 /** What Notion returns when a task page carries no status at all. */
 export const UNKNOWN_STATUS = 'Unknown';
