@@ -591,7 +591,7 @@ export class OntologyRepository {
     if (existing === null) {
       const id = this.newId();
       await this.apply(
-        'CREATE (m:Meeting {id: $id, title: $title, start: $start, end: $end, jamie_id: $jamieId, graph_event_id: $graphEventId, transcript_ref: $transcriptRef, tags: $tags, confidence: 1, source_refs: $sourceRefs, created_at: $ts, updated_at: $ts}) RETURN m.id',
+        'CREATE (m:Meeting {id: $id, title: $title, start: $start, end_at: $end, jamie_id: $jamieId, graph_event_id: $graphEventId, transcript_ref: $transcriptRef, tags: $tags, confidence: 1, source_refs: $sourceRefs, created_at: $ts, updated_at: $ts}) RETURN m.id',
         {
           id,
           title: input.title,
@@ -609,12 +609,12 @@ export class OntologyRepository {
       return { id, created: true };
     }
     await this.apply(
-      'MATCH (m:Meeting {id: $id}) SET m.title = $title, m.start = $start, m.end = $end, m.jamie_id = $jamieId, m.graph_event_id = $graphEventId, m.transcript_ref = $transcriptRef, m.tags = $tags, m.source_refs = $sourceRefs, m.updated_at = $ts RETURN m.id',
+      'MATCH (m:Meeting {id: $id}) SET m.title = $title, m.start = $start, m.end_at = $end, m.jamie_id = $jamieId, m.graph_event_id = $graphEventId, m.transcript_ref = $transcriptRef, m.tags = $tags, m.source_refs = $sourceRefs, m.updated_at = $ts RETURN m.id',
       {
         id: existing.id,
         title: input.title,
         start: input.start ?? existing.properties['start'] ?? null,
-        end: input.end ?? existing.properties['end'] ?? null,
+        end: input.end ?? existing.properties['end_at'] ?? existing.properties['end'] ?? null,
         jamieId: input.jamieId ?? existing.properties['jamie_id'] ?? null,
         graphEventId: input.graphEventId ?? existing.properties['graph_event_id'] ?? null,
         transcriptRef: input.transcriptRef ?? existing.properties['transcript_ref'] ?? null,
