@@ -57,6 +57,7 @@ import { registerDetector } from './alerts/engine/run.js';
 import { allDetectors } from './alerts/detectors/index.js';
 import type { Detector } from './alerts/detectors/types.js';
 import { QUEUE_MORNING, registerBriefs, runMorningBrief } from './briefs/run.js';
+import { registerWeeklyReview } from './briefs/weekly.js';
 import { createAgentLogsDetector, createAgentLogsWatcher } from './watchers/agent-logs/index.js';
 import { createJamieWatcher } from './watchers/jamie/index.js';
 import { createNotionWatcher, notionWatcherReads } from './watchers/notion/index.js';
@@ -465,6 +466,7 @@ async function main(): Promise<void> {
     createProposal,
   };
   await registerBriefs(boss, briefDeps);
+  await registerWeeklyReview(boss, { db, config, agent, slack });
   // `/lance brief` from the api lands on the morning queue too.
   await boss.work(QUEUE_MORNING, async () => {
     await runMorningBrief(briefDeps);
