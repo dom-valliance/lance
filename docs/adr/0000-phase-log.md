@@ -145,3 +145,9 @@ Dom asked for a brief with `/lance brief`; nothing arrived, and a P0 said the sp
 | The brief ran the planner three times and stored nothing | The brief was stored after the Slack post | Stored first, Slack second, and the planner is skipped with a note when the budget is spent |
 
 Still open from the same look: the Notion connector gets HTTP 404 from `data_sources/20257534-6e48-81fe-b4b5-000b69ecace6/query` (the id is right; the integration must be shared with the All Tasks and Meetings databases), and `watcher_failed` alerts from before consent stay open although the watchers recovered. `docs/runbooks/observing.md` says where to look first.
+
+### Notion scope, 2026-09-22
+
+Dom shared the All Tasks database with the `Dom's Lance` integration and decided not to share the Meetings database, which no longer captures meetings. The default for spec 16 Q7 changes accordingly: the notion watcher reads All Tasks only, and `NOTION_MEETINGS_DATA_SOURCE_ID` is unset unless the Meetings database comes back into use. The Meetings connector code stays for that case. Meeting content continues to arrive from Jamie.
+
+Sharing the database also started a backfill: 3,390 task observations in one poll, each queued for triage at a Sonnet call apiece and nothing to propose. The queued jobs were deleted from `pgboss.job` by hand (3,133 rows, GBP 1 already spent) and the notion watcher now opts out of triage, as the agent-logs watcher does.

@@ -245,10 +245,25 @@ function isCounterpartyClass(value: unknown): value is CounterpartyClass {
   );
 }
 
+/** The external attendees plus everyone the ontology knows at their organisations' domains. */
+async function counterpartyPersonIds(
+  deps: BriefDataDeps,
+  attendeeIds: readonly string[],
+  domains: ReadonlySet<string>,
+): Promise<string[]> {
+  const ids = new Set(attendeeIds);
+  for (const domain of domains) {
+    for (const node of await deps.ontology.findPersonsByEmailDomain(domain)) ids.add(node.id);
+  }
+  return [...ids];
+}
+
 async function meetingOf(deps: BriefDataDeps, event: CalendarEvent): Promise<Meeting> {
   const home = domainOf(deps.config.dom.email);
   const attendees: Attendee[] = [];
   const personIds: string[] = [];
+  const externalPersonIds: string[] = [];
+  const externalDomains = new Set<string>();
   let external = false;
   let counterpartyClass: CounterpartyClass = 'internal';
   const people = [
@@ -266,6 +281,9 @@ async function meetingOf(deps: BriefDataDeps, event: CalendarEvent): Promise<Mee
     if (isExternal) external = true;
     const node = email === null ? null : await deps.ontology.findPersonByEmail(email);
     if (node !== null) personIds.push(node.id);
+    if (node !== null && isExternal) externalPersonIds.push(node.id);
+    const organisationDomainOf = email === null ? null : organisationDomain(email);
+    if (isExternal && organisationDomainOf !== null) externalDomains.add(organisationDomainOf);
     const organisation = await organisationOfPerson(deps, node?.id ?? null, email);
     if (isExternal && organisation.type !== null && organisation.type !== 'internal') {
       counterpartyClass = organisation.type;
@@ -284,8 +302,17 @@ async function meetingOf(deps: BriefDataDeps, event: CalendarEvent): Promise<Mee
     });
   }
 
+  // Spec 10.1 item 2: open commitments with those people or that
+  // organisation. In an external meeting the counterparty is the external
+  // side: its attendees and everyone else at their organisations. A
+  // colleague in the room does not bring in what they owe or are owed from
+  // every other meeting they sit in. In an internal meeting the colleagues
+  // are the counterparty, so their commitments are the ones that matter.
+  const commitmentPersonIds = external
+    ? await counterpartyPersonIds(deps, externalPersonIds, externalDomains)
+    : personIds;
   const openRows =
-    personIds.length === 0
+    commitmentPersonIds.length === 0
       ? []
       : await deps.db
           .select()
@@ -294,8 +321,8 @@ async function meetingOf(deps: BriefDataDeps, event: CalendarEvent): Promise<Mee
             and(
               inArray(commitments.status, ['open', 'chased']),
               or(
-                inArray(commitments.ownerPersonId, personIds),
-                inArray(commitments.counterpartyPersonId, personIds),
+                inArray(commitments.ownerPersonId, commitmentPersonIds),
+                inArray(commitments.counterpartyPersonId, commitmentPersonIds),
               ),
             ),
           );

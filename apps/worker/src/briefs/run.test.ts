@@ -111,6 +111,12 @@ beforeAll(async () => {
         type: 'required',
         responseStatus: 'organizer',
       },
+      {
+        name: 'Bob Colleague',
+        address: 'bob@valliance.ai',
+        type: 'required',
+        responseStatus: 'accepted',
+      },
     ],
     url: 'https://outlook.test/evt-1',
     removed: false,
@@ -175,6 +181,54 @@ beforeAll(async () => {
     status: 'open',
     nextChaseAt: new Date('2026-09-20T00:00:00.000Z'),
   });
+  // Cara is at the client but not in the meeting: her commitment belongs in
+  // the prep. Bob is a colleague in the meeting: what Dom owes him from
+  // their own catch-up does not.
+  const cara = await ontology.upsertPerson(
+    {
+      displayName: 'Cara Example',
+      emails: ['cara@client.test'],
+      sourceRef: { system: 'graph', id: 'msg-2', observedAt: NOW },
+    },
+    { correlationId: stableUlid('test') },
+  );
+  const bob = await ontology.upsertPerson(
+    {
+      displayName: 'Bob Colleague',
+      emails: ['bob@valliance.ai'],
+      isInternal: true,
+      sourceRef: { system: 'graph', id: 'evt-1', observedAt: NOW },
+    },
+    { correlationId: stableUlid('test') },
+  );
+  await db.insert(commitments).values([
+    {
+      id: stableUlid('commitment-2'),
+      direction: 'outbound',
+      ownerPersonId: dom.id,
+      counterpartyPersonId: cara.id,
+      description: 'Send Cara the deck',
+      dueAt: null,
+      dueConfidence: 0,
+      evidenceQuote: 'I will send you the deck',
+      sourceRefs: [{ system: 'graph', recordId: 'msg-2', hash: 'h', observedAt: NOW }],
+      status: 'open',
+      nextChaseAt: null,
+    },
+    {
+      id: stableUlid('commitment-3'),
+      direction: 'outbound',
+      ownerPersonId: dom.id,
+      counterpartyPersonId: bob.id,
+      description: 'Review the draft ISO policy',
+      dueAt: null,
+      dueConfidence: 0,
+      evidenceQuote: 'I will review the draft',
+      sourceRefs: [{ system: 'jamie', recordId: 'mt-2', hash: 'h', observedAt: NOW }],
+      status: 'open',
+      nextChaseAt: null,
+    },
+  ]);
 }, 120000);
 
 afterAll(async () => {
@@ -197,12 +251,19 @@ describe('assembleMorningBrief', () => {
     const meeting = brief.meetings[0]!;
     expect(meeting.audience).toBe('external');
     expect(meeting.counterpartyClass).toBe('unknown');
-    expect(meeting.attendees.map((a) => [a.name, a.unknown])).toEqual([['Ann Example', false]]);
+    expect(meeting.attendees.map((a) => [a.name, a.unknown])).toEqual([
+      ['Ann Example', false],
+      ['Bob Colleague', false],
+    ]);
     expect(meeting.attendees[0]?.interactions[0]).toMatchObject({
       kind: 'mail',
       summary: 'Ann Example: Re: scope',
     });
-    expect(meeting.commitments[0]?.description).toBe('Confirm the start date');
+    // The client's people, in the room or not; never a colleague's own commitments.
+    expect(meeting.commitments.map((c) => c.description).sort()).toEqual([
+      'Confirm the start date',
+      'Send Cara the deck',
+    ]);
     expect(meeting.provenance).toMatchObject({ system: 'graph', recordId: 'evt-1' });
     expect(meeting.prepExpandsAt).toBe('2026-09-22T08:30:00.000Z');
     expect(brief.tasks.items.map((t) => [t.title, t.overdueDays])).toEqual([['Send the SOW', 1]]);
@@ -306,6 +367,9 @@ describe('runAfternoonBoard and runMeetingPrep', () => {
     expect(preps).toHaveLength(1);
     const prep = posts.find((p) => p.ts === preps[0]?.slackTs);
     expect(prep?.text).toContain('Prep: Kick-off with Client Ltd');
+    expect(prep?.text).toContain('Open:\n- Owed to you: Confirm the start date (4 days overdue)');
+    expect(prep?.text).toContain('- You owe: Send Cara the deck');
+    expect(prep?.text).not.toContain('ISO policy');
     expect(prep?.threadTs).toBeDefined();
     const again = await runMeetingPrep(deps({ now: () => '2026-09-22T08:40:00.000Z' }));
     expect(again).toHaveLength(0);

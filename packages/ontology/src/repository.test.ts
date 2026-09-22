@@ -79,6 +79,28 @@ describe('OntologyRepository', () => {
     expect(neighbours[0]?.node.properties['name']).toBe('Client Ltd');
   });
 
+  it('finds the people at an email domain once each, whatever their edges', async () => {
+    const cara = await repo.upsertPerson(
+      {
+        displayName: 'Cara Example',
+        emails: ['cara@client.test', 'c.example@client.test'],
+        sourceRef: ref('graph', 'm2'),
+      },
+      context,
+    );
+    await repo.upsertPerson(
+      { displayName: 'Ola Other', emails: ['ola@other.test'], sourceRef: ref('graph', 'm3') },
+      context,
+    );
+    const people = await repo.findPersonsByEmailDomain('Client.test');
+    expect(people.map((node) => node.properties['display_name']).sort()).toEqual([
+      'Ann Example',
+      'Cara Example',
+    ]);
+    expect(people.filter((node) => node.id === cara.id)).toHaveLength(1);
+    expect(await repo.findPersonsByEmailDomain('nobody.test')).toEqual([]);
+  });
+
   it('records every mutation as a resolved event with its Cypher and parameters', async () => {
     const trail = await new LedgerReader(db).byCorrelation(context.correlationId);
     const mutations = trail.filter((event) => event.kind === 'resolved');

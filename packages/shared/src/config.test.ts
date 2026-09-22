@@ -73,7 +73,7 @@ describe('loadConfig defaults', () => {
     expect(config.notion).toEqual({
       tasksDataSourceId: '20257534-6e48-81fe-b4b5-000b69ecace6',
       tasksDatabaseId: '20257534-6e48-8190-9ebb-cfb6997b3bb4',
-      meetingsDataSourceId: '1fc57534-6e48-804e-a193-000bec4176ab',
+      meetingsDataSourceId: null,
       domUserId: '1fdd872b-594c-8146-b22f-00028f1f5a41',
       permittedTaskProperties: [
         'Title',
