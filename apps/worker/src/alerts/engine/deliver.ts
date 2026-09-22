@@ -1,7 +1,7 @@
 import { renderAlertCard, type SlackSurface } from '@lance/connectors';
 import { alerts, type Alert as AlertRow, type Db } from '@lance/db';
-import { LedgerWriter } from '@lance/ledger';
-import { nowIso, type Alert, type Config, type ProvenanceRef } from '@lance/shared';
+import { LedgerWriter, toAlert } from '@lance/ledger';
+import { nowIso, type Config } from '@lance/shared';
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { recordPush, remainingPushes } from './budget.js';
 import { isQuiet, nextQuietEnd } from './hours.js';
@@ -31,26 +31,6 @@ export interface DeliveryResult {
   updated: string[];
   deferred: string[];
   batched: string[];
-}
-
-/** The card renderer's shape, from a row. */
-export function toAlert(row: AlertRow): Alert {
-  return {
-    id: row.id,
-    severity: row.severity,
-    kind: row.kind as Alert['kind'],
-    dedupeKey: row.dedupeKey,
-    title: row.title,
-    body: row.body,
-    provenance: (Array.isArray(row.provenance) ? row.provenance : []) as ProvenanceRef[],
-    status: row.status,
-    firstSeen: row.firstSeen.toISOString(),
-    lastSeen: row.lastSeen.toISOString(),
-    count: row.count,
-    ackedBy: row.ackedBy,
-    ackedAt: row.ackedAt === null ? null : row.ackedAt.toISOString(),
-    slackTs: row.slackTs,
-  };
 }
 
 /** Open P0 and P1 alerts Slack has not seen and that are not muted. */

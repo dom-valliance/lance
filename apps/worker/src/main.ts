@@ -10,8 +10,11 @@ import {
   createAccessTokenProvider,
   createGraphConnector,
   createGraphReads,
+  createAppInsightsClient,
   createJamieConnector,
   createJamieReads,
+  createSlackClient,
+  slackReads,
   createNotionConnector,
   createSlackSurface,
   InMemoryTokenStore,
@@ -23,7 +26,13 @@ import {
 } from '@lance/connectors';
 import { createDb, observations, proposals, type Db } from '@lance/db';
 import { OntologyRepository } from '@lance/ontology';
-import { expireProposals, LedgerWriter, SystemControl, toProposal } from '@lance/ledger';
+import {
+  expireProposals,
+  LedgerReader,
+  LedgerWriter,
+  SystemControl,
+  toProposal,
+} from '@lance/ledger';
 import { getConfig, nowIso, readSecret, type Config, type ProvenanceRef } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { and, eq } from 'drizzle-orm';
@@ -43,6 +52,11 @@ import { createBoss, startBoss } from './scheduler/boss.js';
 import { PauseGate } from './scheduler/gate.js';
 import { QUEUES, type ChaseJob } from './scheduler/queues.js';
 import { runTriage } from './triage/run.js';
+import { deliverAlerts } from './alerts/engine/deliver.js';
+import { registerDetector } from './alerts/engine/run.js';
+import type { Detector } from './alerts/detectors/types.js';
+import { QUEUE_MORNING, registerBriefs, runMorningBrief } from './briefs/run.js';
+import { createAgentLogsDetector, createAgentLogsWatcher } from './watchers/agent-logs/index.js';
 import { createJamieWatcher } from './watchers/jamie/index.js';
 import { createNotionWatcher, notionWatcherReads } from './watchers/notion/index.js';
 import { pgBossTriageEnqueuer, registerWatcher, type TriageJob } from './watchers/runner.js';
@@ -55,6 +69,10 @@ import { hashRecord } from '@lance/shared';
 
 const WORKER_VERSION = '0.1.0';
 const EXPIRY_QUEUE = 'expire-proposals';
+const ALERT_DELIVERY_QUEUE = 'alerts-deliver';
+/** Spec 11: the inbox agent's watermark is stale after this many hours without a new line. */
+const STALE_WATERMARK_HOURS = 24;
+
 /** How long a triage job waits before it is looked at again while paused. */
 const TRIAGE_RETRY_WHILE_PAUSED_S = 60;
 
@@ -159,6 +177,23 @@ function buildNotion(
     },
   });
   return { connector, writers: notionExecutionWriters(connector, config) };
+}
+
+/**
+ * The section 11 detectors live in ./alerts/detectors/index.ts. Loaded by
+ * path so the worker boots while that module is still being written; a
+ * missing module logs once and registers none.
+ */
+async function loadDetectors(): Promise<Detector[]> {
+  try {
+    const module = (await import('./alerts/detectors/index.js')) as {
+      allDetectors?: (options: Record<string, never>) => Detector[];
+    };
+    return module.allDetectors === undefined ? [] : module.allDetectors({});
+  } catch (error) {
+    console.warn({ err: error }, 'no detector module found; only the agent-logs detector runs');
+    return [];
+  }
 }
 
 /** Jamie is optional at boot: without JAMIE_API_KEY the worker runs everything else (ADR 0005). */
@@ -380,6 +415,77 @@ async function main(): Promise<void> {
   await registerDigest(boss, db, slack, config);
   await registerExpiry(boss, db);
 
+  // Alerts (spec 9.4, 11): delivery every minute, detectors on their own crons.
+  await boss.createQueue(ALERT_DELIVERY_QUEUE);
+  await boss.schedule(ALERT_DELIVERY_QUEUE, '* * * * *', {}, { key: ALERT_DELIVERY_QUEUE });
+  await boss.work(ALERT_DELIVERY_QUEUE, async () => {
+    if (!(await gate.check()).runnable) return;
+    await deliverAlerts({ db, config, slack, webUrl: env('PUBLIC_WEB_URL') ?? null });
+  });
+  const detectorContext = { db, config, ontology, now: nowIso };
+  const detectors: Detector[] = [
+    createAgentLogsDetector({ db, maxWatermarkAgeHours: STALE_WATERMARK_HOURS }),
+    ...(await loadDetectors()),
+  ];
+  for (const detector of detectors) await registerDetector(boss, detector, detectorContext);
+
+  // Briefs (spec 10): the Planner needs a model; without one the brief is the facts alone.
+  const briefDeps = {
+    db,
+    config,
+    ontology,
+    agent,
+    reads: {
+      searchLedger: async (query: { correlationId?: string | undefined; limit: number }) =>
+        (
+          await new LedgerReader(db).query({
+            ...(query.correlationId === undefined ? {} : { correlationId: query.correlationId }),
+            limit: query.limit,
+          })
+        ).map((event) => ({
+          id: event.id,
+          ts: event.ts.toISOString(),
+          kind: event.kind,
+          actor: event.actor,
+          sourceSystem: event.sourceSystem,
+          sourceRecordId: event.sourceRecordId,
+          correlationId: event.correlationId,
+          summary:
+            ((event.payload as Record<string, unknown> | null)?.['summary'] as
+              string | undefined) ?? null,
+        })),
+      getSourceRecord: async (system: string, recordId: string) => {
+        const rows = await db
+          .select({ payload: observations.payload })
+          .from(observations)
+          .where(
+            and(eq(observations.sourceSystem, system), eq(observations.sourceRecordId, recordId)),
+          )
+          .limit(1);
+        return (rows[0]?.payload as Record<string, unknown> | undefined) ?? null;
+      },
+      lookupEntity: async (query: string) =>
+        (await ontology.search(query, 10)).map((node) => {
+          const display =
+            node.properties['display_name'] ?? node.properties['name'] ?? node.properties['title'];
+          return {
+            id: node.id,
+            label: node.label,
+            display: typeof display === 'string' ? display : node.id,
+            confidence:
+              typeof node.properties['confidence'] === 'number' ? node.properties['confidence'] : 1,
+          };
+        }),
+    },
+    slack,
+    createProposal,
+  };
+  await registerBriefs(boss, briefDeps);
+  // `/lance brief` from the api lands on the morning queue too.
+  await boss.work(QUEUE_MORNING, async () => {
+    await runMorningBrief(briefDeps);
+  });
+
   if (agent !== null) {
     await boss.work<TriageJob>(QUEUES.triage, async (jobs) => {
       for (const job of jobs) {
@@ -456,6 +562,22 @@ async function main(): Promise<void> {
       boss,
       phaseTwoRunnerDeps,
       createJamieWatcher({ reads: jamie, domEmail: config.dom.email }),
+      config.timeZone,
+    );
+  }
+  if (slack !== null) {
+    const workspaceId = env('LOG_ANALYTICS_WORKSPACE_ID');
+    await registerWatcher(
+      boss,
+      phaseTwoRunnerDeps,
+      createAgentLogsWatcher({
+        slack: slackReads(createSlackClient({ token: readSecret('SLACK_BOT_TOKEN') })),
+        channelId: config.slack.channelId,
+        ...(env('SLACK_BOT_USER_ID') === undefined
+          ? {}
+          : { ownBotUserId: env('SLACK_BOT_USER_ID') as string }),
+        appInsights: workspaceId === undefined ? null : createAppInsightsClient({ workspaceId }),
+      }),
       config.timeZone,
     );
   }

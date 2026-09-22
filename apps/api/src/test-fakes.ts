@@ -560,6 +560,8 @@ export interface FakeDeps {
   enqueued: string[];
   /** Commitment ids handed to `enqueueChase`, in order. */
   chased: string[];
+  /** One entry per `/lance brief` request. */
+  briefRequests: number[];
 }
 
 export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
@@ -575,6 +577,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
   feed.subscribe((event) => events.push(event));
   const enqueued: string[] = [];
   const chased: string[] = [];
+  const briefRequests: number[] = [];
   const commitments = new FakeCommitmentStore();
   const tasks = new FakeTaskStore();
   const briefs = new FakeBriefStore();
@@ -598,6 +601,10 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     briefs,
     alerts,
     ontology,
+    enqueueBrief: () => {
+      briefRequests.push(1);
+      return Promise.resolve('job-brief');
+    },
     enqueueChase: (commitmentId) => {
       chased.push(commitmentId);
       return Promise.resolve(`job-${String(chased.length)}`);
@@ -642,5 +649,6 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     slackFailures,
     enqueued,
     chased,
+    briefRequests,
   };
 };

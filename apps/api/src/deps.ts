@@ -134,6 +134,8 @@ export interface ApiDeps {
    * worker drafts the chase; the api never writes an email.
    */
   enqueueChase: (commitmentId: string) => Promise<string>;
+  /** `/lance brief`: the worker regenerates the morning brief now. */
+  enqueueBrief: () => Promise<string>;
   status: StatusSource;
   auth: TokenVerifier;
   slack: SlackDeps;

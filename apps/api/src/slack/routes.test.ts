@@ -225,13 +225,21 @@ describe('/lance mode', () => {
   });
 });
 
-describe('the commands that arrive in a later phase', () => {
-  it('says so for brief', async () => {
-    expect(await slashText('brief')).toBe(
-      'The brief command arrives in a later phase. No brief has been generated.',
-    );
+describe('/lance brief', () => {
+  it('queues a morning brief for Dom and says it is coming', async () => {
+    const text = await slashText('brief');
+    expect(harness.briefRequests).toHaveLength(1);
+    expect(text).toContain('regenerating the morning brief');
   });
 
+  it('refuses a user who is not on the Slack allowlist', async () => {
+    const text = await slashText('brief', 'U0INTRUDER');
+    expect(harness.briefRequests).toHaveLength(0);
+    expect(text).toContain('Only Dom');
+  });
+});
+
+describe('the commands that arrive in a later phase', () => {
   it('says so for task', async () => {
     expect(await slashText('task ring the accountant')).toBe(
       'The task command arrives in a later phase. No task has been created.',

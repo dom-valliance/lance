@@ -89,6 +89,7 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
     alerts: createAlertStore(options.db),
     ontology: new OntologyRepository(options.db),
     enqueueChase: (commitmentId) => executeQueue.enqueueChase(commitmentId),
+    enqueueBrief: () => executeQueue.enqueueBrief(),
     status: createDbStatusSource(options.db, control, {
       usdToGbp: options.config.cost.usdToGbp,
       timeZone: options.config.timeZone,

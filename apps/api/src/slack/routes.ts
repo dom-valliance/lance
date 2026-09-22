@@ -265,7 +265,13 @@ export const slackRoutes =
             ? handleMode(deps, rest, displayName)
             : ephemeral(`Only Dom may change or read the mode of ${displayName} from Slack.`);
         case 'brief':
-          return ephemeral(laterPhase('brief', 'No brief has been generated.'));
+          if (!mayControl(deps, parsed.data.user_id)) {
+            return ephemeral(`Only Dom may ask ${displayName} for a brief from Slack.`);
+          }
+          await deps.enqueueBrief();
+          return ephemeral(
+            `${displayName} is regenerating the morning brief; it will post in the channel shortly.`,
+          );
         case 'task':
           return ephemeral(laterPhase('task', 'No task has been created.'));
         case 'chase':
