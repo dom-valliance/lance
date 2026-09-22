@@ -16,7 +16,7 @@ param postgresAdministratorPassword = readEnvironmentVariable('LANCE_PG_ADMIN_PA
 // once az acr build has pushed lance-web, lance-api and lance-worker, and set
 // containerImageTag to the tag that was pushed.
 param useBootstrapImage = false
-param containerImageTag = '650abb1'
+param containerImageTag = '6888bdd'
 
 param allowedUpn = 'dom@valliance.ai'
 // Dom's Slack user id in the Valliance workspace. Not a secret.
