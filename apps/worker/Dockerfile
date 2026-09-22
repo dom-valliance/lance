@@ -38,6 +38,7 @@ COPY packages/connectors/src packages/connectors/src
 COPY packages/db/src packages/db/src
 COPY packages/db/drizzle packages/db/drizzle
 COPY packages/ledger/src packages/ledger/src
+COPY packages/ontology/src packages/ontology/src
 COPY packages/policy/src packages/policy/src
 COPY packages/shared/src packages/shared/src
 COPY packages/telemetry/src packages/telemetry/src
