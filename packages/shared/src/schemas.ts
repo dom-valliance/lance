@@ -39,7 +39,7 @@ const HhMmSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be "HH:MM
  * Actor identity on a ledger event (spec 5.1 examples: `agent:triage@1.4.0`,
  * `user:dom`, `system:retention`).
  */
-const ActorSchema = z
+export const ActorSchema = z
   .string()
   .regex(
     /^(agent:[a-z-]+@\d+\.\d+\.\d+|user:[a-z]+|system:[a-z-]+)$/,
@@ -253,8 +253,15 @@ export const SystemStateSchema = z.object({
   quietHoursStart: HhMmSchema,
   quietHoursEnd: HhMmSchema,
   pushBudgetPerHour: z.int().positive(),
+  costCeilingGbp: z.number().positive(),
 });
 export type SystemState = z.infer<typeof SystemStateSchema>;
+
+/** Spec 13: the daily model spend ceiling as Settings sets it; GBP 0.01 to GBP 1000. */
+export const CostCeilingInputSchema = z.object({
+  costCeilingGbp: z.number().min(0.01).max(1000),
+});
+export type CostCeilingInput = z.infer<typeof CostCeilingInputSchema>;
 
 export const UserSchema = z.object({
   id: UlidSchema,

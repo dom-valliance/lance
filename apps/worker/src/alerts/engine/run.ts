@@ -1,4 +1,5 @@
 import type { PgBoss } from 'pg-boss';
+import { work } from '../../scheduler/boss.js';
 import { raiseAlert, type RaiseAlertResult } from '../raise.js';
 import type { Detector, DetectorContext } from '../detectors/types.js';
 
@@ -7,6 +8,11 @@ import type { Detector, DetectorContext } from '../detectors/types.js';
  * queue and cron so a slow one never delays another, and the actor names
  * the detector so the ledger says which code raised what.
  */
+/** Ledger actors allow letters and hyphens only, so a detector's snake_case name is hyphenated. */
+export function detectorActor(detector: Pick<Detector, 'name'>): string {
+  return `system:detector-${detector.name.replace(/_/g, '-')}`;
+}
+
 export async function runDetector(
   detector: Detector,
   context: DetectorContext,
@@ -14,9 +20,7 @@ export async function runDetector(
   const found = await detector.run(context);
   const results: RaiseAlertResult[] = [];
   for (const alert of found) {
-    results.push(
-      await raiseAlert(context.db, { ...alert, actor: `system:detector-${detector.name}` }),
-    );
+    results.push(await raiseAlert(context.db, { ...alert, actor: detectorActor(detector) }));
   }
   return results;
 }
@@ -33,7 +37,7 @@ export async function registerDetector(
   const queue = detectorQueue(detector);
   await boss.createQueue(queue);
   await boss.schedule(queue, detector.schedule, {}, { tz: context.config.timeZone, key: queue });
-  await boss.work(queue, async () => {
+  await work(boss, queue, async () => {
     await runDetector(detector, context);
   });
 }
