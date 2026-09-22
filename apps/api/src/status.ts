@@ -106,6 +106,61 @@ export const startOfLocalDay = (date: Date, timeZone: string): Date => {
   return candidateOffset === offset ? candidate : new Date(localMidnight - candidateOffset);
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Midnight at the start of the local day `days` days from `date`'s, in
+ * `timeZone`. The shift lands at local noon before it is reduced to
+ * midnight, so a week that crosses a clock change still counts seven days.
+ */
+export const shiftLocalDays = (date: Date, days: number, timeZone: string): Date => {
+  const start = startOfLocalDay(date, timeZone);
+  return startOfLocalDay(new Date(start.getTime() + days * DAY_MS + DAY_MS / 2), timeZone);
+};
+
+/**
+ * Midnight at the start of the named `YYYY-MM-DD` local day, as a UTC
+ * instant. Throws on anything that is not a calendar date, so a bad query
+ * string fails at the boundary rather than reading the wrong day.
+ */
+export const startOfNamedLocalDay = (localDate: string, timeZone: string): Date => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(localDate);
+  if (match === null) {
+    throw new Error(`Expected a date as "YYYY-MM-DD", received "${localDate}".`);
+  }
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const midnight = Date.UTC(year, month - 1, day);
+  // Noon is clear of every clock change, so the offset read there is the
+  // day's own offset; the candidate is then re-checked as `startOfLocalDay`
+  // does, for a day that begins inside one.
+  const offset = zoneOffsetMs(new Date(midnight + DAY_MS / 2), timeZone);
+  const candidate = new Date(midnight - offset);
+  const candidateOffset = zoneOffsetMs(candidate, timeZone);
+  return candidateOffset === offset ? candidate : new Date(midnight - candidateOffset);
+};
+
+/** `YYYY-MM-DD` of `date` in `timeZone`. */
+export const localDateOf = (date: Date, timeZone: string): string => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const field = (type: Intl.DateTimeFormatPartTypes): string => {
+    const value = parts.find((part) => part.type === type)?.value;
+    if (value === undefined) {
+      throw new Error(`Could not resolve the ${type} of "${date.toISOString()}" in "${timeZone}".`);
+    }
+    return value;
+  };
+  return `${field('year')}-${field('month')}-${field('day')}`;
+};
+
+/** Whole minutes between `from` and `at`, never negative. */
+export const ageMinutesBetween = (at: Date, from: Date): number =>
+  Math.max(0, Math.floor((at.getTime() - from.getTime()) / MS_PER_MINUTE));
+
 /**
  * Reads the live snapshot from Postgres: `system_state` through
  * `SystemControl`, every `cursors` row, and the `agent_runs` cost total for
@@ -146,10 +201,7 @@ export const createDbStatusSource = (
           key: row.key,
           value: row.value,
           updatedAt: row.updatedAt.toISOString(),
-          ageMinutes: Math.max(
-            0,
-            Math.floor((at.getTime() - row.updatedAt.getTime()) / MS_PER_MINUTE),
-          ),
+          ageMinutes: ageMinutesBetween(at, row.updatedAt),
         })),
         costTodayGbp: totalUsd * options.usdToGbp,
       };

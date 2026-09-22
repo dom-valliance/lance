@@ -1,6 +1,8 @@
 import type { LedgerQuery, ProposalAction, ProposalFilter } from '@lance/ledger';
 import {
   ActionClassSchema,
+  AlertSeveritySchema,
+  AlertStatusSchema,
   BriefKindSchema,
   CommitmentDirectionSchema,
   CommitmentStatusSchema,
@@ -14,7 +16,22 @@ import {
 } from '@lance/shared';
 import { z } from 'zod';
 import { actorFromUpn } from './actor.js';
-import { latestBrief } from './briefs/service.js';
+import {
+  ackAlert,
+  getAlert,
+  listAlerts,
+  muteAlert,
+  resolveAlert,
+  MAX_MUTE_HOURS,
+  MIN_MUTE_HOURS,
+} from './alerts/service.js';
+import { agentsStatus } from './agents/service.js';
+import {
+  getBrief,
+  latestBrief,
+  listBriefs,
+  MAX_PAGE_SIZE as MAX_BRIEF_PAGE_SIZE,
+} from './briefs/service.js';
 import { resumeAndRequeue } from './deps.js';
 import {
   chaseCommitment,
@@ -153,6 +170,33 @@ export const InterruptionBudgetInputSchema = z.object({
 });
 export type InterruptionBudgetInput = z.infer<typeof InterruptionBudgetInputSchema>;
 
+/** The Alerts page's three tabs and its filters (spec 12). */
+export const AlertListInputSchema = z
+  .object({
+    status: AlertStatusSchema.optional(),
+    severity: AlertSeveritySchema.optional(),
+    // The kind column is free text, so the filter takes the string the page
+    // read off a row rather than the union the watchers happen to write.
+    kind: z.string().min(1).optional(),
+    limit: z.int().positive().max(MAX_PAGE_SIZE).optional(),
+    cursor: UlidSchema.optional(),
+  })
+  .default({});
+export type AlertListInput = z.infer<typeof AlertListInputSchema>;
+
+/** `YYYY-MM-DD`, the local day the Today page is showing. */
+const LocalDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a date as "YYYY-MM-DD"');
+
+/** The Today page's brief history (spec 12, Today row). */
+export const BriefListInputSchema = z
+  .object({
+    kind: BriefKindSchema.optional(),
+    limit: z.int().positive().max(MAX_BRIEF_PAGE_SIZE).optional(),
+    cursor: UlidSchema.optional(),
+  })
+  .default({});
+export type BriefListInput = z.infer<typeof BriefListInputSchema>;
+
 export const appRouter = router({
   systemState: router({
     get: procedure.query(({ ctx }) => ctx.deps.control.read()),
@@ -181,9 +225,21 @@ export const appRouter = router({
     retention: procedure.query(({ ctx }) => ctx.deps.config.retention),
   }),
   briefs: router({
+    /** The newest brief of a kind generated on a local day, today by default. */
     latest: procedure
-      .input(z.object({ kind: BriefKindSchema }))
-      .query(({ ctx, input }) => latestBrief(ctx.deps, input.kind)),
+      .input(z.object({ kind: BriefKindSchema, date: LocalDateSchema.optional() }))
+      .query(({ ctx, input }) =>
+        latestBrief(ctx.deps, {
+          kind: input.kind,
+          ...(input.date === undefined ? {} : { date: input.date }),
+        }),
+      ),
+    list: procedure
+      .input(BriefListInputSchema)
+      .query(({ ctx, input }) => listBriefs(ctx.deps, input)),
+    get: procedure
+      .input(z.object({ id: UlidSchema }))
+      .query(({ ctx, input }) => getBrief(ctx.deps, input.id)),
   }),
   proposals: router({
     list: procedure
@@ -230,6 +286,33 @@ export const appRouter = router({
     chase: procedure
       .input(z.object({ id: UlidSchema }))
       .mutation(({ ctx, input }) => chaseCommitment(ctx.deps, input.id, actorFromUpn(ctx.upn))),
+  }),
+  alerts: router({
+    list: procedure
+      .input(AlertListInputSchema)
+      .query(({ ctx, input }) => listAlerts(ctx.deps, input)),
+    get: procedure
+      .input(z.object({ id: UlidSchema }))
+      .query(({ ctx, input }) => getAlert(ctx.deps, input.id)),
+    ack: procedure
+      .input(z.object({ id: UlidSchema }))
+      .mutation(({ ctx, input }) =>
+        ackAlert(ctx.deps, { id: input.id, actor: actorFromUpn(ctx.upn) }),
+      ),
+    mute: procedure
+      .input(z.object({ id: UlidSchema, hours: z.int().min(MIN_MUTE_HOURS).max(MAX_MUTE_HOURS) }))
+      .mutation(({ ctx, input }) =>
+        muteAlert(ctx.deps, { id: input.id, hours: input.hours, actor: actorFromUpn(ctx.upn) }),
+      ),
+    resolve: procedure
+      .input(z.object({ id: UlidSchema }))
+      .mutation(({ ctx, input }) =>
+        resolveAlert(ctx.deps, { id: input.id, actor: actorFromUpn(ctx.upn) }),
+      ),
+  }),
+  agents: router({
+    /** Watchers, agents, cost and breakers in one read (spec 12, Agents row). */
+    status: procedure.query(({ ctx }) => agentsStatus(ctx.deps)),
   }),
   tasks: router({
     list: procedure

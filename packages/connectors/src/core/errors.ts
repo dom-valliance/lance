@@ -1,4 +1,4 @@
-export type ConnectorName = 'graph' | 'jamie' | 'notion' | 'slack';
+export type ConnectorName = 'appinsights' | 'graph' | 'jamie' | 'notion' | 'slack';
 
 export interface ConnectorErrorOptions {
   connector: ConnectorName;

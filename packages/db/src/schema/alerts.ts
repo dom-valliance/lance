@@ -24,6 +24,8 @@ export const alerts = pgTable(
     ackedAt: timestamptz('acked_at'),
     mutedUntil: timestamptz('muted_until'),
     slackTs: text('slack_ts'),
+    /** The overflow post this alert was folded into when the push budget ran out; never a card of its own. */
+    batchTs: text('batch_ts'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

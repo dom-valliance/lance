@@ -13,6 +13,8 @@ import { OntologyRepository } from '@lance/ontology';
 import { getConfig, readSecret, type Config } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { pathToFileURL } from 'node:url';
+import { createAgentsStore } from './agents/store.js';
+import { createAlertStore } from './alerts/store.js';
 import { createEntraVerifier } from './auth/entra.js';
 import { createBriefStore } from './briefs/store.js';
 import { createCommitmentStore } from './commitments/store.js';
@@ -85,8 +87,11 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
     commitments: createCommitmentStore(options.db),
     tasks: createTaskStore(options.db),
     briefs: createBriefStore(options.db),
+    alerts: createAlertStore(options.db),
+    agents: createAgentsStore(options.db),
     ontology: new OntologyRepository(options.db),
     enqueueChase: (commitmentId) => executeQueue.enqueueChase(commitmentId),
+    enqueueBrief: () => executeQueue.enqueueBrief(),
     status: createDbStatusSource(options.db, control, {
       usdToGbp: options.config.cost.usdToGbp,
       timeZone: options.config.timeZone,
@@ -94,6 +99,12 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
     auth: options.auth,
     slack: options.slack,
     slackSurface,
+    onAlertSlackFailure: (error, alertId) => {
+      console.warn(
+        { err: error, alertId },
+        'Could not redraw the Slack card after an alert change',
+      );
+    },
     notify: (event) => {
       feed.notify(event);
     },

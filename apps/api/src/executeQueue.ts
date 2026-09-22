@@ -14,6 +14,7 @@ import { PgBoss } from 'pg-boss';
 export const BOSS_SCHEMA = 'pgboss';
 export const EXECUTE_QUEUE = 'execute';
 export const CHASE_QUEUE = 'chase';
+export const BRIEF_QUEUE = 'brief-morning';
 
 /** The job body the worker's executor consumes. */
 export interface ExecuteJob {
@@ -29,6 +30,8 @@ export interface ExecuteQueue {
   enqueueExecute(proposalId: string): Promise<void>;
   /** Returns the pg-boss job id, which the caller shows to Dom. */
   enqueueChase(commitmentId: string): Promise<string>;
+  /** Regenerates the morning brief now (`/lance brief`, spec 9.2). */
+  enqueueBrief(): Promise<string>;
   stop(): Promise<void>;
 }
 
@@ -56,6 +59,7 @@ export function createExecuteQueue(db: Db): ExecuteQueue {
     await boss.start();
     await boss.createQueue(EXECUTE_QUEUE);
     await boss.createQueue(CHASE_QUEUE);
+    await boss.createQueue(BRIEF_QUEUE);
   };
 
   return {
@@ -64,6 +68,18 @@ export function createExecuteQueue(db: Db): ExecuteQueue {
       await started;
       const job: ExecuteJob = { proposalId };
       await boss.send(EXECUTE_QUEUE, job);
+    },
+
+    async enqueueBrief(): Promise<string> {
+      started ??= start();
+      await started;
+      const jobId = await boss.send(BRIEF_QUEUE, {});
+      if (jobId === null) {
+        throw new Error(
+          'The brief queue refused the job. Check that the worker is running and that the pgboss schema is present.',
+        );
+      }
+      return jobId;
     },
 
     async enqueueChase(commitmentId: string): Promise<string> {

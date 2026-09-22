@@ -27,9 +27,18 @@ export interface HistoryPage {
   nextCursor: string | null;
 }
 
+const AuthTestSchema = z
+  .object({ user_id: z.string(), bot_id: z.string().optional(), team_id: z.string().optional() })
+  .passthrough();
+
 /** Channel history for the agent-logs watcher (spec 7.1). Reads only. */
 export function slackReads(client: SlackClient) {
   return {
+    /** Who the bot token is: its user id and bot id, so the watcher can skip Lance's own posts. */
+    async authTest(): Promise<{ userId: string; botId: string | null; teamId: string | null }> {
+      const reply = await client.call('auth.test', {}, {}, AuthTestSchema);
+      return { userId: reply.user_id, botId: reply.bot_id ?? null, teamId: reply.team_id ?? null };
+    },
     async conversationsHistory(input: {
       channel: string;
       oldest?: string;

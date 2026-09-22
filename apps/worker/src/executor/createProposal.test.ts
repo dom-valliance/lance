@@ -21,6 +21,7 @@ const config = {
   agentDisplayName: 'Lance',
   timeZone: 'Europe/London',
   proposals: { expiryHours: 48 },
+  interruption: { quietHoursStart: '19:00', quietHoursEnd: '07:00', pushBudgetPerHour: 6 },
 };
 
 function handler(slackConfigured = true) {
@@ -170,6 +171,28 @@ describe('createProposal', () => {
       watcherDryRun: true,
     });
     expect(outcome.status).toBe('held');
+  });
+
+  it('leaves a pending proposal without a card when the hourly push budget is spent', async () => {
+    const spent = createProposalHandler({
+      db,
+      config: { ...config, interruption: { ...config.interruption, pushBudgetPerHour: 0 } },
+      control,
+      loadRules: () => Promise.resolve(rules),
+      critique: (draft) => critique(draft, { permittedNotionProperties: ['Title', 'Status'] }),
+      slack: {
+        channelId: CHANNEL,
+        post: () => Promise.reject(new Error('the budget should have stopped this post')),
+      },
+      enqueueExecute: () => Promise.resolve(),
+    });
+    const outcome = await spent(draft({ counterpartyClass: 'client' }), {
+      ...context,
+      labels: ['Deals'],
+    });
+    expect(outcome.status).toBe('pending');
+    const row = (await db.select().from(proposals).where(eq(proposals.id, outcome.proposalId)))[0];
+    expect(row?.slackTs).toBeNull();
   });
 
   it('proceeds without Slack when no surface is configured', async () => {

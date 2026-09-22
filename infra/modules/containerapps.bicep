@@ -202,6 +202,23 @@ resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09
   name: logAnalyticsWorkspaceName
 }
 
+// Log Analytics Reader, so the worker's identity can run the telemetry query
+// the agent-logs watcher issues. Read-only on the workspace, nothing else.
+var logAnalyticsReaderRoleId = '73c42c96-874c-4d5f-b4ea-93de3d4ce7e0'
+
+resource workerLogReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: logAnalyticsWorkspace
+  name: guid(logAnalyticsWorkspace.id, identities.worker.principalId, logAnalyticsReaderRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      logAnalyticsReaderRoleId
+    )
+    principalId: identities.worker.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 resource managedEnvironment 'Microsoft.App/managedEnvironments@2025-01-01' = {
   name: 'cae-lance-${environmentName}'
   location: location
@@ -368,6 +385,16 @@ resource containerApps 'Microsoft.App/containerApps@2025-01-01' = [
                     {
                       name: 'FF_NOTION_WRITES'
                       value: string(notionWritesEnabled)
+                    }
+                    {
+                      // The agent-logs watcher queries Lance's own telemetry here (spec 7.1).
+                      name: 'LOG_ANALYTICS_WORKSPACE_ID'
+                      value: logAnalyticsWorkspace.properties.customerId
+                    }
+                    {
+                      // Links in Slack back to the Alerts page (spec 9.4 overflow post).
+                      name: 'PUBLIC_WEB_URL'
+                      value: 'https://ca-lance-web-${environmentName}.${managedEnvironment.properties.defaultDomain}'
                     }
                   ]
                 : [],

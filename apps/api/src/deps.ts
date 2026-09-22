@@ -11,6 +11,8 @@ import type {
   ResumeResult,
 } from '@lance/ledger';
 import type { Config, LedgerEventInputCandidate, Proposal, SystemMode } from '@lance/shared';
+import type { AgentsStoreLike } from './agents/store.js';
+import type { AlertStoreLike } from './alerts/store.js';
 import type { BriefStoreLike } from './briefs/store.js';
 import type { CommitmentStoreLike } from './commitments/store.js';
 import type { FeedEvent, FeedListener } from './events.js';
@@ -124,6 +126,10 @@ export interface ApiDeps {
   tasks: TaskStoreLike;
   /** The generated briefs behind the Today page. */
   briefs: BriefStoreLike;
+  /** Reads and the three status writes behind the Alerts page. */
+  alerts: AlertStoreLike;
+  /** Cursors, agent runs and pushes behind the Agents page. */
+  agents: AgentsStoreLike;
   /** Person nodes, for the owner and counterparty of a commitment. */
   ontology: OntologyLike;
   /**
@@ -131,6 +137,8 @@ export interface ApiDeps {
    * worker drafts the chase; the api never writes an email.
    */
   enqueueChase: (commitmentId: string) => Promise<string>;
+  /** `/lance brief`: the worker regenerates the morning brief now. */
+  enqueueBrief: () => Promise<string>;
   status: StatusSource;
   auth: TokenVerifier;
   slack: SlackDeps;
@@ -140,6 +148,11 @@ export interface ApiDeps {
    * without a token instead of failing at construction.
    */
   slackSurface: SlackSurface | null;
+  /**
+   * Called when an alert card could not be redrawn. The state change has
+   * already landed by then, so the failure is reported rather than thrown.
+   */
+  onAlertSlackFailure?: (error: unknown, alertId: string) => void;
   /** Fans a live update out to every client connected to `GET /events`. */
   notify: (event: FeedEvent) => void;
   /** Registers one such client. Returns the function that removes it. */

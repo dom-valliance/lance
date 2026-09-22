@@ -1,5 +1,5 @@
 import type { SlackSurface } from '@lance/connectors';
-import type { Commitment, SystemState } from '@lance/db';
+import type { Alert, Commitment, SystemState } from '@lance/db';
 import type {
   DecisionResult,
   InterruptionBudget,
@@ -12,7 +12,6 @@ import type {
 import {
   loadConfig,
   newUlid,
-  type BriefKind,
   type Config,
   type LedgerEventInputCandidate,
   type Proposal,
@@ -29,7 +28,9 @@ import type {
   SystemControlLike,
   TokenVerifier,
 } from './deps.js';
-import type { BriefRecord, BriefStoreLike } from './briefs/store.js';
+import type { AgentLastRun, AgentRunRow, AgentsStoreLike, CursorRow } from './agents/store.js';
+import type { AlertQuery, AlertStoreLike, SetAlertStatusInput } from './alerts/store.js';
+import type { BriefQuery, BriefRecord, BriefStoreLike, LatestBriefQuery } from './briefs/store.js';
 import type { CommitmentQuery, CommitmentStoreLike } from './commitments/store.js';
 import type { TaskQuery, TaskStoreLike } from './tasks/store.js';
 import { toTaskView, type ObservationRecord } from './tasks/view.js';
@@ -282,6 +283,69 @@ export class FakeCommitmentStore implements CommitmentStoreLike {
   }
 }
 
+export const TEST_ALERT_ID = '01K5S9V6QW3SWCCPVB0N0E304A';
+
+export const fakeAlert = (overrides: Partial<Alert> = {}): Alert => ({
+  id: TEST_ALERT_ID,
+  severity: 'P1',
+  kind: 'client_mail_unanswered',
+  dedupeKey: 'thread:AAMk3',
+  title: 'No reply to Ann Example in three working days',
+  body: 'The thread "the pilot" has had no reply since Tuesday.',
+  provenance: [
+    { system: 'graph', recordId: 'AAMk3', hash: 'h3', observedAt: '2026-09-20T09:00:00.000Z' },
+  ],
+  status: 'open',
+  firstSeen: new Date('2026-09-20T09:00:00.000Z'),
+  lastSeen: new Date('2026-09-21T09:00:00.000Z'),
+  count: 2,
+  ackedBy: null,
+  ackedAt: null,
+  mutedUntil: null,
+  slackTs: null,
+  batchTs: null,
+  createdAt: new Date('2026-09-20T09:00:00.000Z'),
+  updatedAt: new Date('2026-09-21T09:00:00.000Z'),
+  ...overrides,
+});
+
+/** The alerts table without a database: filters, cursors and one status write. */
+export class FakeAlertStore implements AlertStoreLike {
+  rows: Alert[] = [fakeAlert()];
+  readonly queries: AlertQuery[] = [];
+
+  list(query: AlertQuery): Promise<Alert[]> {
+    this.queries.push(query);
+    const matched = this.rows
+      .filter((row) => query.status === undefined || row.status === query.status)
+      .filter((row) => query.severity === undefined || row.severity === query.severity)
+      .filter((row) => query.kind === undefined || row.kind === query.kind)
+      .filter((row) => query.cursor === undefined || row.id < query.cursor)
+      .sort((left, right) => (left.id < right.id ? 1 : -1));
+    return Promise.resolve(matched.slice(0, query.limit));
+  }
+
+  get(id: string): Promise<Alert | null> {
+    return Promise.resolve(this.rows.find((row) => row.id === id) ?? null);
+  }
+
+  setStatus(input: SetAlertStatusInput): Promise<Alert | null> {
+    const index = this.rows.findIndex(
+      (row) => row.id === input.id && input.from.includes(row.status),
+    );
+    if (index === -1) return Promise.resolve(null);
+    const updated: Alert = {
+      ...this.rows[index]!,
+      status: input.to,
+      updatedAt: input.at,
+      ...(input.ackedBy === undefined ? {} : { ackedBy: input.ackedBy, ackedAt: input.at }),
+      ...(input.mutedUntil === undefined ? {} : { mutedUntil: input.mutedUntil }),
+    };
+    this.rows[index] = updated;
+    return Promise.resolve(updated);
+  }
+}
+
 export const fakeNotionTaskObservation = (
   overrides: Partial<ObservationRecord> = {},
 ): ObservationRecord => ({
@@ -332,15 +396,103 @@ export const fakeBrief = (overrides: Partial<BriefRecord> = {}): BriefRecord => 
   ...overrides,
 });
 
-/** The briefs table without a database; `latest` picks the newest of a kind. */
+/** The briefs table without a database: one local day, a page, or one row. */
 export class FakeBriefStore implements BriefStoreLike {
   rows: BriefRecord[] = [];
+  readonly latestQueries: LatestBriefQuery[] = [];
 
-  latest(kind: BriefKind): Promise<BriefRecord | null> {
+  latest(query: LatestBriefQuery): Promise<BriefRecord | null> {
+    this.latestQueries.push(query);
     const matched = [...this.rows]
-      .filter((row) => row.kind === kind)
-      .sort((left, right) => (left.generatedAt < right.generatedAt ? 1 : -1));
+      .filter((row) => row.kind === query.kind)
+      .filter((row) => {
+        const at = new Date(row.generatedAt);
+        return at >= query.from && at < query.to;
+      })
+      .sort((left, right) =>
+        left.generatedAt === right.generatedAt
+          ? right.id.localeCompare(left.id)
+          : right.generatedAt.localeCompare(left.generatedAt),
+      );
     return Promise.resolve(matched[0] ?? null);
+  }
+
+  list(query: BriefQuery): Promise<BriefRecord[]> {
+    const matched = [...this.rows]
+      .filter((row) => query.kind === undefined || row.kind === query.kind)
+      .filter((row) => query.cursor === undefined || row.id < query.cursor)
+      .sort((left, right) => right.id.localeCompare(left.id));
+    return Promise.resolve(matched.slice(0, query.limit));
+  }
+
+  get(id: string): Promise<BriefRecord | null> {
+    return Promise.resolve(this.rows.find((row) => row.id === id) ?? null);
+  }
+}
+
+export const fakeCursorRow = (overrides: Partial<CursorRow> = {}): CursorRow => ({
+  watcher: 'graph-mail',
+  key: 'inbox',
+  value: 'delta-token',
+  updatedAt: new Date('2026-09-22T08:48:00.000Z'),
+  ...overrides,
+});
+
+export const fakeAgentRun = (overrides: Partial<AgentRunRow> = {}): AgentRunRow => ({
+  agent: 'triage',
+  startedAt: new Date('2026-09-22T08:00:00.000Z'),
+  status: 'succeeded',
+  costUsd: 0.1,
+  error: null,
+  ...overrides,
+});
+
+/**
+ * The cursors, agent runs and pushes behind the Agents page, without a
+ * database. `lastRuns` is derived from `runs`, as the distinct-on query is.
+ */
+export class FakeAgentsStore implements AgentsStoreLike {
+  cursorRows: CursorRow[] = [fakeCursorRow()];
+  runs: AgentRunRow[] = [fakeAgentRun()];
+  pushes = 0;
+  /** The `since` of every push count asked for, in order. */
+  readonly pushWindows: Date[] = [];
+
+  listCursors(): Promise<CursorRow[]> {
+    return Promise.resolve(
+      [...this.cursorRows].sort(
+        (left, right) =>
+          left.watcher.localeCompare(right.watcher) || left.key.localeCompare(right.key),
+      ),
+    );
+  }
+
+  runsSince(since: Date): Promise<AgentRunRow[]> {
+    return Promise.resolve(
+      this.runs
+        .filter((run) => run.startedAt >= since)
+        .sort((left, right) => left.startedAt.getTime() - right.startedAt.getTime()),
+    );
+  }
+
+  lastRuns(): Promise<AgentLastRun[]> {
+    const newest = new Map<string, AgentRunRow>();
+    for (const run of this.runs) {
+      const seen = newest.get(run.agent);
+      if (seen === undefined || run.startedAt > seen.startedAt) newest.set(run.agent, run);
+    }
+    return Promise.resolve(
+      [...newest.values()].map((run) => ({
+        agent: run.agent,
+        startedAt: run.startedAt,
+        error: run.error,
+      })),
+    );
+  }
+
+  pushesSince(since: Date): Promise<number> {
+    this.pushWindows.push(since);
+    return Promise.resolve(this.pushes);
   }
 }
 
@@ -489,11 +641,17 @@ export interface FakeDeps {
   commitments: FakeCommitmentStore;
   tasks: FakeTaskStore;
   briefs: FakeBriefStore;
+  alerts: FakeAlertStore;
+  agents: FakeAgentsStore;
   ontology: FakeOntology;
+  /** Alert ids whose Slack card could not be redrawn, in order. */
+  slackFailures: string[];
   /** Proposal ids handed to `enqueueExecute`, in order. */
   enqueued: string[];
   /** Commitment ids handed to `enqueueChase`, in order. */
   chased: string[];
+  /** One entry per `/lance brief` request. */
+  briefRequests: number[];
 }
 
 export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
@@ -509,10 +667,14 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
   feed.subscribe((event) => events.push(event));
   const enqueued: string[] = [];
   const chased: string[] = [];
+  const briefRequests: number[] = [];
   const commitments = new FakeCommitmentStore();
   const tasks = new FakeTaskStore();
   const briefs = new FakeBriefStore();
+  const alerts = new FakeAlertStore();
+  const agents = new FakeAgentsStore();
   const ontology = new FakeOntology();
+  const slackFailures: string[] = [];
 
   const deps: ApiDeps = {
     config: overrides.config ?? testConfig(),
@@ -528,7 +690,13 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     commitments,
     tasks,
     briefs,
+    alerts,
+    agents,
     ontology,
+    enqueueBrief: () => {
+      briefRequests.push(1);
+      return Promise.resolve('job-brief');
+    },
     enqueueChase: (commitmentId) => {
       chased.push(commitmentId);
       return Promise.resolve(`job-${String(chased.length)}`);
@@ -543,6 +711,9 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
           : overrides.allowedSlackUserId,
     },
     slackSurface: overrides.withoutSlackSurface === true ? null : slack.surface,
+    onAlertSlackFailure: (_error, alertId) => {
+      slackFailures.push(alertId);
+    },
     notify: (event) => {
       feed.notify(event);
     },
@@ -565,8 +736,12 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     commitments,
     tasks,
     briefs,
+    alerts,
+    agents,
     ontology,
+    slackFailures,
     enqueued,
     chased,
+    briefRequests,
   };
 };

@@ -50,6 +50,13 @@
       "when": 1790020800000,
       "tag": "0006_ontology_labels_and_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790107200000,
+      "tag": "0007_alerts_batch_ts",
+      "breakpoints": true
     }
   ]
 }
