@@ -56,7 +56,7 @@ import { deliverAlerts } from './alerts/engine/deliver.js';
 import { registerDetector } from './alerts/engine/run.js';
 import { allDetectors } from './alerts/detectors/index.js';
 import type { Detector } from './alerts/detectors/types.js';
-import { QUEUE_MORNING, registerBriefs, runMorningBrief } from './briefs/run.js';
+import { registerBriefs } from './briefs/run.js';
 import { registerWeeklyReview } from './briefs/weekly.js';
 import { createAgentLogsDetector, createAgentLogsWatcher } from './watchers/agent-logs/index.js';
 import { createJamieWatcher } from './watchers/jamie/index.js';
@@ -404,8 +404,9 @@ async function main(): Promise<void> {
   await boss.createQueue(ALERT_DELIVERY_QUEUE);
   await boss.schedule(ALERT_DELIVERY_QUEUE, '* * * * *', {}, { key: ALERT_DELIVERY_QUEUE });
   await boss.work(ALERT_DELIVERY_QUEUE, async () => {
-    if (!(await gate.check()).runnable) return;
-    await deliverAlerts({ db, config, slack, webUrl: env('PUBLIC_WEB_URL') ?? null });
+    // Paused is not silent: P0 still goes out, everything else waits (spec 9.4).
+    const paused = !(await gate.check()).runnable;
+    await deliverAlerts({ db, config, slack, webUrl: env('PUBLIC_WEB_URL') ?? null, paused });
   });
   const detectorContext = { db, config, ontology, now: nowIso };
   const detectors: Detector[] = [
@@ -447,7 +448,15 @@ async function main(): Promise<void> {
             and(eq(observations.sourceSystem, system), eq(observations.sourceRecordId, recordId)),
           )
           .limit(1);
-        return (rows[0]?.payload as Record<string, unknown> | undefined) ?? null;
+        const record = rows[0]?.payload as Record<string, unknown> | undefined;
+        if (record === undefined) return null;
+        // The planner reads metadata, never a mail body or a transcript (spec 4.3).
+        const { body, bodyPreview, bodyText, transcript, ...metadata } = record;
+        void body;
+        void bodyPreview;
+        void bodyText;
+        void transcript;
+        return metadata;
       },
       lookupEntity: async (query: string) =>
         (await ontology.search(query, 10)).map((node) => {
@@ -466,11 +475,8 @@ async function main(): Promise<void> {
     createProposal,
   };
   await registerBriefs(boss, briefDeps);
+  // `/lance brief` from the api lands on the same morning queue.
   await registerWeeklyReview(boss, { db, config, agent, slack });
-  // `/lance brief` from the api lands on the morning queue too.
-  await boss.work(QUEUE_MORNING, async () => {
-    await runMorningBrief(briefDeps);
-  });
 
   if (agent !== null) {
     await boss.work<TriageJob>(QUEUES.triage, async (jobs) => {
@@ -555,20 +561,35 @@ async function main(): Promise<void> {
     const workspaceId = env('LOG_ANALYTICS_WORKSPACE_ID');
     const reads = slackReads(createSlackClient({ token: readSecret('SLACK_BOT_TOKEN') }));
     // The watcher skips Lance's own posts; the bot's identity comes from the
-    // token itself rather than from configuration that could drift.
-    const self = await reads.authTest();
-    await registerWatcher(
-      boss,
-      phaseTwoRunnerDeps,
-      createAgentLogsWatcher({
-        slack: reads,
-        channelId: config.slack.channelId,
-        ownBotUserId: self.userId,
-        ...(self.botId === null ? {} : { ownBotId: self.botId }),
-        appInsights: workspaceId === undefined ? null : createAppInsightsClient({ workspaceId }),
-      }),
-      config.timeZone,
-    );
+    // token itself rather than from configuration that could drift. When
+    // Slack will not say who we are, the watcher stays off and Dom hears why,
+    // rather than the whole worker failing to boot.
+    const self = await reads.authTest().catch(async (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      await raiseAlert(db, {
+        kind: 'watcher_failed',
+        severity: 'P1',
+        dedupeKey: 'watcher:agent-logs:identity',
+        title: 'Agent-logs watcher did not start',
+        body: `Slack auth.test failed: ${message} Check the bot token in Key Vault and restart the worker.`,
+        actor: `agent:worker@${WORKER_VERSION}`,
+      });
+      return null;
+    });
+    if (self !== null) {
+      await registerWatcher(
+        boss,
+        phaseTwoRunnerDeps,
+        createAgentLogsWatcher({
+          slack: reads,
+          channelId: config.slack.channelId,
+          ownBotUserId: self.userId,
+          ...(self.botId === null ? {} : { ownBotId: self.botId }),
+          appInsights: workspaceId === undefined ? null : createAppInsightsClient({ workspaceId }),
+        }),
+        config.timeZone,
+      );
+    }
   }
   if (notion !== null) {
     await registerWatcher(
