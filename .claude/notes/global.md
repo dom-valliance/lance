@@ -112,6 +112,13 @@
 **Rule**: Every registration `main.ts` performs (queues, schedules, workers) has a test that performs it against real pg-boss in a container. When a boot path only runs with credentials that are absent locally, stub the credentials and run it anyway. After a deploy, read each container's console log, not only its revision state.
 **Applies to**: apps/worker/src/main.ts, apps/worker/src/watchers/
 
+### [2026-09-21] Chain every Flexible Server child resource in series
+
+**Context**: The redeploy after the Phase 1 merge failed on the `log_connections` configuration with ServerIsBusy. The template had two resources depending on the same parent (the database and the `shared_preload_libraries` write, then the firewall rules and `log_connections`), so ARM started them in parallel and Flexible Server, which accepts one management operation at a time, refused the second. The first deploy had passed by timing.
+**Correction**: Dom pasted the deployment error.
+**Rule**: On a Postgres Flexible Server, every child resource (administrator, configuration, database, firewall rule) depends on the one before it, forming one chain, never a fan-out from the parent. Treat any ServerIsBusy as a template ordering fault, not a transient to retry.
+**Applies to**: infra/modules/postgres.bicep
+
 ### [2026-09-21] Verification output is read by exit code, never by grep
 
 **Context**: The consent button branch failed CI lint on two unused parameters. The local check had piped eslint through `grep -E "error|✖"` and printed "checks done" regardless of the exit code, and the lines that mattered were lost.
