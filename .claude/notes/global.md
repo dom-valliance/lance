@@ -180,3 +180,10 @@
 **Correction**: Dom pasted the CI log.
 **Rule**: Before calling a branch done, run every command the workflow runs, read from `.github/workflows/ci.yml` rather than from memory; today that is lint, format:check, typecheck, test, build and the image builds. A subagent's "prettier was run over my files" is not evidence; the root `pnpm format:check` is.
 **Applies to**: global
+
+### [2026-09-22] Built-in role ids come from the CLI, never from memory
+
+**Context**: The first Phase 3 deploy failed with RoleDefinitionDoesNotExist: the Log Analytics Reader role assignment in containerapps.bicep carried a GUID recalled from memory, right in its first segment and wrong after that. The three apps had already moved to the new image when the assignment failed, so the deploy left dev half applied until the template was fixed and rerun.
+**Correction**: Self-found on reading the deployment error; fixed in the template and redeployed rather than assigning the role by hand.
+**Rule**: Every built-in role definition id in Bicep is read with `az role definition list --name "<role>"` at the time it is written, and the command that yields it goes in the comment above the variable. Role assignments come last in a module, so a failing one does not strand the apps on a new image while the rest of the deploy is unverified.
+**Applies to**: infra/modules/*.bicep
