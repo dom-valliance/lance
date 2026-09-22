@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, type ReactNode } from 'react';
+import { InlineFailure } from '@/components/inline-failure';
 
 /** A server action that answers with a message to show, or null when it landed. */
 export type FormAction = (previous: string | null, form: FormData) => Promise<string | null>;
@@ -23,11 +24,7 @@ export function ActionForm({
   return (
     <form action={formAction} className={className} aria-busy={pending}>
       {children}
-      {failure === null ? null : (
-        <p role="alert" className="text-sm text-destructive">
-          {failure}
-        </p>
-      )}
+      {failure === null ? null : <InlineFailure>{failure}</InlineFailure>}
     </form>
   );
 }

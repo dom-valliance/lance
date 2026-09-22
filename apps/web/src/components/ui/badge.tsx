@@ -1,43 +1,61 @@
 import * as React from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from 'cn';
-import { Slot } from 'radix-ui';
+import type { Tone } from '@/lib/tones';
 
+/**
+ * A pill with a text label in one of the semantic tones (design
+ * foundations, section 3). Fill at low alpha, text at the tone's tint, a
+ * hairline at 30%. `dot` adds the 6px leading dot the watcher-health and
+ * mode badges carry.
+ */
 const badgeVariants = cva(
-  'group/badge inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3!',
+  'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border font-medium',
   {
     variants: {
-      variant: {
-        default: 'bg-primary text-primary-foreground [a]:hover:bg-primary/80',
-        secondary: 'bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80',
-        destructive:
-          'bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20',
-        outline: 'border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground',
-        ghost: 'hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50',
-        link: 'text-primary underline-offset-4 hover:underline',
+      tone: {
+        blue: 'border-sem-blue-line bg-sem-blue-bg text-sem-blue-fg',
+        pink: 'border-sem-pink-line bg-sem-pink-bg text-sem-pink-fg',
+        peach: 'border-sem-peach-line bg-sem-peach-bg text-sem-peach-fg',
+        teal: 'border-sem-teal-line bg-sem-teal-bg text-sem-teal-fg',
+        green: 'border-sem-green-line bg-sem-green-bg text-sem-green-fg',
+        red: 'border-sem-red-line bg-sem-red-bg text-sem-red-fg',
+        neutral: 'border-sem-neutral-line bg-sem-neutral-bg text-sem-neutral-fg',
+        'neutral-strong': 'border-border bg-muted text-foreground',
+        outline: 'border-input bg-transparent text-muted-foreground',
+        'solid-red': 'border-transparent bg-sem-red-fg font-semibold text-background',
+      } satisfies Record<Tone, string>,
+      size: {
+        default: 'h-[22px] px-2 text-xs',
+        sm: 'h-5 px-[7px] text-[11px]',
+        xs: 'h-[18px] px-1.5 text-[11px]',
       },
     },
     defaultVariants: {
-      variant: 'default',
+      tone: 'neutral',
+      size: 'default',
     },
   },
 );
 
 function Badge({
   className,
-  variant = 'default',
-  asChild = false,
+  tone = 'neutral',
+  size = 'default',
+  dot = false,
+  children,
   ...props
-}: React.ComponentProps<'span'> & VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
-  const Comp = asChild ? Slot.Root : 'span';
-
+}: React.ComponentProps<'span'> & VariantProps<typeof badgeVariants> & { dot?: boolean }) {
   return (
-    <Comp
+    <span
       data-slot="badge"
-      data-variant={variant}
-      className={cn(badgeVariants({ variant }), className)}
+      data-tone={tone}
+      className={cn(badgeVariants({ tone, size }), className)}
       {...props}
-    />
+    >
+      {dot ? <span aria-hidden className="size-1.5 rounded-full bg-current" /> : null}
+      {children}
+    </span>
   );
 }
 

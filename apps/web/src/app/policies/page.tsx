@@ -1,10 +1,10 @@
-import { PageHeading } from '@/components/page-heading';
+import { PageHeader } from '@/components/page-header';
 
 export default function PoliciesPage() {
   return (
-    <PageHeading
+    <PageHeader
       title="Policies"
-      description="A matrix of policy cells and their current decision, a rule history and evidence view per cell, a validated rule editor with hard floors shown as locked, and a shadow run form with diff output."
+      summary="A matrix of policy cells and their current decision, a rule history and evidence view per cell, a validated rule editor with hard floors shown as locked, and a shadow run form with diff output."
     />
   );
 }

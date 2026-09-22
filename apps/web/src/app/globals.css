@@ -29,6 +29,7 @@
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: 'Satoshi', system-ui, sans-serif;
+  --font-mono: ui-monospace, Menlo, monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -46,6 +47,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -60,21 +62,65 @@
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* Brand accent (design foundations, section 2). */
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+
+  /*
+   * Semantic palettes (design foundations, section 3): fill, text and
+   * hairline for each of the six hues plus neutral. Components pick a hue
+   * through `lib/tones.ts`; nothing else names these directly.
+   */
+  --color-sem-blue-bg: var(--sem-blue-bg);
+  --color-sem-blue-fg: var(--sem-blue-fg);
+  --color-sem-blue-line: var(--sem-blue-line);
+  --color-sem-pink-bg: var(--sem-pink-bg);
+  --color-sem-pink-fg: var(--sem-pink-fg);
+  --color-sem-pink-line: var(--sem-pink-line);
+  --color-sem-peach-bg: var(--sem-peach-bg);
+  --color-sem-peach-fg: var(--sem-peach-fg);
+  --color-sem-peach-line: var(--sem-peach-line);
+  --color-sem-teal-bg: var(--sem-teal-bg);
+  --color-sem-teal-fg: var(--sem-teal-fg);
+  --color-sem-teal-line: var(--sem-teal-line);
+  --color-sem-green-bg: var(--sem-green-bg);
+  --color-sem-green-fg: var(--sem-green-fg);
+  --color-sem-green-line: var(--sem-green-line);
+  --color-sem-red-bg: var(--sem-red-bg);
+  --color-sem-red-fg: var(--sem-red-fg);
+  --color-sem-red-line: var(--sem-red-line);
+  --color-sem-neutral-bg: var(--sem-neutral-bg);
+  --color-sem-neutral-fg: var(--sem-neutral-fg);
+  --color-sem-neutral-line: var(--sem-neutral-line);
+
+  /* Radii: 12 for cards, 8 for controls and fields, pill for badges. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
+  --radius-4xl: 24px;
+
+}
+
+/* A row that a live update just changed settles from the soft accent. */
+@keyframes flash {
+  from {
+    background-color: var(--brand-soft);
+  }
+  to {
+    background-color: transparent;
+  }
 }
 
 /*
  * Dark-first palette. Lance's web shell has no light theme: `<html>` always
  * carries class="dark" (see layout.tsx), so the default tokens below are the
- * only palette in use. Values keep the neutral oklch scale shadcn generated,
- * inverted so :root already holds the dark reading rather than a light
- * palette overridden by a separate .dark block.
+ * only palette in use. The base greys are the neutral oklch scale shadcn
+ * generated, inverted so :root already holds the dark reading. The accent
+ * and the semantic hues come from the Valliance palette (docs/design).
  */
 :root {
   --background: oklch(0.145 0 0);
@@ -84,7 +130,7 @@
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.145 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
@@ -92,9 +138,16 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  /* Text on the destructive fill is the page background, not white: 7.9:1. */
+  --destructive-foreground: oklch(0.145 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+
+  /* Valliance peach 200. Links, active nav bar, pending rows, focus ring. */
+  --brand: #f3a982;
+  --brand-soft: rgb(243 169 130 / 15%);
+  --ring: #f3a982;
+
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -103,23 +156,47 @@
   --radius: 0.75rem;
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-primary: #f3a982;
+  --sidebar-primary-foreground: oklch(0.145 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: #f3a982;
+
+  --sem-blue-bg: rgb(156 160 189 / 15%);
+  --sem-blue-fg: #b0c1e3;
+  --sem-blue-line: rgb(176 193 227 / 30%);
+  --sem-pink-bg: rgb(217 151 184 / 15%);
+  --sem-pink-fg: #f0b9e2;
+  --sem-pink-line: rgb(240 185 226 / 30%);
+  --sem-peach-bg: rgb(243 169 130 / 15%);
+  --sem-peach-fg: #f3a982;
+  --sem-peach-line: rgb(243 169 130 / 30%);
+  --sem-teal-bg: rgb(127 191 193 / 15%);
+  --sem-teal-fg: #7fbfc1;
+  --sem-teal-line: rgb(127 191 193 / 30%);
+  --sem-green-bg: rgb(158 194 161 / 12%);
+  --sem-green-fg: #9ec2a1;
+  --sem-green-line: rgb(158 194 161 / 30%);
+  --sem-red-bg: rgb(216 140 140 / 15%);
+  --sem-red-fg: #d88c8c;
+  --sem-red-line: rgb(216 140 140 / 30%);
+  --sem-neutral-bg: oklch(0.269 0 0);
+  --sem-neutral-fg: oklch(0.708 0 0);
+  --sem-neutral-line: oklch(1 0 0 / 10%);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    @apply font-sans;
+    color-scheme: dark;
+  }
   body {
     @apply bg-background text-foreground;
     font-family: 'Satoshi', system-ui, sans-serif;
-  }
-  html {
-    @apply font-sans;
+    -webkit-font-smoothing: antialiased;
   }
 }
