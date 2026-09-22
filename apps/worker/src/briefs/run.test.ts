@@ -3,7 +3,14 @@ import { briefs, commitments, createDb, runMigrations, seed, type Db } from '@la
 import { startPostgresContainer } from '@lance/db/testing';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
 import { OntologyRepository } from '@lance/ontology';
-import { hashRecord, idempotencyKey, loadConfig, stableUlid } from '@lance/shared';
+import {
+  AfternoonBoardContentSchema,
+  MorningBriefContentSchema,
+  hashRecord,
+  idempotencyKey,
+  loadConfig,
+  stableUlid,
+} from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -176,33 +183,56 @@ afterAll(async () => {
 });
 
 describe('assembleMorningBrief', () => {
-  it("lists today's meeting with its resolved attendee, recent mail, open commitment, the overdue task and the waiting-for line", async () => {
-    const brief = await assembleMorningBrief({ db, ontology, config, now: () => NOW });
+  it("lists today's meeting with its resolved attendee, recent mail, open commitment, the overdue task and the waiting-for line in the shared shape", async () => {
+    const { content: brief, freeTimeShort } = await assembleMorningBrief({
+      db,
+      ontology,
+      config,
+      now: () => NOW,
+    });
+    expect(MorningBriefContentSchema.safeParse(brief).success).toBe(true);
     expect(brief.date).toBe('2026-09-22');
-    expect(brief.meetings.map((m) => m.subject)).toEqual(['Kick-off with Client Ltd']);
+    expect(brief.headline).toBe('1 meeting, 1 external. 1 task overdue. 1 waiting on others.');
+    expect(brief.meetings.map((m) => m.title)).toEqual(['Kick-off with Client Ltd']);
     const meeting = brief.meetings[0]!;
-    expect(meeting.isExternal).toBe(true);
-    expect(meeting.attendees.map((a) => [a.name, a.known])).toEqual([['Ann Example', true]]);
-    expect(meeting.lastInteractions[0]?.summary).toBe('Ann Example: Re: scope');
-    expect(meeting.openCommitments[0]?.description).toBe('Confirm the start date');
-    expect(meeting.provenance[0]).toMatchObject({ system: 'graph', recordId: 'evt-1' });
-    expect(brief.tasks.map((t) => [t.title, t.overdue])).toEqual([['Send the SOW', true]]);
-    expect(brief.waitingFor[0]).toMatchObject({ counterparty: 'Ann Example', daysOverdue: 4 });
-    expect(brief.dayShape).toMatchObject({ meetingHours: 1, freeTimeShort: false });
+    expect(meeting.audience).toBe('external');
+    expect(meeting.counterpartyClass).toBe('unknown');
+    expect(meeting.attendees.map((a) => [a.name, a.unknown])).toEqual([['Ann Example', false]]);
+    expect(meeting.attendees[0]?.interactions[0]).toMatchObject({
+      kind: 'mail',
+      summary: 'Ann Example: Re: scope',
+    });
+    expect(meeting.commitments[0]?.description).toBe('Confirm the start date');
+    expect(meeting.provenance).toMatchObject({ system: 'graph', recordId: 'evt-1' });
+    expect(meeting.prepExpandsAt).toBe('2026-09-22T08:30:00.000Z');
+    expect(brief.tasks.items.map((t) => [t.title, t.overdueDays])).toEqual([['Send the SOW', 1]]);
+    expect(brief.tasks.total).toBe(1);
+    expect(brief.waitingFor[0]).toMatchObject({
+      counterparty: 'Ann Example',
+      overdueDays: 4,
+      chaseCount: 0,
+      pendingChaseProposalId: null,
+    });
+    expect(brief.dayShape).toMatchObject({ meetingHours: 1, workingHours: 10 });
+    expect(brief.dayShape.longestFreeBlock?.hours).toBe(7);
+    expect(freeTimeShort).toBe(false);
+    expect(brief.dayShape.note).toContain('no hold is proposed');
   });
 });
 
 describe('runMorningBrief', () => {
-  it("applies the planner's objectives and ranking, posts a parent with threaded sections, stores the brief and records the ledger", async () => {
+  it("applies the planner's objectives and ranking, posts a parent with threaded sections, stores the validated brief and records the ledger", async () => {
     const runner = new ScriptedRunner([
       [
         textMessage(
           JSON.stringify({
-            meetings: [
-              { eventId: 'evt-1', objectives: ['Agree the start date.', 'Close the SOW.'] },
-            ],
+            meetings: [{ id: 'evt-1', objectives: ['Agree the start date.', 'Close the SOW.'] }],
             tasks: [
-              { id: 'notion:page-1', rank: 1, reason: 'Ann is waiting on it and you meet at ten.' },
+              {
+                taskId: 'notion:page-1',
+                rank: 1,
+                reason: 'Ann is waiting on it and you meet at ten.',
+              },
             ],
             holdsProposed: 0,
           }),
@@ -222,14 +252,12 @@ describe('runMorningBrief', () => {
     );
     const stored = (await db.select().from(briefs).where(eq(briefs.id, result.briefId)))[0];
     expect(stored?.kind).toBe('morning_brief');
-    const content = stored?.content as {
-      meetings: { objectives: string[] }[];
-      tasks: { reason: string | null }[];
-      slackThreads: Record<string, string>;
-    };
-    expect(content.meetings[0]?.objectives).toEqual(['Agree the start date.', 'Close the SOW.']);
-    expect(content.tasks[0]?.reason).toContain('Ann is waiting');
-    expect(content.slackThreads['evt-1']).toBeDefined();
+    const parsed = MorningBriefContentSchema.parse(stored?.content);
+    const extras = stored?.content as { slackThreads: Record<string, string>; slackTs: string };
+    expect(parsed.meetings[0]?.objectives).toEqual(['Agree the start date.', 'Close the SOW.']);
+    expect(parsed.tasks.items[0]?.reason).toContain('Ann is waiting');
+    expect(extras.slackThreads['evt-1']).toBeDefined();
+    expect(extras.slackTs).toBe(result.slackTs);
     expect(stored?.markdown).toContain('# Morning brief, 2026-09-22');
     const parent = posts.find((p) => p.ts === result.slackTs);
     expect(parent?.text).toContain('morning brief, 2026-09-22');
@@ -241,18 +269,25 @@ describe('runMorningBrief', () => {
     );
   });
 
-  it('ignores planner ids that are not in the brief', () => {
+  it('ignores planner ids that are not in the brief and drops lines that fail the voice checks', () => {
     const brief = {
-      meetings: [{ eventId: 'evt-1', objectives: [] }],
-      tasks: [{ id: 'a', reason: null }],
+      meetings: [
+        { id: 'evt-1', objectives: [] },
+        { id: 'evt-2', objectives: [] },
+      ],
+      tasks: { items: [{ taskId: 'a', reason: '' }], total: 1, duplicatesMerged: 0 },
     } as never;
     const out = applyPlan(brief, {
-      meetings: [{ eventId: 'ghost', objectives: ['x'] }],
-      tasks: [{ id: 'ghost', rank: 1, reason: 'no' }],
+      meetings: [
+        { id: 'ghost', objectives: ['x'] },
+        { id: 'evt-2', objectives: ['Fine.', 'Not only this but also that.'] },
+      ],
+      tasks: [{ taskId: 'ghost', rank: 1, reason: 'no' }],
       holdsProposed: 0,
     });
     expect(out.meetings[0]?.objectives).toEqual([]);
-    expect(out.tasks).toHaveLength(1);
+    expect(out.meetings[1]?.objectives).toEqual(['Fine.']);
+    expect(out.tasks.items).toHaveLength(1);
   });
 });
 
@@ -260,11 +295,11 @@ describe('runAfternoonBoard and runMeetingPrep', () => {
   it("reports what is pending and tomorrow's first meeting, and writes one prep under the brief thread within the lead time", async () => {
     const board = await runAfternoonBoard(deps({ now: () => '2026-09-22T15:00:00.000Z' }));
     const stored = (await db.select().from(briefs).where(eq(briefs.id, board.briefId)))[0];
-    const content = stored?.content as {
-      tomorrowFirstMeeting: { subject: string; prepExists: boolean } | null;
-    };
-    expect(content.tomorrowFirstMeeting?.subject).toBe('Tomorrow planning');
+    const content = AfternoonBoardContentSchema.parse(stored?.content);
+    expect(content.tomorrowFirstMeeting?.title).toBe('Tomorrow planning');
+    expect(content.tomorrowFirstMeeting?.audience).toBe('internal');
     expect(content.tomorrowFirstMeeting?.prepExists).toBe(false);
+    expect(content.moved.proposalsDecided).toEqual({ approved: 0, edited: 0, rejected: 0 });
 
     // 09:35 BST, 25 minutes before the external kick-off.
     const preps = await runMeetingPrep(deps({ now: () => '2026-09-22T08:35:00.000Z' }));

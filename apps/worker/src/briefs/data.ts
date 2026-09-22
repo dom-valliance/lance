@@ -1,6 +1,7 @@
 import {
   agentRuns,
   alerts,
+  briefs,
   commitments,
   cursors,
   observations,
@@ -9,23 +10,23 @@ import {
 } from '@lance/db';
 import type { OntologyRepository } from '@lance/ontology';
 import { organisationDomain } from '@lance/ontology';
-import type { Config, ProvenanceRef } from '@lance/shared';
+import type {
+  AfternoonBoardContent,
+  Config,
+  CounterpartyClass,
+  MorningBriefContent,
+  ProvenanceRef,
+} from '@lance/shared';
 import { and, desc, eq, gte, inArray, lt, or, sql } from 'drizzle-orm';
 import { addDays, instantOf, localDate, startOfLocalDay } from './local.js';
-import type {
-  AfternoonBoard,
-  CommitmentLine,
-  MeetingSection,
-  MorningBrief,
-  TaskLine,
-} from './schema.js';
 
 /**
- * Deterministic assembly of everything a brief says (spec 10.1, 10.2):
- * the calendar, the people in it resolved through the ontology, what has
- * passed with them lately, open commitments, tasks, overnight activity
- * and agent health. The Planner reads this and adds judgement; it never
- * adds a fact.
+ * Deterministic assembly of everything a brief says (spec 10.1, 10.2), in
+ * the shapes `packages/shared/src/briefs.ts` fixes for the api and the
+ * Today page: the calendar, the people in it resolved through the
+ * ontology, what has passed with them lately, open commitments, tasks,
+ * overnight activity and agent health. The Planner reads this and adds
+ * judgement; it never adds a fact.
  */
 
 export interface BriefDataDeps {
@@ -34,6 +35,17 @@ export interface BriefDataDeps {
   config: Pick<Config, 'timeZone' | 'dom' | 'briefs' | 'cost'>;
   now: () => string;
 }
+
+/** The working day the free block calculation looks at, local hours. */
+const WORKING_DAY = { startHour: 8, endHour: 18 } as const;
+const WORKING_HOURS = WORKING_DAY.endHour - WORKING_DAY.startHour;
+/** Spec 9.1: prep expands 30 minutes before an external meeting, 10 before an internal one. */
+export const PREP_LEAD_MINUTES = { external: 30, internal: 10 } as const;
+const MAX_INTERACTIONS_PER_PERSON = 3;
+
+type Meeting = MorningBriefContent['meetings'][number];
+type Attendee = Meeting['attendees'][number];
+type Interaction = Attendee['interactions'][number];
 
 interface LatestObservation {
   id: string;
@@ -44,58 +56,62 @@ interface LatestObservation {
   payload: Record<string, unknown>;
 }
 
+function str(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+function validUrl(value: unknown): string | null {
+  const text = str(value);
+  if (text === null) return null;
+  try {
+    return new URL(text).toString();
+  } catch {
+    return null;
+  }
+}
+
 function provenanceOf(row: LatestObservation): ProvenanceRef {
-  const url = row.payload['url'];
+  const url = validUrl(row.payload['url']);
   return {
     system: row.sourceSystem as ProvenanceRef['system'],
     recordId: row.sourceRecordId,
     hash: row.sourceRecordHash,
     observedAt: row.ts.toISOString(),
-    ...(typeof url === 'string' ? { url } : {}),
+    ...(url === null ? {} : { url }),
   };
 }
 
+const OBSERVATION_COLUMNS = {
+  id: observations.id,
+  ts: observations.ts,
+  sourceSystem: observations.sourceSystem,
+  sourceRecordId: observations.sourceRecordId,
+  sourceRecordHash: observations.sourceRecordHash,
+  payload: observations.payload,
+};
+
 /** The newest observation per source record for one watcher. */
-async function latestByWatcher(
-  db: Db,
-  watcher: string,
-  since?: Date,
-): Promise<LatestObservation[]> {
+async function latestByWatcher(db: Db, watcher: string): Promise<LatestObservation[]> {
   const rows = await db
-    .selectDistinctOn([observations.sourceRecordId], {
-      id: observations.id,
-      ts: observations.ts,
-      sourceSystem: observations.sourceSystem,
-      sourceRecordId: observations.sourceRecordId,
-      sourceRecordHash: observations.sourceRecordHash,
-      payload: observations.payload,
-    })
+    .selectDistinctOn([observations.sourceRecordId], OBSERVATION_COLUMNS)
     .from(observations)
-    .where(
-      and(
-        sql`${observations.payload} ->> 'watcher' = ${watcher}`,
-        since === undefined ? undefined : gte(observations.ts, since),
-      ),
-    )
+    .where(sql`${observations.payload} ->> 'watcher' = ${watcher}`)
     .orderBy(observations.sourceRecordId, desc(observations.ts), desc(observations.id));
   return rows.map((row) => ({ ...row, payload: (row.payload ?? {}) as Record<string, unknown> }));
 }
 
-interface CalendarEvent {
+export interface CalendarEvent {
   row: LatestObservation;
   id: string;
   subject: string;
   start: Date;
-  end: Date | null;
+  end: Date;
+  location: string | null;
   attendees: { name: string | null; address: string | null; responseStatus: string | null }[];
   organiser: { name: string | null; address: string | null } | null;
 }
 
-function str(value: unknown): string | null {
-  return typeof value === 'string' && value !== '' ? value : null;
-}
-
-/** Calendar events starting within [from, to), newest observation each, not cancelled or removed. */
+/** Calendar events starting within [from, to), newest observation each, not cancelled, removed or all day. */
 export async function calendarEvents(
   deps: BriefDataDeps,
   from: Date,
@@ -111,10 +127,11 @@ export async function calendarEvents(
       deps.config.timeZone,
     );
     if (start === null || start < from || start >= to) continue;
-    const end = instantOf(
-      p['end'] as { dateTime: string; timeZone: string | null } | null,
-      deps.config.timeZone,
-    );
+    const end =
+      instantOf(
+        p['end'] as { dateTime: string; timeZone: string | null } | null,
+        deps.config.timeZone,
+      ) ?? new Date(start.getTime() + 30 * 60 * 1000);
     const attendees = Array.isArray(p['attendees'])
       ? (p['attendees'] as Record<string, unknown>[]).map((a) => ({
           name: str(a['name']),
@@ -122,13 +139,14 @@ export async function calendarEvents(
           responseStatus: str(a['responseStatus']),
         }))
       : [];
-    const organiser = p['organizer'] as { name?: unknown; address?: unknown } | null;
+    const organiser = p['organizer'] as { name?: unknown; address?: unknown } | null | undefined;
     events.push({
       row,
       id: row.sourceRecordId,
       subject: str(p['subject']) ?? '(no subject)',
       start,
       end,
+      location: str(p['location']),
       attendees,
       organiser:
         organiser === null || organiser === undefined
@@ -139,92 +157,100 @@ export async function calendarEvents(
   return events.sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
-function homeDomain(email: string): string | null {
+function domainOf(email: string): string | null {
   const at = email.lastIndexOf('@');
   return at < 0 ? null : email.slice(at + 1).toLowerCase();
 }
 
-/** Mail and meetings with an address, newest first, capped. */
-async function interactionsWith(
-  deps: BriefDataDeps,
-  email: string,
-  limit: number,
-): Promise<MeetingSection['lastInteractions']> {
+/** Mail and meetings with an address, newest first, one per record. */
+async function interactionsWith(deps: BriefDataDeps, email: string): Promise<Interaction[]> {
   const needle = email.toLowerCase();
   const rows = await deps.db
-    .select({
-      id: observations.id,
-      ts: observations.ts,
-      sourceSystem: observations.sourceSystem,
-      sourceRecordId: observations.sourceRecordId,
-      sourceRecordHash: observations.sourceRecordHash,
-      payload: observations.payload,
-    })
+    .select(OBSERVATION_COLUMNS)
     .from(observations)
     .where(
       and(
         inArray(observations.sourceSystem, ['graph', 'jamie']),
-        sql`lower(${observations.payload}::text) like ${`%${needle}%`}`,
         sql`${observations.payload} ->> 'watcher' in ('graph-mail', 'jamie')`,
+        sql`lower(${observations.payload}::text) like ${`%${needle}%`}`,
       ),
     )
     .orderBy(desc(observations.ts))
-    .limit(limit * 3);
+    .limit(MAX_INTERACTIONS_PER_PERSON * 3);
   const seen = new Set<string>();
-  const out: MeetingSection['lastInteractions'] = [];
+  const out: Interaction[] = [];
   for (const row of rows) {
     const p = (row.payload ?? {}) as Record<string, unknown>;
     if (seen.has(row.sourceRecordId)) continue;
     seen.add(row.sourceRecordId);
-    const kind = row.sourceSystem === 'jamie' ? 'meeting' : 'mail';
+    const kind: Interaction['kind'] =
+      row.sourceSystem === 'jamie'
+        ? p['transcriptReady'] === true
+          ? 'transcript'
+          : 'meeting'
+        : 'mail';
+    // Only the watcher's capped summary or the subject: never a body.
     const summary = str(p['summary']) ?? str(p['subject']) ?? str(p['title']) ?? kind;
     out.push({
       kind,
       at: row.ts.toISOString(),
       summary,
-      provenance: [provenanceOf({ ...row, payload: p })],
+      provenance: provenanceOf({ ...row, payload: p }),
     });
-    if (out.length >= limit) break;
+    if (out.length >= MAX_INTERACTIONS_PER_PERSON) break;
   }
   return out;
 }
 
-async function commitmentLines(
+async function personName(deps: BriefDataDeps, personId: string): Promise<string> {
+  const node = await deps.ontology.getNode(personId);
+  const name = node?.properties['display_name'];
+  return typeof name === 'string' ? name : personId;
+}
+
+async function organisationOfPerson(
   deps: BriefDataDeps,
-  rows: (typeof commitments.$inferSelect)[],
-): Promise<CommitmentLine[]> {
-  const nowMs = new Date(deps.now()).getTime();
-  const out: CommitmentLine[] = [];
-  for (const row of rows) {
-    const otherId = row.direction === 'outbound' ? row.counterpartyPersonId : row.ownerPersonId;
-    const node = await deps.ontology.getNode(otherId);
-    const counterparty =
-      typeof node?.properties['display_name'] === 'string'
-        ? node.properties['display_name']
-        : otherId;
-    const daysOverdue =
-      row.dueAt === null || row.dueAt.getTime() > nowMs
-        ? null
-        : Math.floor((nowMs - row.dueAt.getTime()) / (24 * 3600 * 1000));
-    out.push({
-      id: row.id,
-      direction: row.direction,
-      description: row.description,
-      counterparty,
-      dueAt: row.dueAt === null ? null : row.dueAt.toISOString(),
-      daysOverdue,
-      provenance: (Array.isArray(row.sourceRefs) ? row.sourceRefs : []) as ProvenanceRef[],
-    });
+  personId: string | null,
+  email: string | null,
+): Promise<{ name: string | null; type: CounterpartyClass | null }> {
+  if (personId !== null) {
+    const org = (await deps.ontology.neighbours(personId, 'WORKS_AT'))[0]?.node;
+    if (org !== undefined) {
+      const type = org.properties['type'];
+      return {
+        name: typeof org.properties['name'] === 'string' ? org.properties['name'] : null,
+        type: isCounterpartyClass(type) ? type : null,
+      };
+    }
   }
-  return out;
+  const domain = email === null ? null : organisationDomain(email);
+  if (domain === null) return { name: null, type: null };
+  const org = await deps.ontology.findOrganisationByDomain(domain);
+  if (org === null) return { name: domain, type: null };
+  const type = org.properties['type'];
+  return {
+    name: typeof org.properties['name'] === 'string' ? org.properties['name'] : domain,
+    type: isCounterpartyClass(type) ? type : null,
+  };
 }
 
-async function meetingSection(deps: BriefDataDeps, event: CalendarEvent): Promise<MeetingSection> {
-  const home = homeDomain(deps.config.dom.email);
-  const attendees: MeetingSection['attendees'] = [];
-  const unknown: string[] = [];
+function isCounterpartyClass(value: unknown): value is CounterpartyClass {
+  return (
+    value === 'client' ||
+    value === 'prospect' ||
+    value === 'partner' ||
+    value === 'vendor' ||
+    value === 'internal' ||
+    value === 'unknown'
+  );
+}
+
+async function meetingOf(deps: BriefDataDeps, event: CalendarEvent): Promise<Meeting> {
+  const home = domainOf(deps.config.dom.email);
+  const attendees: Attendee[] = [];
   const personIds: string[] = [];
-  let isExternal = false;
+  let external = false;
+  let counterpartyClass: CounterpartyClass = 'internal';
   const people = [
     ...event.attendees,
     ...(event.organiser === null ? [] : [{ ...event.organiser, responseStatus: null }]),
@@ -235,67 +261,60 @@ async function meetingSection(deps: BriefDataDeps, event: CalendarEvent): Promis
     if (email !== null && seen.has(email)) continue;
     if (email !== null) seen.add(email);
     if (email === deps.config.dom.email.toLowerCase()) continue;
-    const domain = email === null ? null : homeDomain(email);
-    if (domain !== null && domain !== home) isExternal = true;
+    const domain = email === null ? null : domainOf(email);
+    const isExternal = domain !== null && domain !== home;
+    if (isExternal) external = true;
     const node = email === null ? null : await deps.ontology.findPersonByEmail(email);
-    let organisation: string | null = null;
-    if (node !== null) {
-      personIds.push(node.id);
-      const org = (await deps.ontology.neighbours(node.id, 'WORKS_AT'))[0]?.node;
-      organisation = typeof org?.properties['name'] === 'string' ? org.properties['name'] : null;
+    if (node !== null) personIds.push(node.id);
+    const organisation = await organisationOfPerson(deps, node?.id ?? null, email);
+    if (isExternal && organisation.type !== null && organisation.type !== 'internal') {
+      counterpartyClass = organisation.type;
+    } else if (isExternal && counterpartyClass === 'internal') {
+      counterpartyClass = 'unknown';
     }
-    if (organisation === null && email !== null) {
-      const orgDomain = organisationDomain(email);
-      const org =
-        orgDomain === null ? null : await deps.ontology.findOrganisationByDomain(orgDomain);
-      organisation =
-        typeof org?.properties['name'] === 'string' ? org.properties['name'] : orgDomain;
-    }
-    const name = person.name ?? email ?? 'unknown';
-    if (node === null && domain !== home) unknown.push(name);
-    attendees.push({ name, email, organisation, known: node !== null });
+    const role = node?.properties['role'];
+    attendees.push({
+      personId: node?.id ?? null,
+      name: person.name ?? email ?? 'unknown',
+      role: typeof role === 'string' ? role : null,
+      organisation: organisation.name,
+      email,
+      unknown: node === null && isExternal,
+      interactions: email === null ? [] : await interactionsWith(deps, email),
+    });
   }
 
-  const lastInteractions: MeetingSection['lastInteractions'] = [];
-  for (const attendee of attendees.slice(0, 6)) {
-    if (attendee.email === null) continue;
-    lastInteractions.push(...(await interactionsWith(deps, attendee.email, 3)));
-  }
-  lastInteractions.sort((a, b) => b.at.localeCompare(a.at));
-
-  const openCommitments =
+  const openRows =
     personIds.length === 0
       ? []
-      : await commitmentLines(
-          deps,
-          await deps.db
-            .select()
-            .from(commitments)
-            .where(
-              and(
-                inArray(commitments.status, ['open', 'chased']),
-                or(
-                  inArray(commitments.ownerPersonId, personIds),
-                  inArray(commitments.counterpartyPersonId, personIds),
-                ),
+      : await deps.db
+          .select()
+          .from(commitments)
+          .where(
+            and(
+              inArray(commitments.status, ['open', 'chased']),
+              or(
+                inArray(commitments.ownerPersonId, personIds),
+                inArray(commitments.counterpartyPersonId, personIds),
               ),
             ),
-        );
+          );
+  const nowMs = new Date(deps.now()).getTime();
+  const meetingCommitments: Meeting['commitments'] = openRows.map((row) => ({
+    commitmentId: row.id,
+    direction: row.direction,
+    description: row.description,
+    dueAt: row.dueAt === null ? null : row.dueAt.toISOString(),
+    overdueDays: overdueDays(row.dueAt, nowMs),
+  }));
 
   // Transcripts in the last 30 days with any of these people.
-  const documents: MeetingSection['documents'] = [];
+  const documents: Meeting['documents'] = [];
   const since = addDays(new Date(deps.now()), -30);
   for (const attendee of attendees.slice(0, 6)) {
     if (attendee.email === null) continue;
     const rows = await deps.db
-      .select({
-        id: observations.id,
-        ts: observations.ts,
-        sourceSystem: observations.sourceSystem,
-        sourceRecordId: observations.sourceRecordId,
-        sourceRecordHash: observations.sourceRecordHash,
-        payload: observations.payload,
-      })
+      .select(OBSERVATION_COLUMNS)
       .from(observations)
       .where(
         and(
@@ -310,82 +329,104 @@ async function meetingSection(deps: BriefDataDeps, event: CalendarEvent): Promis
       .limit(3);
     for (const row of rows) {
       const p = (row.payload ?? {}) as Record<string, unknown>;
-      if (documents.some((d) => d.provenance[0]?.recordId === row.sourceRecordId)) continue;
+      if (documents.some((d) => d.url !== null && d.url === validUrl(p['url']))) continue;
       documents.push({
         title: str(p['title']) ?? 'Meeting transcript',
-        url: str(p['url']),
-        provenance: [provenanceOf({ ...row, payload: p })],
+        source: 'jamie',
+        editedAt: row.ts.toISOString(),
+        url: validUrl(p['url']),
       });
     }
   }
 
+  const lead = external ? PREP_LEAD_MINUTES.external : PREP_LEAD_MINUTES.internal;
   return {
-    eventId: event.id,
-    subject: event.subject,
+    id: event.id,
+    title: event.subject,
     start: event.start.toISOString(),
-    end: event.end === null ? null : event.end.toISOString(),
-    isExternal,
+    end: event.end.toISOString(),
+    location: event.location,
+    audience: external ? 'external' : 'internal',
+    counterpartyClass,
+    provenance: provenanceOf(event.row),
+    prepExpandsAt: new Date(event.start.getTime() - lead * 60 * 1000).toISOString(),
     attendees,
-    unknownAttendees: unknown,
-    lastInteractions: lastInteractions.slice(0, 9),
-    openCommitments,
+    commitments: meetingCommitments,
     documents,
     objectives: [],
-    provenance: [provenanceOf(event.row)],
   };
 }
 
-function dayShape(
+function overdueDays(dueAt: Date | null, nowMs: number): number | null {
+  if (dueAt === null || dueAt.getTime() > nowMs) return null;
+  return Math.floor((nowMs - dueAt.getTime()) / 86_400_000);
+}
+
+interface FreeBlock {
+  start: Date;
+  end: Date;
+}
+
+/** Spec 10.1 item 1, over the working day. */
+export function dayShapeOf(
   events: CalendarEvent[],
   dayStart: Date,
-  dayEnd: Date,
   minFreeHours: number,
-): MorningBrief['dayShape'] {
-  if (events.length === 0) {
-    return {
-      firstMeeting: null,
-      lastMeeting: null,
-      meetingHours: 0,
-      longestFreeBlockHours: 24,
-      freeTimeShort: false,
-    };
-  }
+  calendarObservedAt: string,
+): { shape: Omit<MorningBriefContent['dayShape'], 'proposedHolds'>; freeTimeShort: boolean } {
+  const workStart = new Date(dayStart.getTime() + WORKING_DAY.startHour * 3600 * 1000);
+  const workEnd = new Date(dayStart.getTime() + WORKING_DAY.endHour * 3600 * 1000);
   let meetingMs = 0;
-  let longestFree = 0;
-  // Working day 08:00 to 18:00 local for the free block calculation.
-  const workStart = new Date(dayStart.getTime() + 8 * 3600 * 1000);
-  const workEnd = new Date(dayStart.getTime() + 18 * 3600 * 1000);
+  const free: FreeBlock[] = [];
   let cursor = workStart;
   for (const event of events) {
-    const end = event.end ?? new Date(event.start.getTime() + 30 * 60 * 1000);
-    meetingMs += Math.max(0, end.getTime() - event.start.getTime());
-    if (event.start > cursor)
-      longestFree = Math.max(longestFree, event.start.getTime() - cursor.getTime());
-    if (end > cursor) cursor = end;
+    meetingMs += Math.max(0, event.end.getTime() - event.start.getTime());
+    if (event.start > cursor) free.push({ start: cursor, end: event.start });
+    if (event.end > cursor) cursor = event.end;
   }
-  if (workEnd > cursor) longestFree = Math.max(longestFree, workEnd.getTime() - cursor.getTime());
-  const longestFreeHours = Math.round((longestFree / 3600000) * 10) / 10;
+  if (workEnd > cursor) free.push({ start: cursor, end: workEnd });
+  const lengthOf = (b: FreeBlock): number => b.end.getTime() - b.start.getTime();
+  const block = free.reduce<FreeBlock | null>(
+    (best, b) => (best === null || lengthOf(b) > lengthOf(best) ? b : best),
+    null,
+  );
+  const hours =
+    block === null
+      ? 0
+      : Math.round(((block.end.getTime() - block.start.getTime()) / 3_600_000) * 10) / 10;
+  const first = events[0];
   const last = events[events.length - 1];
+  const freeTimeShort = events.length > 0 && hours < minFreeHours;
   return {
-    firstMeeting: events[0]?.start.toISOString() ?? null,
-    lastMeeting: (last?.end ?? last?.start)?.toISOString() ?? null,
-    meetingHours: Math.round((meetingMs / 3600000) * 10) / 10,
-    longestFreeBlockHours: longestFreeHours,
-    freeTimeShort: longestFreeHours < minFreeHours && dayEnd > dayStart,
+    shape: {
+      firstMeeting:
+        first === undefined ? null : { start: first.start.toISOString(), title: first.subject },
+      lastMeeting:
+        last === undefined ? null : { start: last.start.toISOString(), title: last.subject },
+      meetingHours: Math.round((meetingMs / 3_600_000) * 10) / 10,
+      workingHours: WORKING_HOURS,
+      longestFreeBlock:
+        block === null
+          ? null
+          : { start: block.start.toISOString(), end: block.end.toISOString(), hours },
+      note: freeTimeShort
+        ? null
+        : events.length === 0
+          ? 'No meetings today, so no holds are needed.'
+          : `The longest free block is ${String(hours)} hours, above the ${String(minFreeHours)} hour minimum, so no hold is proposed.`,
+      calendarObservedAt,
+    },
+    freeTimeShort,
   };
 }
 
 /** Tasks due today or overdue across Notion and Jamie, newest observation per record, not done. */
-export async function tasksDue(deps: BriefDataDeps, today: string): Promise<TaskLine[]> {
+export async function tasksDue(
+  deps: BriefDataDeps,
+  today: string,
+): Promise<MorningBriefContent['tasks']> {
   const rows = await deps.db
-    .selectDistinctOn([observations.sourceRecordId], {
-      id: observations.id,
-      ts: observations.ts,
-      sourceSystem: observations.sourceSystem,
-      sourceRecordId: observations.sourceRecordId,
-      sourceRecordHash: observations.sourceRecordHash,
-      payload: observations.payload,
-    })
+    .selectDistinctOn([observations.sourceRecordId], OBSERVATION_COLUMNS)
     .from(observations)
     .where(
       and(
@@ -394,7 +435,8 @@ export async function tasksDue(deps: BriefDataDeps, today: string): Promise<Task
       ),
     )
     .orderBy(observations.sourceRecordId, desc(observations.ts), desc(observations.id));
-  const out: TaskLine[] = [];
+  const items: MorningBriefContent['tasks']['items'] = [];
+  const todayMs = new Date(`${today}T00:00:00.000Z`).getTime();
   for (const row of rows) {
     const p = (row.payload ?? {}) as Record<string, unknown>;
     const source = row.sourceSystem as 'notion' | 'jamie';
@@ -403,72 +445,123 @@ export async function tasksDue(deps: BriefDataDeps, today: string): Promise<Task
         ? p['completed'] === true
         : ['Done', 'Cancelled', 'Archived'].includes(str(p['status']) ?? '');
     if (done) continue;
-    const due = str(p['due']) ?? str(p['dueDate']) ?? null;
-    if (due === null || due.slice(0, 10) > today) continue;
-    out.push({
-      id: `${source}:${row.sourceRecordId}`,
-      source,
+    const due = (str(p['due']) ?? str(p['dueDate']))?.slice(0, 10) ?? null;
+    if (due === null || due > today) continue;
+    const dueMs = new Date(`${due}T00:00:00.000Z`).getTime();
+    items.push({
+      taskId: `${source}:${row.sourceRecordId}`,
       title: str(p['title']) ?? str(p['text']) ?? '(untitled)',
-      due: due.slice(0, 10),
-      overdue: due.slice(0, 10) < today,
-      url: str(p['url']),
-      reason: null,
-      provenance: [provenanceOf({ ...row, payload: p })],
+      source,
+      reason: '',
+      due,
+      overdueDays: due < today ? Math.floor((todayMs - dueMs) / 86_400_000) : null,
+      url: validUrl(p['url']),
     });
   }
-  return out.sort((a, b) => (a.due ?? '').localeCompare(b.due ?? ''));
+  items.sort((a, b) => (a.due ?? '').localeCompare(b.due ?? ''));
+  return { items, total: items.length, duplicatesMerged: 0 };
 }
 
-export async function assembleMorningBrief(deps: BriefDataDeps): Promise<MorningBrief> {
-  const now = new Date(deps.now());
-  const zone = deps.config.timeZone;
-  const dayStart = startOfLocalDay(now, zone);
-  const dayEnd = addDays(dayStart, 1);
-  const today = localDate(now, zone);
-
-  const events = await calendarEvents(deps, dayStart, dayEnd);
-  const meetings: MeetingSection[] = [];
-  for (const event of events) meetings.push(await meetingSection(deps, event));
-
-  const tasks = await tasksDue(deps, today);
-
-  const waiting = await commitmentLines(
-    deps,
-    await deps.db
-      .select()
-      .from(commitments)
+async function waitingFor(
+  deps: BriefDataDeps,
+  now: Date,
+): Promise<MorningBriefContent['waitingFor']> {
+  const rows = await deps.db
+    .select()
+    .from(commitments)
+    .where(
+      and(
+        eq(commitments.direction, 'inbound'),
+        inArray(commitments.status, ['open', 'chased']),
+        sql`${commitments.nextChaseAt} <= ${now}`,
+      ),
+    );
+  const out: MorningBriefContent['waitingFor'] = [];
+  for (const row of rows) {
+    const refs = (Array.isArray(row.sourceRefs) ? row.sourceRefs : []) as ProvenanceRef[];
+    const provenance = refs[0];
+    if (provenance === undefined) continue; // non-negotiable 5: nothing without provenance
+    const organisation = await organisationOfPerson(deps, row.ownerPersonId, null);
+    const chase = await deps.db
+      .select({ id: proposals.id })
+      .from(proposals)
       .where(
         and(
-          eq(commitments.direction, 'inbound'),
-          inArray(commitments.status, ['open', 'chased']),
-          sql`${commitments.nextChaseAt} <= ${now}`,
+          eq(proposals.actionClass, 'draft_email'),
+          inArray(proposals.status, ['pending', 'held', 'approved', 'edited']),
+          sql`${proposals.payload} ->> 'commitmentId' = ${row.id}`,
         ),
-      ),
-  );
+      )
+      .limit(1);
+    out.push({
+      commitmentId: row.id,
+      description: row.description,
+      counterparty: await personName(deps, row.ownerPersonId),
+      organisation: organisation.name,
+      dueAt: row.dueAt === null ? null : row.dueAt.toISOString(),
+      overdueDays: overdueDays(row.dueAt, now.getTime()),
+      chaseCount: row.chaseCount,
+      chaseDueAt: row.nextChaseAt === null ? null : row.nextChaseAt.toISOString(),
+      provenance,
+      pendingChaseProposalId: chase[0]?.id ?? null,
+    });
+  }
+  return out;
+}
 
-  const since = new Date(dayStart.getTime() - 5 * 3600 * 1000); // 19:00 the day before
-  const overnightAlerts = await deps.db
+async function overnight(
+  deps: BriefDataDeps,
+  from: Date,
+  to: Date,
+): Promise<MorningBriefContent['overnight']> {
+  const alertRows = await deps.db
     .select()
     .from(alerts)
-    .where(and(gte(alerts.lastSeen, since), inArray(alerts.status, ['open', 'acked'])))
+    .where(and(gte(alerts.lastSeen, from), inArray(alerts.status, ['open', 'acked'])))
     .orderBy(desc(alerts.lastSeen));
   const pending = await deps.db
     .select()
     .from(proposals)
     .where(eq(proposals.status, 'pending'))
     .orderBy(desc(proposals.createdAt));
-  const executedAuto = await deps.db
+  const executed = await deps.db
     .select()
     .from(proposals)
     .where(
       and(
         eq(proposals.status, 'executed'),
         eq(proposals.decidedBy, 'system:policy'),
-        gte(proposals.updatedAt, since),
+        gte(proposals.updatedAt, from),
       ),
     )
     .orderBy(desc(proposals.updatedAt));
+  return {
+    from: from.toISOString(),
+    to: to.toISOString(),
+    alerts: alertRows.map((a) => ({
+      alertId: a.id,
+      severity: a.severity,
+      title: a.title,
+      at: a.lastSeen.toISOString(),
+    })),
+    awaiting: {
+      count: pending.length,
+      top: pending.slice(0, 3).map((p) => ({
+        proposalId: p.id,
+        preview: p.preview,
+        actionClass: p.actionClass,
+        expiresAt: p.expiresAt.toISOString(),
+      })),
+    },
+    executed: executed.map((p) => ({ summary: p.preview, correlationId: p.correlationId })),
+  };
+}
 
+async function agentHealth(
+  deps: BriefDataDeps,
+  now: Date,
+  dayStart: Date,
+): Promise<MorningBriefContent['agentHealth']> {
   const cursorRows = await deps.db.select().from(cursors);
   const byWatcher = new Map<string, Date>();
   for (const row of cursorRows) {
@@ -476,55 +569,97 @@ export async function assembleMorningBrief(deps: BriefDataDeps): Promise<Morning
     const prev = byWatcher.get(row.watcher);
     if (prev === undefined || row.updatedAt > prev) byWatcher.set(row.watcher, row.updatedAt);
   }
-  const watchers = [...byWatcher.entries()].map(([name, at]) => ({
-    name,
-    ageMinutes: Math.round((now.getTime() - at.getTime()) / 60000),
-  }));
-  const yesterdayStart = addDays(dayStart, -1);
-  const cost = await deps.db
-    .select({ total: sql<string>`coalesce(sum(${agentRuns.estimatedCostUsd}), 0)::text` })
-    .from(agentRuns)
-    .where(and(gte(agentRuns.startedAt, yesterdayStart), lt(agentRuns.startedAt, dayStart)));
-  const costYesterdayGbp =
-    Math.round(Number(cost[0]?.total ?? '0') * deps.config.cost.usdToGbp * 100) / 100;
-  const stale = watchers
-    .filter((w) => w.ageMinutes !== null && w.ageMinutes > 120)
-    .map((w) => w.name);
-  const line =
-    `${String(watchers.length)} watchers` +
-    (stale.length === 0 ? ' current' : `, stale: ${stale.join(', ')}`) +
-    `; yesterday cost GBP ${costYesterdayGbp.toFixed(2)}.`;
-
+  const openBreakers = await deps.db
+    .select({ dedupeKey: alerts.dedupeKey })
+    .from(alerts)
+    .where(and(eq(alerts.kind, 'breaker_open'), eq(alerts.status, 'open')));
+  const brokenConnectors = new Set(
+    openBreakers.map((row) => row.dedupeKey.replace(/^breaker:/, '')),
+  );
+  const watchers = [...byWatcher.entries()].map(([name, at]) => {
+    const ageMinutes = Math.max(0, Math.round((now.getTime() - at.getTime()) / 60000));
+    const connector = name.startsWith('graph') ? 'graph' : name;
+    const state: MorningBriefContent['agentHealth']['watchers'][number]['state'] =
+      brokenConnectors.has(connector) ? 'breaker_open' : ageMinutes > 120 ? 'stale' : 'healthy';
+    return { name, ageMinutes, state };
+  });
+  const sumUsd = async (from: Date, to: Date): Promise<number> => {
+    const rows = await deps.db
+      .select({ total: sql<string>`coalesce(sum(${agentRuns.estimatedCostUsd}), 0)::text` })
+      .from(agentRuns)
+      .where(and(gte(agentRuns.startedAt, from), lt(agentRuns.startedAt, to)));
+    return Number(rows[0]?.total ?? '0');
+  };
+  const gbp = (usd: number): number => Math.round(usd * deps.config.cost.usdToGbp * 100) / 100;
   return {
-    date: today,
-    dayShape: dayShape(events, dayStart, dayEnd, deps.config.briefs.minFreeBlockHours),
-    meetings,
-    tasks,
-    waitingFor: waiting,
-    overnight: {
-      alerts: overnightAlerts.map((a) => ({
-        id: a.id,
-        severity: a.severity,
-        title: a.title,
-        provenance: (Array.isArray(a.provenance) ? a.provenance : []) as ProvenanceRef[],
-      })),
-      pendingProposals: {
-        count: pending.length,
-        top: pending.slice(0, 3).map((p) => ({
-          id: p.id,
-          preview: p.preview,
-          provenance: p.provenance as ProvenanceRef[],
-        })),
-      },
-      executedAuto: executedAuto.map((p) => ({
-        id: p.id,
-        preview: p.preview,
-        provenance: p.provenance as ProvenanceRef[],
-      })),
+    watchers,
+    breakersOpen: openBreakers.length,
+    costYesterdayGbp: gbp(await sumUsd(addDays(dayStart, -1), dayStart)),
+    costTodayGbp: gbp(await sumUsd(dayStart, now)),
+    ceilingGbp: deps.config.cost.dailyCeilingGbp,
+  };
+}
+
+function headlineOf(
+  meetings: Meeting[],
+  tasks: MorningBriefContent['tasks'],
+  waiting: number,
+): string {
+  const external = meetings.filter((m) => m.audience === 'external').length;
+  const overdue = tasks.items.filter((t) => t.overdueDays !== null).length;
+  const parts = [
+    meetings.length === 0
+      ? 'No meetings.'
+      : `${String(meetings.length)} meeting${meetings.length === 1 ? '' : 's'}${external === 0 ? '' : `, ${String(external)} external`}.`,
+    overdue === 0 ? null : `${String(overdue)} task${overdue === 1 ? '' : 's'} overdue.`,
+    waiting === 0 ? null : `${String(waiting)} waiting on others.`,
+  ];
+  return parts.filter((part): part is string => part !== null).join(' ');
+}
+
+export interface AssembledMorningBrief {
+  content: MorningBriefContent;
+  /** Whether the Planner should propose holds (spec 10.1 item 1). */
+  freeTimeShort: boolean;
+  events: CalendarEvent[];
+}
+
+export async function assembleMorningBrief(deps: BriefDataDeps): Promise<AssembledMorningBrief> {
+  const now = new Date(deps.now());
+  const zone = deps.config.timeZone;
+  const dayStart = startOfLocalDay(now, zone);
+  const dayEnd = addDays(dayStart, 1);
+  const today = localDate(now, zone);
+
+  const events = await calendarEvents(deps, dayStart, dayEnd);
+  const meetings: Meeting[] = [];
+  for (const event of events) meetings.push(await meetingOf(deps, event));
+  const calendarObservedAt = events.reduce<Date>(
+    (latest, event) => (event.row.ts > latest ? event.row.ts : latest),
+    new Date(0),
+  );
+  const { shape, freeTimeShort } = dayShapeOf(
+    events,
+    dayStart,
+    deps.config.briefs.minFreeBlockHours,
+    (calendarObservedAt.getTime() === 0 ? now : calendarObservedAt).toISOString(),
+  );
+  const tasks = await tasksDue(deps, today);
+  const waiting = await waitingFor(deps, now);
+  const from = new Date(dayStart.getTime() - 5 * 3600 * 1000); // 19:00 the day before
+  return {
+    content: {
+      date: today,
+      headline: headlineOf(meetings, tasks, waiting.length),
+      dayShape: { ...shape, proposedHolds: [] },
+      meetings,
+      tasks,
+      waitingFor: waiting,
+      overnight: await overnight(deps, from, now),
+      agentHealth: await agentHealth(deps, now, dayStart),
     },
-    agentHealth: { watchers, costYesterdayGbp, line },
-    holdProposalIds: [],
-    slackThreads: {},
+    freeTimeShort,
+    events,
   };
 }
 
@@ -532,20 +667,12 @@ export async function assembleMorningBrief(deps: BriefDataDeps): Promise<Morning
 export async function assembleAfternoonBoard(
   deps: BriefDataDeps,
   since: Date,
-): Promise<AfternoonBoard> {
+): Promise<AfternoonBoardContent> {
   const now = new Date(deps.now());
   const zone = deps.config.timeZone;
-  const today = localDate(now, zone);
 
   const taskRows = await deps.db
-    .select({
-      id: observations.id,
-      ts: observations.ts,
-      sourceSystem: observations.sourceSystem,
-      sourceRecordId: observations.sourceRecordId,
-      sourceRecordHash: observations.sourceRecordHash,
-      payload: observations.payload,
-    })
+    .select(OBSERVATION_COLUMNS)
     .from(observations)
     .where(
       and(
@@ -555,49 +682,40 @@ export async function assembleAfternoonBoard(
       ),
     )
     .orderBy(desc(observations.ts));
-  const tasksCompleted: TaskLine[] = [];
-  const seenTasks = new Set<string>();
+  const tasksCompleted: AfternoonBoardContent['moved']['tasksCompleted'] = [];
+  const seen = new Set<string>();
   for (const row of taskRows) {
     const p = (row.payload ?? {}) as Record<string, unknown>;
-    if (seenTasks.has(row.sourceRecordId)) continue;
-    seenTasks.add(row.sourceRecordId);
-    const source = row.sourceSystem as 'notion' | 'jamie';
+    if (seen.has(row.sourceRecordId)) continue;
+    seen.add(row.sourceRecordId);
     const done =
-      source === 'jamie'
+      row.sourceSystem === 'jamie'
         ? p['completed'] === true
         : ['Done', 'Cancelled', 'Archived'].includes(str(p['status']) ?? '');
     if (!done) continue;
     tasksCompleted.push({
-      id: `${source}:${row.sourceRecordId}`,
-      source,
+      taskId: `${row.sourceSystem}:${row.sourceRecordId}`,
       title: str(p['title']) ?? str(p['text']) ?? '(untitled)',
-      due: (str(p['due']) ?? '').slice(0, 10) || null,
-      overdue: false,
-      url: str(p['url']),
-      reason: null,
-      provenance: [provenanceOf({ ...row, payload: p })],
+      url: validUrl(p['url']),
     });
   }
 
   const decided = await deps.db
-    .select()
+    .select({ status: proposals.status })
     .from(proposals)
+    .where(gte(proposals.decidedAt, since));
+  const proposalsDecided = {
+    approved: decided.filter((p) => ['approved', 'executing', 'executed'].includes(p.status))
+      .length,
+    edited: decided.filter((p) => p.status === 'edited').length,
+    rejected: decided.filter((p) => p.status === 'rejected').length,
+  };
+  const closed = await deps.db
+    .select({ id: commitments.id, description: commitments.description })
+    .from(commitments)
     .where(
-      and(
-        gte(proposals.decidedAt, since),
-        inArray(proposals.status, ['approved', 'edited', 'rejected', 'executed', 'failed']),
-      ),
-    )
-    .orderBy(desc(proposals.decidedAt));
-  const closed = await commitmentLines(
-    deps,
-    await deps.db
-      .select()
-      .from(commitments)
-      .where(
-        and(gte(commitments.updatedAt, since), inArray(commitments.status, ['done', 'dropped'])),
-      ),
-  );
+      and(gte(commitments.updatedAt, since), inArray(commitments.status, ['done', 'dropped'])),
+    );
   const pending = await deps.db
     .select()
     .from(proposals)
@@ -606,36 +724,39 @@ export async function assembleAfternoonBoard(
 
   const tomorrowStart = addDays(startOfLocalDay(now, zone), 1);
   const tomorrow = (await calendarEvents(deps, tomorrowStart, addDays(tomorrowStart, 1)))[0];
-  let tomorrowFirstMeeting: AfternoonBoard['tomorrowFirstMeeting'] = null;
+  let tomorrowFirstMeeting: AfternoonBoardContent['tomorrowFirstMeeting'] = null;
   if (tomorrow !== undefined) {
+    const meeting = await meetingOf(deps, tomorrow);
     const prep = await deps.db
-      .select({ id: sql<string>`id` })
-      .from(sql`briefs`)
-      .where(sql`kind = 'meeting_prep' and content ->> 'eventId' = ${tomorrow.id}`)
+      .select({ id: briefs.id })
+      .from(briefs)
+      .where(
+        and(eq(briefs.kind, 'meeting_prep'), sql`${briefs.content} ->> 'eventId' = ${tomorrow.id}`),
+      )
       .limit(1);
     tomorrowFirstMeeting = {
-      subject: tomorrow.subject,
-      start: tomorrow.start.toISOString(),
+      title: meeting.title,
+      start: meeting.start,
+      audience: meeting.audience,
+      counterpartyClass: meeting.counterpartyClass,
+      attendees: meeting.attendees.map((a) => a.name),
+      provenance: meeting.provenance,
       prepExists: prep.length > 0,
-      provenance: [provenanceOf(tomorrow.row)],
+      prepBriefId: prep[0]?.id ?? null,
     };
   }
 
   return {
-    date: today,
     since: since.toISOString(),
-    tasksCompleted,
-    proposalsDecided: decided.map((p) => ({
-      id: p.id,
+    moved: {
+      tasksCompleted,
+      proposalsDecided,
+      commitmentsClosed: closed.map((c) => ({ commitmentId: c.id, description: c.description })),
+    },
+    pending: pending.map((p) => ({
+      proposalId: p.id,
       preview: p.preview,
-      status: p.status,
-      provenance: p.provenance as ProvenanceRef[],
-    })),
-    commitmentsClosed: closed,
-    pendingDecision: pending.map((p) => ({
-      id: p.id,
-      preview: p.preview,
-      provenance: p.provenance as ProvenanceRef[],
+      expiresAt: p.expiresAt.toISOString(),
     })),
     tomorrowFirstMeeting,
   };

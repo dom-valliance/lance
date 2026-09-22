@@ -3,17 +3,25 @@ import type { SlackSurface } from '@lance/connectors';
 import { briefs, proposals, type Db } from '@lance/db';
 import { LedgerWriter } from '@lance/ledger';
 import type { OntologyRepository } from '@lance/ontology';
-import { newUlid, nowIso, type Config } from '@lance/shared';
+import {
+  AfternoonBoardContentSchema,
+  MorningBriefContentSchema,
+  newUlid,
+  nowIso,
+  type Config,
+  type MorningBriefContent,
+} from '@lance/shared';
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import type { createProposalHandler } from '../executor/createProposal.js';
 import {
+  PREP_LEAD_MINUTES,
   assembleAfternoonBoard,
   assembleMorningBrief,
   calendarEvents,
   type BriefDataDeps,
 } from './data.js';
-import { addDays, startOfLocalDay } from './local.js';
+import { addDays, localDate, startOfLocalDay } from './local.js';
 import { PLANNER_ACTOR, applyPlan, planMorningBrief } from './planner.js';
 import {
   renderAfternoonBoardMarkdown,
@@ -21,21 +29,21 @@ import {
   renderMorningBriefMarkdown,
   renderMorningBriefSlack,
 } from './render.js';
-import type { MeetingSection, MorningBrief } from './schema.js';
+
+export { PREP_LEAD_MINUTES };
 
 /**
  * The briefs (spec 10): assembled by deterministic code, judged by the
- * Planner, stored in `briefs`, posted to Slack as a parent message with
- * one thread reply per section (spec 9.1), and recorded in the ledger.
- * Briefs and boards do not count against the push budget.
+ * Planner, validated against the shared content schemas, stored in
+ * `briefs`, posted to Slack as a parent message with one thread reply per
+ * section (spec 9.1), and recorded in the ledger. Briefs and boards do not
+ * count against the push budget.
  */
 
 export const BRIEFS_ACTOR = 'system:briefs';
 export const QUEUE_MORNING = 'brief-morning';
 export const QUEUE_BOARD = 'brief-afternoon';
 export const QUEUE_PREP = 'brief-meeting-prep';
-/** Spec 9.1: prep 30 minutes before an external meeting, 10 before an internal one. */
-export const PREP_LEAD_MINUTES = { external: 30, internal: 10 } as const;
 
 export interface BriefDeps {
   db: Db;
@@ -55,6 +63,14 @@ export interface BriefResult {
   slackTs: string | null;
 }
 
+/** Slack delivery details stored beside the validated content. */
+interface SlackDelivery {
+  slackTs: string | null;
+  slackThreads?: Record<string, string>;
+}
+
+type StoredMorningBrief = MorningBriefContent & SlackDelivery;
+
 function dataDeps(deps: BriefDeps, now: () => string): BriefDataDeps {
   return { db: deps.db, ontology: deps.ontology, config: deps.config, now };
 }
@@ -63,7 +79,7 @@ async function recordBrief(
   deps: BriefDeps,
   kind: 'morning_brief' | 'afternoon_board' | 'meeting_prep',
   correlationId: string,
-  content: Record<string, unknown>,
+  content: object,
   markdown: string,
   slackTs: string | null,
   now: () => string,
@@ -73,7 +89,7 @@ async function recordBrief(
     id: briefId,
     kind,
     correlationId,
-    content: { ...content, slackTs },
+    content,
     markdown,
     generatedAt: new Date(now()),
   });
@@ -91,7 +107,8 @@ async function recordBrief(
 export async function runMorningBrief(deps: BriefDeps): Promise<BriefResult> {
   const now = deps.now ?? nowIso;
   const correlationId = newUlid();
-  let brief = await assembleMorningBrief(dataDeps(deps, now));
+  const assembled = await assembleMorningBrief(dataDeps(deps, now));
+  let brief = assembled.content;
 
   if (deps.agent !== null) {
     const context = { correlationId, actor: PLANNER_ACTOR };
@@ -105,11 +122,12 @@ export async function runMorningBrief(deps: BriefDeps): Promise<BriefResult> {
         createProposal: (draft) => deps.createProposal(draft, context),
       },
       brief,
+      assembled.freeTimeShort,
       correlationId,
     );
     brief = applyPlan(brief, plan.output);
     const holds = await deps.db
-      .select({ id: proposals.id })
+      .select({ id: proposals.id, preview: proposals.preview })
       .from(proposals)
       .where(
         and(
@@ -117,18 +135,27 @@ export async function runMorningBrief(deps: BriefDeps): Promise<BriefResult> {
           eq(proposals.actionClass, 'create_calendar_hold'),
         ),
       );
-    brief = { ...brief, holdProposalIds: holds.map((row) => row.id) };
+    brief = {
+      ...brief,
+      dayShape: {
+        ...brief.dayShape,
+        proposedHolds: holds.map((row) => ({ proposalId: row.id, title: row.preview })),
+        note: holds.length === 0 ? brief.dayShape.note : null,
+      },
+    };
   }
 
-  let slackTs: string | null = null;
+  // The contract the api and the Today page read; a shape error fails the run rather than storing junk.
+  const content = MorningBriefContentSchema.parse(brief);
+
+  let delivery: SlackDelivery = { slackTs: null };
   if (deps.slack !== null) {
     const rendered = renderMorningBriefSlack(
-      brief,
+      content,
       deps.config.timeZone,
       deps.config.agentDisplayName,
     );
     const parent = await deps.slack.post({ text: rendered.parent }, { correlationId });
-    slackTs = parent.ts;
     const threads: Record<string, string> = {};
     for (const section of rendered.sections) {
       const reply = await deps.slack.post(
@@ -138,19 +165,20 @@ export async function runMorningBrief(deps: BriefDeps): Promise<BriefResult> {
       if (section.key.startsWith('meeting:'))
         threads[section.key.slice('meeting:'.length)] = reply.ts;
     }
-    brief = { ...brief, slackThreads: threads };
+    delivery = { slackTs: parent.ts, slackThreads: threads };
   }
 
+  const stored: StoredMorningBrief = { ...content, ...delivery };
   const briefId = await recordBrief(
     deps,
     'morning_brief',
     correlationId,
-    brief,
-    renderMorningBriefMarkdown(brief, deps.config.timeZone),
-    slackTs,
+    stored,
+    renderMorningBriefMarkdown(content, deps.config.timeZone),
+    delivery.slackTs,
     now,
   );
-  return { briefId, correlationId, slackTs };
+  return { briefId, correlationId, slackTs: delivery.slackTs };
 }
 
 /** The most recent morning brief for today's local date, if any. */
@@ -168,18 +196,38 @@ async function todaysMorningBrief(
   return rows[0] ?? null;
 }
 
+/** Stored content that fails the schema is treated as absent; the prep falls back to fresh assembly. */
+function parseStoredMorningBrief(content: unknown): StoredMorningBrief | null {
+  const parsed = MorningBriefContentSchema.safeParse(content);
+  if (!parsed.success) return null;
+  const extras = content as SlackDelivery;
+  return {
+    ...parsed.data,
+    slackTs: typeof extras.slackTs === 'string' ? extras.slackTs : null,
+    ...(extras.slackThreads === undefined ? {} : { slackThreads: extras.slackThreads }),
+  };
+}
+
 export async function runAfternoonBoard(deps: BriefDeps): Promise<BriefResult> {
   const now = deps.now ?? nowIso;
   const correlationId = newUlid();
   const morning = await todaysMorningBrief(deps, now);
   const since = morning?.generatedAt ?? startOfLocalDay(new Date(now()), deps.config.timeZone);
-  const board = await assembleAfternoonBoard(dataDeps(deps, now), since);
+  const board = AfternoonBoardContentSchema.parse(
+    await assembleAfternoonBoard(dataDeps(deps, now), since),
+  );
+  const date = localDate(new Date(now()), deps.config.timeZone);
 
   let slackTs: string | null = null;
   if (deps.slack !== null) {
     const posted = await deps.slack.post(
       {
-        text: renderAfternoonBoardSlack(board, deps.config.timeZone, deps.config.agentDisplayName),
+        text: renderAfternoonBoardSlack(
+          board,
+          deps.config.timeZone,
+          deps.config.agentDisplayName,
+          date,
+        ),
       },
       { correlationId },
     );
@@ -189,8 +237,8 @@ export async function runAfternoonBoard(deps: BriefDeps): Promise<BriefResult> {
     deps,
     'afternoon_board',
     correlationId,
-    board,
-    renderAfternoonBoardMarkdown(board, deps.config.timeZone),
+    { ...board, slackTs },
+    renderAfternoonBoardMarkdown(board, deps.config.timeZone, date),
     slackTs,
     now,
   );
@@ -199,10 +247,10 @@ export async function runAfternoonBoard(deps: BriefDeps): Promise<BriefResult> {
 
 /**
  * Meeting prep (spec 10.3): the meeting's section from the morning brief,
- * the last transcript with the same organisation cut to five lines, and
- * open tasks. Posted as a thread reply under the brief's entry for the
- * meeting when one exists, otherwise as its own message. One prep per
- * event, checked in `briefs`.
+ * the last transcript with the same people, and open commitments. Posted
+ * as a thread reply under the brief's entry for the meeting when one
+ * exists, otherwise as its own message. One prep per event, checked in
+ * `briefs`.
  */
 export async function runMeetingPrep(deps: BriefDeps): Promise<BriefResult[]> {
   const now = deps.now ?? nowIso;
@@ -210,15 +258,14 @@ export async function runMeetingPrep(deps: BriefDeps): Promise<BriefResult[]> {
   const horizon = new Date(at.getTime() + PREP_LEAD_MINUTES.external * 60 * 1000);
   const events = await calendarEvents(dataDeps(deps, now), at, addDays(at, 1));
   const morning = await todaysMorningBrief(deps, now);
-  const morningContent = (morning?.content ?? null) as
-    (MorningBrief & { slackTs?: string | null }) | null;
+  const morningContent = morning === null ? null : parseStoredMorningBrief(morning.content);
   const results: BriefResult[] = [];
 
   for (const event of events) {
     if (event.start > horizon) continue;
-    const fromBrief = morningContent?.meetings.find((m) => m.eventId === event.id) ?? null;
+    const fromBrief = morningContent?.meetings.find((m) => m.id === event.id) ?? null;
     const lead =
-      fromBrief?.isExternal === false ? PREP_LEAD_MINUTES.internal : PREP_LEAD_MINUTES.external;
+      fromBrief?.audience === 'internal' ? PREP_LEAD_MINUTES.internal : PREP_LEAD_MINUTES.external;
     if (event.start.getTime() - at.getTime() > lead * 60 * 1000) continue;
     const existing = await deps.db
       .select({ id: briefs.id })
@@ -229,39 +276,28 @@ export async function runMeetingPrep(deps: BriefDeps): Promise<BriefResult[]> {
       .limit(1);
     if (existing.length > 0) continue;
 
-    const section: MeetingSection = fromBrief ??
-      (await assembleMorningBrief({ ...dataDeps(deps, now) })).meetings.find(
-        (m) => m.eventId === event.id,
-      ) ?? {
-        eventId: event.id,
-        subject: event.subject,
-        start: event.start.toISOString(),
-        end: event.end?.toISOString() ?? null,
-        isExternal: false,
-        attendees: [],
-        unknownAttendees: [],
-        lastInteractions: [],
-        openCommitments: [],
-        documents: [],
-        objectives: [],
-        provenance: [],
-      };
+    const section =
+      fromBrief ??
+      (await assembleMorningBrief(dataDeps(deps, now))).content.meetings.find(
+        (m) => m.id === event.id,
+      ) ??
+      null;
+    if (section === null) continue;
     const transcript = section.documents[0] ?? null;
+    const unknown = section.attendees.filter((a) => a.unknown).map((a) => a.name);
     const lines = [
-      `*Prep: ${section.subject}*`,
+      `*Prep: ${section.title}*`,
       `Attendees: ${section.attendees.map((a) => `${a.name}${a.organisation === null ? '' : `, ${a.organisation}`}`).join('; ') || 'none'}`,
       ...(section.objectives.length === 0 ? [] : [`Objectives: ${section.objectives.join(' ')}`]),
-      ...(section.openCommitments.length === 0
+      ...(section.commitments.length === 0
         ? []
-        : [`Open: ${section.openCommitments.map((c) => c.description).join('; ')}`]),
+        : [`Open: ${section.commitments.map((c) => c.description).join('; ')}`]),
       ...(transcript === null
         ? []
         : [
             `Last transcript: ${transcript.url === null ? transcript.title : `<${transcript.url}|${transcript.title}>`}`,
           ]),
-      ...(section.unknownAttendees.length === 0
-        ? []
-        : [`Unknown attendees: ${section.unknownAttendees.join(', ')}`]),
+      ...(unknown.length === 0 ? [] : [`Unknown attendees: ${unknown.join(', ')}`]),
     ];
     const correlationId = newUlid();
     let slackTs: string | null = null;
@@ -271,7 +307,7 @@ export async function runMeetingPrep(deps: BriefDeps): Promise<BriefResult[]> {
       const posted = await deps.slack.post(
         {
           text: lines.join('\n'),
-          ...(threadTs === undefined ? {} : { threadTs: String(threadTs) }),
+          ...(threadTs === undefined ? {} : { threadTs }),
         },
         { correlationId },
       );
@@ -281,7 +317,7 @@ export async function runMeetingPrep(deps: BriefDeps): Promise<BriefResult[]> {
       deps,
       'meeting_prep',
       correlationId,
-      { eventId: event.id, section },
+      { eventId: event.id, section, slackTs },
       lines.join('\n').replace(/\*/g, ''),
       slackTs,
       now,
