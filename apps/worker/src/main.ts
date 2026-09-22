@@ -54,6 +54,7 @@ import { QUEUES, type ChaseJob } from './scheduler/queues.js';
 import { runTriage } from './triage/run.js';
 import { deliverAlerts } from './alerts/engine/deliver.js';
 import { registerDetector } from './alerts/engine/run.js';
+import { allDetectors } from './alerts/detectors/index.js';
 import type { Detector } from './alerts/detectors/types.js';
 import { QUEUE_MORNING, registerBriefs, runMorningBrief } from './briefs/run.js';
 import { createAgentLogsDetector, createAgentLogsWatcher } from './watchers/agent-logs/index.js';
@@ -177,23 +178,6 @@ function buildNotion(
     },
   });
   return { connector, writers: notionExecutionWriters(connector, config) };
-}
-
-/**
- * The section 11 detectors live in ./alerts/detectors/index.ts. Loaded by
- * path so the worker boots while that module is still being written; a
- * missing module logs once and registers none.
- */
-async function loadDetectors(): Promise<Detector[]> {
-  try {
-    const module = (await import('./alerts/detectors/index.js')) as {
-      allDetectors?: (options: Record<string, never>) => Detector[];
-    };
-    return module.allDetectors === undefined ? [] : module.allDetectors({});
-  } catch (error) {
-    console.warn({ err: error }, 'no detector module found; only the agent-logs detector runs');
-    return [];
-  }
 }
 
 /** Jamie is optional at boot: without JAMIE_API_KEY the worker runs everything else (ADR 0005). */
@@ -425,7 +409,7 @@ async function main(): Promise<void> {
   const detectorContext = { db, config, ontology, now: nowIso };
   const detectors: Detector[] = [
     createAgentLogsDetector({ db, maxWatermarkAgeHours: STALE_WATERMARK_HOURS }),
-    ...(await loadDetectors()),
+    ...allDetectors(),
   ];
   for (const detector of detectors) await registerDetector(boss, detector, detectorContext);
 
