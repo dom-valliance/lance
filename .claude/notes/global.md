@@ -118,6 +118,7 @@
 **Correction**: Dom pasted the deployment error.
 **Rule**: On a Postgres Flexible Server, every child resource (administrator, configuration, database, firewall rule) depends on the one before it, forming one chain, never a fan-out from the parent. Treat any ServerIsBusy as a template ordering fault, not a transient to retry.
 **Applies to**: infra/modules/postgres.bicep
+
 ### [2026-09-21] Verification output is read by exit code, never by grep
 
 **Context**: The consent button branch failed CI lint on two unused parameters. The local check had piped eslint through `grep -E "error|✖"` and printed "checks done" regardless of the exit code, and the lines that mattered were lost.
