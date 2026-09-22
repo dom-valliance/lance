@@ -3,6 +3,7 @@ import type { SystemState } from '@lance/db';
 import type {
   AppendResult,
   DecisionResult,
+  InterruptionBudget,
   LedgerEventRow,
   LedgerQuery,
   PauseResult,
@@ -10,6 +11,7 @@ import type {
   ResumeResult,
 } from '@lance/ledger';
 import type { Config, LedgerEventInputCandidate, Proposal, SystemMode } from '@lance/shared';
+import type { BriefStoreLike } from './briefs/store.js';
 import type { CommitmentStoreLike } from './commitments/store.js';
 import type { FeedEvent, FeedListener } from './events.js';
 import type { DecisionRequest } from './proposals/decide.js';
@@ -30,6 +32,11 @@ export interface SystemControlLike {
   /** Switches between dry run and live (spec 6.3); records a state_changed event either way. */
   setMode(
     mode: SystemMode,
+    options: { actor: string },
+  ): Promise<{ changed: boolean; eventId: string }>;
+  /** Sets the quiet hours and the hourly push ceiling (spec 9.1). */
+  setInterruptionBudget(
+    budget: InterruptionBudget,
     options: { actor: string },
   ): Promise<{ changed: boolean; eventId: string }>;
 }
@@ -115,6 +122,8 @@ export interface ApiDeps {
   commitments: CommitmentStoreLike;
   /** The aggregated task read behind the Tasks page. */
   tasks: TaskStoreLike;
+  /** The generated briefs behind the Today page. */
+  briefs: BriefStoreLike;
   /** Person nodes, for the owner and counterparty of a commitment. */
   ontology: OntologyLike;
   /**

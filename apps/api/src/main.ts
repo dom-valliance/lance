@@ -14,6 +14,7 @@ import { getConfig, readSecret, type Config } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { pathToFileURL } from 'node:url';
 import { createEntraVerifier } from './auth/entra.js';
+import { createBriefStore } from './briefs/store.js';
 import { createCommitmentStore } from './commitments/store.js';
 import { createTaskStore } from './tasks/store.js';
 import type { ApiDeps, GraphConsentDeps, SlackDeps, TokenVerifier } from './deps.js';
@@ -83,6 +84,7 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
     enqueueExecute: (proposalId) => executeQueue.enqueueExecute(proposalId),
     commitments: createCommitmentStore(options.db),
     tasks: createTaskStore(options.db),
+    briefs: createBriefStore(options.db),
     ontology: new OntologyRepository(options.db),
     enqueueChase: (commitmentId) => executeQueue.enqueueChase(commitmentId),
     status: createDbStatusSource(options.db, control, {
