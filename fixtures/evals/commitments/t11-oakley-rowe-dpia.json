@@ -1,0 +1,27 @@
+{
+  "id": "t11-oakley-rowe-dpia",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Owen Pritchard",
+      "email": "owen.pritchard@oakleyrowe.example.test"
+    }
+  ],
+  "text": "# Oakley Rowe: data protection review\n\n**Date:** Friday 2 October 2026\n\n###### 00:00 - 00:23\n**Owen Pritchard**\n\nOur DPO will not clear the pilot without an impact assessment.\n\n###### 00:23 - 00:50\n**Dom Selvon**\n\nThen I will have the data protection impact assessment with you by the end of the month.\n\n###### 00:50 - 01:06\n**Owen Pritchard**\n\nThat is comfortable. The DPO reviews in the first week of November.\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Deliver the data protection impact assessment to Owen Pritchard",
+      "counterpartyName": "Owen Pritchard",
+      "counterpartyEmail": "owen.pritchard@oakleyrowe.example.test",
+      "dueAt": "2026-10-31",
+      "dueConfidence": 0.5,
+      "evidenceQuote": "I will have the data protection impact assessment with you by the end of the month."
+    }
+  ],
+  "notes": "End of month phrasing resolved to the last day of the month in which the meeting falls."
+}

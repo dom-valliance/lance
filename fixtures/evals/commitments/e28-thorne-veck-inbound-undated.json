@@ -1,0 +1,27 @@
+{
+  "id": "e28-thorne-veck-inbound-undated",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Marcus Oyelaran",
+      "email": "marcus.oyelaran@thorneveck.example.test"
+    }
+  ],
+  "text": "Subject: Penetration test window\nDate: Friday 6 November 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Marcus Oyelaran <marcus.oyelaran@thorneveck.example.test>\n\nMarcus,\n\nUnderstood on the timing.\n\nYou said you would let me know the penetration test window once the supplier confirms their availability, with no date at this stage. I will wait.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Marcus Oyelaran to confirm the penetration test window",
+      "counterpartyName": "Marcus Oyelaran",
+      "counterpartyEmail": "marcus.oyelaran@thorneveck.example.test",
+      "dueAt": null,
+      "dueConfidence": 0,
+      "evidenceQuote": "You said you would let me know the penetration test window once the supplier confirms their availability, with no date at this stage."
+    }
+  ],
+  "notes": "Undated inbound commitment."
+}

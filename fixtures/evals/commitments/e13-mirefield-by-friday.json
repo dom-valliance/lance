@@ -1,0 +1,27 @@
+{
+  "id": "e13-mirefield-by-friday",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Eleanor Vance",
+      "email": "eleanor.vance@mirefield.example.test"
+    }
+  ],
+  "text": "Subject: Committee timetable\nDate: Tuesday 13 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Eleanor Vance <eleanor.vance@mirefield.example.test>\n\nEleanor,\n\nThank you for the timetable, it helps.\n\nI will map our milestones onto the committee dates and send you the result by Friday.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Map the milestones onto the committee dates and send the result to Eleanor Vance",
+      "counterpartyName": "Eleanor Vance",
+      "counterpartyEmail": "eleanor.vance@mirefield.example.test",
+      "dueAt": "2026-10-16",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will map our milestones onto the committee dates and send you the result by Friday."
+    }
+  ],
+  "notes": "Straightforward outbound with a weekday date."
+}

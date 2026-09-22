@@ -10,9 +10,11 @@ import type {
   ResumeResult,
 } from '@lance/ledger';
 import type { Config, LedgerEventInputCandidate, Proposal, SystemMode } from '@lance/shared';
+import type { CommitmentStoreLike } from './commitments/store.js';
 import type { FeedEvent, FeedListener } from './events.js';
 import type { DecisionRequest } from './proposals/decide.js';
 import type { StatusSource } from './status.js';
+import type { TaskStoreLike } from './tasks/store.js';
 
 /**
  * Everything `buildServer` needs, as structural subsets of the real
@@ -45,6 +47,19 @@ export interface ProposalStoreLike {
 
 export interface LedgerWriterLike {
   append(candidate: LedgerEventInputCandidate): Promise<AppendResult>;
+}
+
+/**
+ * Person names on the Commitments page come from the graph, not from the
+ * commitments table. Structural like the rest: `OntologyRepository`
+ * satisfies it, and a test passes a map of nodes.
+ */
+export interface OntologyNodeLike {
+  properties: Record<string, unknown>;
+}
+
+export interface OntologyLike {
+  getNode(id: string): Promise<OntologyNodeLike | null>;
 }
 
 /** Turns a bearer token into the caller's UPN, or throws `UnauthorisedError`. */
@@ -96,6 +111,17 @@ export interface ApiDeps {
    * "released" means the executor will pick it up.
    */
   enqueueExecute: (proposalId: string) => Promise<void>;
+  /** Reads and the two status writes behind the Commitments page. */
+  commitments: CommitmentStoreLike;
+  /** The aggregated task read behind the Tasks page. */
+  tasks: TaskStoreLike;
+  /** Person nodes, for the owner and counterparty of a commitment. */
+  ontology: OntologyLike;
+  /**
+   * Puts a commitment on the `chase` queue and returns the job id. The
+   * worker drafts the chase; the api never writes an email.
+   */
+  enqueueChase: (commitmentId: string) => Promise<string>;
   status: StatusSource;
   auth: TokenVerifier;
   slack: SlackDeps;

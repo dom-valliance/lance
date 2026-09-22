@@ -1,14 +1,28 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { FakeClock } from '../core/testing.js';
+import { createNotionConnector, type NotionConnector } from './client.js';
+import { notionWrites } from './writes.js';
 import {
+  blockPlainText,
   fromNotionDataSource,
+  fromNotionMeetingPage,
   fromNotionPage,
   fromNotionUser,
+  MEETING_PROPERTY_NAMES,
+  notionBlockSchema,
   notionDataSourceSchema,
+  notionMeetingPageSchema,
   notionPageSchema,
   notionUserSchema,
   TASK_PROPERTY_NAMES,
+  TEXT_BLOCK_TYPES,
 } from './types.js';
+
+/** No request leaves these tests: every write under test is refused before it is built. */
+function connector(): NotionConnector {
+  return createNotionConnector({ token: 'ntn_test_only', clock: new FakeClock() });
+}
 
 /** Loads a recorded Notion response. Shape is asserted by the schemas under test. */
 const fixture = (name: string): Record<string, unknown> =>
@@ -120,5 +134,122 @@ describe('fromNotionDataSource', () => {
     expect(schema.properties.map((property) => property.name)).toEqual(
       [...schema.properties.map((property) => property.name)].sort(),
     );
+  });
+});
+
+describe('fromNotionMeetingPage', () => {
+  const emptyMeeting = {
+    object: 'page',
+    id: 'cc33dd44-ee55-4ff6-8a07-112233445566',
+    url: 'https://www.notion.so/cc33dd44ee554ff68a07112233445566',
+    created_time: '2026-09-15T08:00:00.000Z',
+    last_edited_time: '2026-09-21T09:30:00.000Z',
+    properties: {},
+  };
+
+  it('maps a meeting with no properties set to nulls and empty lists', () => {
+    const page = notionMeetingPageSchema.parse(emptyMeeting);
+    expect(fromNotionMeetingPage(page)).toEqual({
+      id: 'cc33dd44-ee55-4ff6-8a07-112233445566',
+      url: 'https://www.notion.so/cc33dd44ee554ff68a07112233445566',
+      name: '',
+      attendeeIds: [],
+      ownerIds: [],
+      type: null,
+      eventTimeStart: null,
+      eventTimeEnd: null,
+      date: null,
+      summary: '',
+      aiSummary: '',
+      attendeeNames: '',
+      projectIds: [],
+      accountIds: [],
+      threadTags: [],
+      threadSessionIds: [],
+      createdTime: '2026-09-15T08:00:00.000Z',
+      lastEditedTime: '2026-09-21T09:30:00.000Z',
+    });
+  });
+
+  it('keeps both ends of an Event time range', () => {
+    const page = notionMeetingPageSchema.parse({
+      ...emptyMeeting,
+      properties: {
+        'Event time': {
+          type: 'date',
+          date: { start: '2026-09-21T09:00:00.000Z', end: '2026-09-21T10:30:00.000Z' },
+        },
+      },
+    });
+    const meeting = fromNotionMeetingPage(page);
+    expect(meeting.eventTimeStart).toBe('2026-09-21T09:00:00.000Z');
+    expect(meeting.eventTimeEnd).toBe('2026-09-21T10:30:00.000Z');
+  });
+});
+
+describe('blockPlainText', () => {
+  it('returns the text of every block type Lance renders', () => {
+    for (const type of TEXT_BLOCK_TYPES) {
+      const block = notionBlockSchema.parse({
+        object: 'block',
+        id: 'b1',
+        type,
+        [type]: { rich_text: [{ plain_text: 'A readable line' }] },
+      });
+      expect(blockPlainText(block)).toBe('A readable line');
+    }
+  });
+
+  it('returns null for a block type it does not know, such as a Meeting Notes AI block', () => {
+    const block = notionBlockSchema.parse({
+      object: 'block',
+      id: 'b1',
+      type: 'meeting_notes_ai_summary',
+      meeting_notes_ai_summary: { state: 'generated' },
+    });
+    expect(blockPlainText(block)).toBeNull();
+  });
+
+  it('returns null for a known block type whose payload carries no rich text', () => {
+    const block = notionBlockSchema.parse({
+      object: 'block',
+      id: 'b1',
+      type: 'paragraph',
+      paragraph: { colour: 'default' },
+    });
+    expect(blockPlainText(block)).toBeNull();
+  });
+});
+
+describe('the Meetings DB and the write guard', () => {
+  /**
+   * `Type` is left out: it is the one name both databases use, and on All
+   * Tasks it is the permitted Type relation. A write always names the All
+   * Tasks data source, so the two never meet.
+   */
+  const MEETINGS_ONLY = Object.values(MEETING_PROPERTY_NAMES).filter((name) => name !== 'Type');
+
+  it('refuses a createTask that names any Meetings property', async () => {
+    for (const name of MEETINGS_ONLY) {
+      await expect(
+        notionWrites.createTask(connector(), {
+          dataSourceId: '20257534-6e48-81fe-b4b5-000b69ecace6',
+          permittedProperties: [...Object.values(TASK_PROPERTY_NAMES)],
+          input: { [name]: 'anything' },
+        }),
+      ).rejects.toThrow(`"${name}" is read-only to Lance`);
+    }
+  });
+
+  it('refuses an updateTask that names any Meetings property', async () => {
+    for (const name of MEETINGS_ONLY) {
+      await expect(
+        notionWrites.updateTask(connector(), {
+          pageId: 'aa11bb22-cc33-4dd4-8ee5-ff6600112233',
+          permittedProperties: [...Object.values(TASK_PROPERTY_NAMES)],
+          patch: { [name]: 'anything' },
+        }),
+      ).rejects.toThrow(`"${name}" is read-only to Lance`);
+    }
   });
 });

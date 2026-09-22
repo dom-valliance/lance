@@ -1,0 +1,36 @@
+{
+  "id": "t17-harlow-two-inbound-one-sentence",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Priya Nandra",
+      "email": "priya.nandra@harlowbrook.example.test"
+    }
+  ],
+  "text": "# Harlow Brook Insurance: risk and legal\n\n**Date:** Friday 9 October 2026\n\n###### 00:00 - 00:24\n**Dom Selvon**\n\nWe are blocked on two things, the risk register and the data processing agreement.\n\n###### 00:24 - 00:55\n**Priya Nandra**\n\nI will circulate the risk register on Monday and chase legal for the data processing agreement the same day.\n\n###### 00:55 - 01:08\n**Dom Selvon**\n\nThat clears both blockers, thank you.\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Priya Nandra to circulate the risk register",
+      "counterpartyName": "Priya Nandra",
+      "counterpartyEmail": "priya.nandra@harlowbrook.example.test",
+      "dueAt": "2026-10-12",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will circulate the risk register on Monday and chase legal for the data processing agreement the same day."
+    },
+    {
+      "direction": "inbound",
+      "description": "Priya Nandra to chase legal for the data processing agreement",
+      "counterpartyName": "Priya Nandra",
+      "counterpartyEmail": "priya.nandra@harlowbrook.example.test",
+      "dueAt": "2026-10-12",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will circulate the risk register on Monday and chase legal for the data processing agreement the same day."
+    }
+  ],
+  "notes": "Two inbound commitments in one sentence with the same direction, counterparty and due date. Only the description separates them."
+}

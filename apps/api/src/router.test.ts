@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { actorFromUpn } from './actor.js';
 import { appRouter } from './router.js';
-import { fakeDeps, fakeProposal, TEST_UPN, type FakeDeps } from './test-fakes.js';
+import {
+  fakeDeps,
+  fakeProposal,
+  TEST_COMMITMENT_ID,
+  TEST_UPN,
+  type FakeDeps,
+} from './test-fakes.js';
 import { createCallerFactory } from './trpc.js';
 
 const PROPOSAL_ID = '01K5S9V6QW3SWCCPVB0N0E301A';
@@ -137,5 +143,71 @@ describe('ledger', () => {
     const trail = await caller.ledger.correlation({ correlationId: CORRELATION_ID });
 
     expect(trail.map((event) => event.id)).toEqual(['01K5S9V6QW3SWCCPVB0N0E301C']);
+  });
+});
+
+describe('commitments', () => {
+  it('lists with the filters the page sent', async () => {
+    const page = await caller.commitments.list({ direction: 'inbound', status: 'open' });
+
+    expect(harness.commitments.queries).toEqual([
+      { limit: 51, direction: 'inbound', status: 'open' },
+    ]);
+    expect(page.items[0]?.id).toBe(TEST_COMMITMENT_ID);
+  });
+
+  it('rejects a direction the schema does not know', async () => {
+    await expect(
+      caller.commitments.list({ direction: 'sideways' } as unknown as { direction: 'inbound' }),
+    ).rejects.toThrow();
+  });
+
+  it('returns one commitment with its provenance', async () => {
+    const view = await caller.commitments.get({ id: TEST_COMMITMENT_ID });
+
+    expect(view?.sourceRefs[0]?.recordId).toBe('AAMk2');
+  });
+
+  it('marks a commitment done as Dom', async () => {
+    const view = await caller.commitments.markDone({ id: TEST_COMMITMENT_ID });
+
+    expect(view.status).toBe('done');
+    expect(harness.writer.appended[0]?.actor).toBe('user:dom');
+  });
+
+  it('refuses a drop with no reason', async () => {
+    await expect(caller.commitments.drop({ id: TEST_COMMITMENT_ID, reason: '' })).rejects.toThrow();
+  });
+
+  it('drops a commitment with the reason Dom gave', async () => {
+    const view = await caller.commitments.drop({
+      id: TEST_COMMITMENT_ID,
+      reason: 'The client cancelled the order.',
+    });
+
+    expect(view.status).toBe('dropped');
+  });
+
+  it('enqueues a chase rather than drafting one itself', async () => {
+    expect(await caller.commitments.chase({ id: TEST_COMMITMENT_ID })).toEqual({
+      enqueued: true,
+      jobId: 'job-1',
+    });
+    expect(harness.chased).toEqual([TEST_COMMITMENT_ID]);
+  });
+});
+
+describe('tasks', () => {
+  it('lists tasks from the observations the watchers recorded', async () => {
+    const page = await caller.tasks.list({ source: 'notion' });
+
+    expect(harness.tasks.queries).toEqual([{ limit: 51, source: 'notion' }]);
+    expect(page.items[0]?.source).toBe('notion');
+  });
+
+  it('rejects a source the schema does not know', async () => {
+    await expect(
+      caller.tasks.list({ source: 'asana' } as unknown as { source: 'notion' }),
+    ).rejects.toThrow();
   });
 });

@@ -1,0 +1,36 @@
+{
+  "id": "e03-wyndham-two-outbound-one-sentence",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Imogen Fairlie",
+      "email": "imogen.fairlie@wyndhamretail.example.test"
+    }
+  ],
+  "text": "Subject: Contract and fees\nDate: Monday 28 September 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Imogen Fairlie <imogen.fairlie@wyndhamretail.example.test>\n\nImogen,\n\nYour legal team has been quick, which I appreciate.\n\nI will send the redlined contract this afternoon and the revised fee schedule by Friday.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Imogen Fairlie the redlined contract",
+      "counterpartyName": "Imogen Fairlie",
+      "counterpartyEmail": "imogen.fairlie@wyndhamretail.example.test",
+      "dueAt": "2026-09-28",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the redlined contract this afternoon and the revised fee schedule by Friday."
+    },
+    {
+      "direction": "outbound",
+      "description": "Send Imogen Fairlie the revised fee schedule",
+      "counterpartyName": "Imogen Fairlie",
+      "counterpartyEmail": "imogen.fairlie@wyndhamretail.example.test",
+      "dueAt": "2026-10-02",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the redlined contract this afternoon and the revised fee schedule by Friday."
+    }
+  ],
+  "notes": "Two outbound commitments in one sentence with different due dates."
+}

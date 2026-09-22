@@ -6,7 +6,14 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { diffPayload, editableFields, formatInstant, REJECT_REASONS } from '@/lib/proposal-view';
+import {
+  allowedActions,
+  diffPayload,
+  editableFields,
+  formatInstant,
+  statusSentence,
+  REJECT_REASONS,
+} from '@/lib/proposal-view';
 import { apiClient } from '@/lib/trpc';
 import { approveProposal, editProposal, rejectProposal, snoozeProposal } from '../actions';
 
@@ -35,6 +42,8 @@ export default async function ProposalPage({ params }: { params: Promise<{ id: s
 
   const trail = await client.ledger.correlation.query({ correlationId: proposal.correlationId });
   const changes = diffPayload(proposal.payload, proposal.editedPayload);
+  const actions = allowedActions(proposal.status);
+  const sentence = statusSentence(proposal.status);
 
   return (
     <div className="flex flex-col gap-6">
@@ -153,63 +162,77 @@ export default async function ProposalPage({ params }: { params: Promise<{ id: s
           <CardTitle>Decide</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
-          <div className="flex flex-wrap gap-3">
-            <ActionForm action={approveProposal}>
-              <input type="hidden" name="proposalId" value={proposal.id} />
-              <Button type="submit">Approve</Button>
-            </ActionForm>
-            <ActionForm action={snoozeProposal}>
-              <input type="hidden" name="proposalId" value={proposal.id} />
-              <Button type="submit" variant="outline">
-                Snooze 4h
-              </Button>
-            </ActionForm>
-          </div>
+          {sentence === null ? null : <p className="text-sm text-muted-foreground">{sentence}</p>}
 
-          <Separator />
+          {!actions.includes('approve') && !actions.includes('snooze') ? null : (
+            <div className="flex flex-wrap gap-3">
+              {!actions.includes('approve') ? null : (
+                <ActionForm action={approveProposal}>
+                  <input type="hidden" name="proposalId" value={proposal.id} />
+                  <Button type="submit">Approve</Button>
+                </ActionForm>
+              )}
+              {!actions.includes('snooze') ? null : (
+                <ActionForm action={snoozeProposal}>
+                  <input type="hidden" name="proposalId" value={proposal.id} />
+                  <Button type="submit" variant="outline">
+                    Snooze 4h
+                  </Button>
+                </ActionForm>
+              )}
+            </div>
+          )}
 
-          <ActionForm action={editProposal} className="flex flex-col gap-3">
-            <h2 className="text-sm font-medium">Edit</h2>
-            <input type="hidden" name="proposalId" value={proposal.id} />
-            {editableFields(proposal.payload).map(([field, value]) => (
-              <label key={field} className="flex flex-col gap-1 text-xs text-muted-foreground">
-                {field}
-                <textarea
-                  name={`field:${field}`}
-                  defaultValue={value}
-                  rows={value.length > 120 ? 4 : 1}
-                  className={INPUT_CLASS}
-                />
-              </label>
-            ))}
-            <Button type="submit" variant="outline" className="w-fit">
-              Save the edit and execute
-            </Button>
-          </ActionForm>
-
-          <Separator />
-
-          <ActionForm action={rejectProposal} className="flex flex-col gap-3">
-            <h2 className="text-sm font-medium">Reject</h2>
-            <input type="hidden" name="proposalId" value={proposal.id} />
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Reason
-              <select name="reasonCode" required className={INPUT_CLASS}>
-                {REJECT_REASONS.map((reason) => (
-                  <option key={reason.value} value={reason.value}>
-                    {reason.label}
-                  </option>
+          {!actions.includes('edit') ? null : (
+            <>
+              <Separator />
+              <ActionForm action={editProposal} className="flex flex-col gap-3">
+                <h2 className="text-sm font-medium">Edit</h2>
+                <input type="hidden" name="proposalId" value={proposal.id} />
+                {editableFields(proposal.payload).map(([field, value]) => (
+                  <label key={field} className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    {field}
+                    <textarea
+                      name={`field:${field}`}
+                      defaultValue={value}
+                      rows={value.length > 120 ? 4 : 1}
+                      className={INPUT_CLASS}
+                    />
+                  </label>
                 ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Note (optional)
-              <textarea name="note" rows={2} className={INPUT_CLASS} />
-            </label>
-            <Button type="submit" variant="destructive" className="w-fit">
-              Reject
-            </Button>
-          </ActionForm>
+                <Button type="submit" variant="outline" className="w-fit">
+                  Save the edit and execute
+                </Button>
+              </ActionForm>
+            </>
+          )}
+
+          {!actions.includes('reject') ? null : (
+            <>
+              <Separator />
+              <ActionForm action={rejectProposal} className="flex flex-col gap-3">
+                <h2 className="text-sm font-medium">Reject</h2>
+                <input type="hidden" name="proposalId" value={proposal.id} />
+                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  Reason
+                  <select name="reasonCode" required className={INPUT_CLASS}>
+                    {REJECT_REASONS.map((reason) => (
+                      <option key={reason.value} value={reason.value}>
+                        {reason.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  Note (optional)
+                  <textarea name="note" rows={2} className={INPUT_CLASS} />
+                </label>
+                <Button type="submit" variant="destructive" className="w-fit">
+                  Reject
+                </Button>
+              </ActionForm>
+            </>
+          )}
         </CardContent>
       </Card>
 

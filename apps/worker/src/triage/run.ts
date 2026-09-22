@@ -3,13 +3,18 @@ import {
   readTools,
   runAgent,
   type AgentDeps,
+  type CommitmentCandidate,
+  type CommitmentExtractor,
   type ProposalDraft,
 } from '@lance/agents';
 import { observations, proposals, type Db } from '@lance/db';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
 import { nowIso, type Config, type ProvenanceRef } from '@lance/shared';
 import { and, eq } from 'drizzle-orm';
+import type { OntologyRepository } from '@lance/ontology';
 import { raiseAlert } from '../alerts/raise.js';
+import { recordCommitments, type RecordedCommitment } from '../commitments/record.js';
+import { runDebrief, type DebriefDeps, type DebriefResult } from '../debrief/run.js';
 import type { ProposalContext, createProposalHandler } from '../executor/createProposal.js';
 import type { TriageJob } from '../watchers/runner.js';
 import { watcherStartedAt } from '../watchers/runner.js';
@@ -21,9 +26,14 @@ export const TRIAGE_ACTOR = `agent:triage@${TRIAGE_VERSION}`;
 
 export interface TriageDeps {
   db: Db;
-  config: Pick<Config, 'agentDisplayName' | 'models' | 'notion' | 'watchers'>;
+  config: Pick<Config, 'agentDisplayName' | 'models' | 'notion' | 'watchers' | 'timeZone'>;
   agent: Omit<AgentDeps, 'config'> & { config: AgentDeps['config'] };
   createProposal: ReturnType<typeof createProposalHandler>;
+  /** Phase 2 collaborators. Absent (tests, a process without them) means the step is skipped. */
+  ontology?: OntologyRepository | null;
+  extractCommitments?: CommitmentExtractor | null;
+  dom?: { name: string; email: string; notionUserId?: string | null } | null;
+  debrief?: Pick<DebriefDeps, 'slack'> | null;
   now?: () => string;
 }
 
@@ -32,7 +42,72 @@ export interface TriageResult {
   output: TriageOutput;
   taskProposals: string[];
   alerts: string[];
+  commitments: RecordedCommitment[];
+  debrief: DebriefResult | null;
   runId: string;
+}
+
+/** The parts of a `jamie` meeting observation the Phase 2 steps read. */
+interface MeetingObservation {
+  eventId: string;
+  recordId: string;
+  id: string;
+  title: string;
+  startTime: string;
+  endTime: string | null;
+  participants: { name: string; email: string | null }[];
+  attendees: { name: string; email: string | null }[];
+  graphEventId: string | null;
+  tags: string[];
+  summaryShort: string | null;
+  transcript: string | null;
+  transcriptReady: boolean;
+  domAttended: boolean;
+  url: string | null;
+}
+
+function people(value: unknown): { name: string; email: string | null }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item !== 'object' || item === null) return [];
+    const { name, email } = item as { name?: unknown; email?: unknown };
+    if (typeof name !== 'string' || name === '') return [];
+    return [{ name, email: typeof email === 'string' && email !== '' ? email : null }];
+  });
+}
+
+function meetingObservationOf(event: {
+  id: string;
+  sourceRecordId: string | null;
+  payload: unknown;
+}): MeetingObservation | null {
+  const payload = event.payload as Record<string, unknown> | null;
+  if (payload === null || payload['watcher'] !== 'jamie' || payload['kind'] !== 'meeting')
+    return null;
+  if (typeof payload['id'] !== 'string' || typeof payload['startTime'] !== 'string') return null;
+  const str = (key: string): string | null => {
+    const value = payload[key];
+    return typeof value === 'string' ? value : null;
+  };
+  return {
+    eventId: event.id,
+    recordId: event.sourceRecordId ?? payload['id'],
+    id: payload['id'],
+    title: str('title') ?? '(untitled)',
+    startTime: payload['startTime'],
+    endTime: str('endTime'),
+    participants: people(payload['participants']),
+    attendees: people(payload['attendees']),
+    graphEventId: str('graphEventId'),
+    tags: Array.isArray(payload['tags'])
+      ? payload['tags'].filter((tag): tag is string => typeof tag === 'string')
+      : [],
+    summaryShort: str('summaryShort'),
+    transcript: str('transcript'),
+    transcriptReady: payload['transcriptReady'] === true,
+    domAttended: payload['domAttended'] === true,
+    url: str('url'),
+  };
 }
 
 /** Working days from the watcher's first run; the first five are dry run (spec 6.3). */
@@ -267,6 +342,145 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
     alerts.push(raised.alertId);
   }
 
+  // Phase 2: the meeting in the graph, the commitments it or the mail
+  // contains, and the debrief when a transcript for a meeting Dom attended
+  // has arrived (spec 5.2, 10.4). Each step is deterministic code over
+  // what the models returned.
+  const meetings = events
+    .map((event) => meetingObservationOf(event))
+    .filter((meeting): meeting is MeetingObservation => meeting !== null);
+  const newest = meetings.reduce<MeetingObservation | null>(
+    (best, meeting) =>
+      best === null || (meeting.transcriptReady && !best.transcriptReady) ? meeting : best,
+    null,
+  );
+
+  let meetingNodeId: string | null = null;
+  const directory = newest === null ? [] : [...newest.attendees, ...newest.participants];
+  if (deps.ontology && newest !== null) {
+    const mutation = { correlationId: job.correlationId, actor: TRIAGE_ACTOR };
+    const sourceRef = {
+      system: 'jamie' as const,
+      id: newest.id,
+      observedAt: now(),
+      ...(newest.url === null ? {} : { url: newest.url }),
+    };
+    const node = await deps.ontology.upsertMeeting(
+      {
+        title: newest.title,
+        start: newest.startTime,
+        end: newest.endTime,
+        jamieId: newest.id,
+        graphEventId: newest.graphEventId,
+        tags: newest.tags,
+        sourceRef,
+      },
+      mutation,
+    );
+    meetingNodeId = node.id;
+    for (const person of directory) {
+      const resolved = await deps.ontology.resolvePerson(
+        {
+          displayName: person.name,
+          emails: person.email === null ? [] : [person.email],
+          sourceRef,
+        },
+        mutation,
+      );
+      await deps.ontology.link(resolved.id, 'ATTENDED', node.id, {}, mutation);
+    }
+  }
+
+  let commitmentCandidates: CommitmentCandidate[] = [...output.commitments];
+  if (
+    deps.extractCommitments &&
+    deps.dom &&
+    newest !== null &&
+    newest.transcriptReady &&
+    newest.transcript !== null
+  ) {
+    const extracted = await deps.extractCommitments(
+      {
+        id: newest.recordId,
+        kind: 'transcript',
+        dom: { name: deps.dom.name, email: deps.dom.email },
+        participants: directory,
+        occurredAt: newest.startTime,
+        text: newest.transcript,
+      },
+      job.correlationId,
+    );
+    const quoted = new Set(commitmentCandidates.map((candidate) => candidate.evidenceQuote));
+    for (const candidate of extracted) {
+      if (!quoted.has(candidate.evidenceQuote)) commitmentCandidates.push(candidate);
+    }
+  }
+  commitmentCandidates = commitmentCandidates.filter(
+    (candidate) => provenanceFor(events, candidate.recordId).length > 0,
+  );
+
+  // Each commitment is recorded with the provenance of the record it was
+  // quoted from (non-negotiable 5), so candidates are grouped by record: a
+  // correlation id can carry a meeting and its action items together.
+  const recordedCommitments: RecordedCommitment[] = [];
+  if (deps.ontology && deps.dom) {
+    const byRecord = new Map<string, CommitmentCandidate[]>();
+    for (const candidate of commitmentCandidates) {
+      const group = byRecord.get(candidate.recordId) ?? [];
+      group.push(candidate);
+      byRecord.set(candidate.recordId, group);
+    }
+    for (const [recordId, group] of byRecord) {
+      const result = await recordCommitments(
+        { db: deps.db, ontology: deps.ontology, dom: deps.dom, now },
+        group,
+        {
+          correlationId: job.correlationId,
+          actor: TRIAGE_ACTOR,
+          provenance: provenanceFor(events, recordId),
+          derivedFromNodeId: meetingNodeId,
+          directory,
+        },
+      );
+      recordedCommitments.push(...result.recorded);
+    }
+  }
+
+  let debrief: DebriefResult | null = null;
+  if (deps.debrief && deps.dom && newest !== null && newest.transcriptReady && newest.domAttended) {
+    debrief = await runDebrief(
+      {
+        db: deps.db,
+        config: deps.config,
+        dom: deps.dom,
+        agent: deps.agent,
+        slack: deps.debrief.slack,
+        createProposal: deps.createProposal,
+        now,
+      },
+      {
+        correlationId: job.correlationId,
+        meeting: {
+          id: newest.id,
+          title: newest.title,
+          startTime: newest.startTime,
+          endTime: newest.endTime,
+          participants: newest.participants,
+          attendees: newest.attendees,
+          summaryShort: newest.summaryShort,
+          url: newest.url,
+        },
+        provenance: provenanceFor(events, newest.recordId),
+        summary: output.summary,
+        decisions: output.decisions,
+        openQuestions: output.openQuestions,
+        taskProposalIds: taskProposals,
+        commitments: recordedCommitments,
+        context,
+      },
+    );
+  }
+
   await new LedgerWriter(deps.db).append({
     ts: now(),
     actor: TRIAGE_ACTOR,
@@ -285,10 +499,20 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
       proposalsSubmitted: output.proposalsSubmitted,
       taskProposals,
       alerts,
+      recordedCommitmentIds: recordedCommitments.map((commitment) => commitment.id),
+      debriefId: debrief?.briefId ?? null,
       observationEventIds: events.map((event) => event.id),
       watcherDryRun,
     },
   });
 
-  return { correlationId: job.correlationId, output, taskProposals, alerts, runId: result.runId };
+  return {
+    correlationId: job.correlationId,
+    output,
+    taskProposals,
+    alerts,
+    commitments: recordedCommitments,
+    debrief,
+    runId: result.runId,
+  };
 }

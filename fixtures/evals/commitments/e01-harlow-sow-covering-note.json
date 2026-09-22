@@ -1,0 +1,27 @@
+{
+  "id": "e01-harlow-sow-covering-note",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Priya Nandra",
+      "email": "priya.nandra@harlowbrook.example.test"
+    }
+  ],
+  "text": "Subject: Harlow Brook statement of work\nDate: Friday 25 September 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Priya Nandra <priya.nandra@harlowbrook.example.test>\n\nHi Priya,\n\nThe statement of work is attached, fixed price, with the assumptions set out in section four.\n\nTwo things from my side. I will send the revised timeline on Thursday once the team has sized the migration. Could you confirm the data warehouse access by Wednesday so we are not guessing?\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Priya Nandra the revised timeline once the team has sized the migration",
+      "counterpartyName": "Priya Nandra",
+      "counterpartyEmail": "priya.nandra@harlowbrook.example.test",
+      "dueAt": "2026-10-01",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the revised timeline on Thursday once the team has sized the migration."
+    }
+  ],
+  "notes": "The request for data access is a question put to the counterparty, not a commitment either party has made."
+}

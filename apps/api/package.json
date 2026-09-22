@@ -19,6 +19,7 @@
     "@lance/connectors": "workspace:*",
     "@lance/db": "workspace:*",
     "@lance/ledger": "workspace:*",
+    "@lance/ontology": "workspace:*",
     "@lance/shared": "workspace:*",
     "@lance/telemetry": "workspace:*",
     "@trpc/server": "11.19.0",

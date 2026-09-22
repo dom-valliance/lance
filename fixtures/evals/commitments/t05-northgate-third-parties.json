@@ -1,0 +1,21 @@
+{
+  "id": "t05-northgate-third-parties",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Hannah Cleave",
+      "email": "hannah.cleave@northgaterail.example.test"
+    },
+    {
+      "name": "Tobias Renn",
+      "email": "tobias.renn@northgaterail.example.test"
+    }
+  ],
+  "text": "# Northgate Rail: timetable data session\n\n**Date:** Wednesday 23 September 2026\n\n###### 00:00 - 00:19\n**Hannah Cleave**\n\nTobias, I will get you the timetable extract by Friday so you can run the comparison.\n\n###### 00:19 - 00:36\n**Tobias Renn**\n\nThanks. I will feed the results back to your planning team next week.\n\n###### 00:36 - 00:58\n**Dom Selvon**\n\nUseful to hear. I will stay out of that loop and pick things up once you have compared them.\n\n###### 00:58 - 01:10\n**Hannah Cleave**\n\nThat is the right order.\n",
+  "expected": [],
+  "notes": "Both promises are between two people at the counterparty. Nothing is owed to or by Dom."
+}

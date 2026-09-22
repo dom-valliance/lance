@@ -1,0 +1,17 @@
+{
+  "id": "t16-brightmoor-vendor-demo",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Rosa Delaney",
+      "email": "rosa.delaney@brightmoor.example.test"
+    }
+  ],
+  "text": "# Brightmoor Tooling: product demonstration\n\n**Date:** Thursday 8 October 2026\n\n###### 00:00 - 00:28\n**Rosa Delaney**\n\nThis is the observability view. Everything you see is from the public sandbox.\n\n###### 00:28 - 00:50\n**Dom Selvon**\n\nHow does it behave when a trace is incomplete?\n\n###### 00:50 - 01:16\n**Rosa Delaney**\n\nIt degrades to the span level. You lose the parent link but not the timings.\n\n###### 01:16 - 01:31\n**Dom Selvon**\n\nClear enough. I have what I needed from this.\n",
+  "expected": [],
+  "notes": "A demonstration with no undertakings on either side."
+}

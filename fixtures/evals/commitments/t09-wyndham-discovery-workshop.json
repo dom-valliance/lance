@@ -1,0 +1,49 @@
+{
+  "id": "t09-wyndham-discovery-workshop",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Imogen Fairlie",
+      "email": "imogen.fairlie@wyndhamretail.example.test"
+    },
+    {
+      "name": "Gus Holloway",
+      "email": "gus.holloway@wyndhamretail.example.test"
+    }
+  ],
+  "text": "# Wyndham Retail Group: discovery workshop\n\n**Date:** Wednesday 30 September 2026\n\n###### 00:00 - 00:24\n**Imogen Fairlie**\n\nWe have three candidate processes and no agreement on which one to automate first.\n\n###### 00:24 - 00:55\n**Dom Selvon**\n\nI will write up the three processes with an effort estimate against each and send it to you by Monday.\n\n###### 00:55 - 01:18\n**Gus Holloway**\n\nIf it helps, I will send you the returns volumes for last quarter on Thursday so the estimates are grounded.\n\n###### 01:18 - 01:44\n**Dom Selvon**\n\nPlease do. I will also book a follow-up session with your operations leads before the end of next week.\n\n###### 01:44 - 01:58\n**Imogen Fairlie**\n\nThursday afternoons are usually clearest for them.\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Write up the three candidate processes with effort estimates and send them to Imogen Fairlie",
+      "counterpartyName": "Imogen Fairlie",
+      "counterpartyEmail": "imogen.fairlie@wyndhamretail.example.test",
+      "dueAt": "2026-10-05",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will write up the three processes with an effort estimate against each and send it to you by Monday."
+    },
+    {
+      "direction": "inbound",
+      "description": "Gus Holloway to send the returns volumes for last quarter",
+      "counterpartyName": "Gus Holloway",
+      "counterpartyEmail": "gus.holloway@wyndhamretail.example.test",
+      "dueAt": "2026-10-08",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send you the returns volumes for last quarter on Thursday so the estimates are grounded."
+    },
+    {
+      "direction": "outbound",
+      "description": "Book a follow-up session with the Wyndham operations leads",
+      "counterpartyName": "Imogen Fairlie",
+      "counterpartyEmail": "imogen.fairlie@wyndhamretail.example.test",
+      "dueAt": "2026-10-09",
+      "dueConfidence": 0.5,
+      "evidenceQuote": "I will also book a follow-up session with your operations leads before the end of next week."
+    }
+  ],
+  "notes": "Three commitments across two counterparties in one meeting."
+}

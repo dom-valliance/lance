@@ -1,0 +1,17 @@
+{
+  "id": "e17-oakley-hedged-capacity",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Owen Pritchard",
+      "email": "owen.pritchard@oakleyrowe.example.test"
+    }
+  ],
+  "text": "Subject: Capacity in November\nDate: Wednesday 21 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Owen Pritchard <owen.pritchard@oakleyrowe.example.test>\n\nOwen,\n\nOn your question about November, we may be able to take the second workstream, and I would like to, but our two senior engineers are committed until the middle of the month. I will know more when the Saltmarsh work closes.\n\nNothing to plan around yet.\n\nBest,\nDom\n",
+  "expected": [],
+  "notes": "Hedged capacity language with no undertaking. Knowing more later is not a commitment."
+}

@@ -1,0 +1,27 @@
+{
+  "id": "e06-saltmarsh-end-of-month",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Martina Sacco",
+      "email": "martina.sacco@saltmarsh.example.test"
+    }
+  ],
+  "text": "Subject: Phase two proposal\nDate: Tuesday 6 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Martina Sacco <martina.sacco@saltmarsh.example.test>\n\nMartina,\n\nPhase one is closed and the retrospective actions are logged.\n\nI will have the phase two proposal with you by the end of the month so it can go into your November planning round.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Deliver the phase two proposal to Martina Sacco",
+      "counterpartyName": "Martina Sacco",
+      "counterpartyEmail": "martina.sacco@saltmarsh.example.test",
+      "dueAt": "2026-10-31",
+      "dueConfidence": 0.5,
+      "evidenceQuote": "I will have the phase two proposal with you by the end of the month so it can go into your November planning round."
+    }
+  ],
+  "notes": "End of month phrasing in mail."
+}

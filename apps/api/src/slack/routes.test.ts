@@ -5,6 +5,7 @@ import { buildServer } from '../server.js';
 import {
   fakeDeps,
   fakeSnapshot,
+  TEST_COMMITMENT_ID,
   TEST_SIGNING_SECRET,
   TEST_SLACK_USER_ID,
   type FakeDeps,
@@ -236,11 +237,42 @@ describe('the commands that arrive in a later phase', () => {
       'The task command arrives in a later phase. No task has been created.',
     );
   });
+});
 
-  it('says so for chase', async () => {
-    expect(await slashText('chase 01K5S9V6QW3SWCCPVB0N0E301A')).toBe(
-      'The chase command arrives in a later phase. No chase has been drafted.',
+describe('/lance chase', () => {
+  it('enqueues the chase and says a proposal is coming', async () => {
+    const text = await slashText(`chase ${TEST_COMMITMENT_ID}`);
+
+    expect(harness.chased).toEqual([TEST_COMMITMENT_ID]);
+    expect(text).toBe(
+      'Lance is preparing a chase draft for "Send the signed order form". It will arrive here as a proposal for you to approve.',
     );
+  });
+
+  it('asks for an id when none was given', async () => {
+    expect(await slashText('chase')).toBe(
+      'Usage: /lance chase <commitment id>. The id is on the Commitments page.',
+    );
+    expect(harness.chased).toEqual([]);
+  });
+
+  it('says so when the id is not a commitment id at all', async () => {
+    expect(await slashText('chase the order form')).toContain('is not a commitment id');
+    expect(harness.chased).toEqual([]);
+  });
+
+  it('says so when no commitment has that id', async () => {
+    expect(await slashText('chase 01K5S9V6QW3SWCCPVB0N0E301A')).toBe(
+      'No commitment has id 01K5S9V6QW3SWCCPVB0N0E301A. Check the id on the Commitments page and try again.',
+    );
+    expect(harness.chased).toEqual([]);
+  });
+
+  it('refuses a Slack user other than Dom', async () => {
+    const text = await slashText(`chase ${TEST_COMMITMENT_ID}`, 'U0INTRUDER');
+
+    expect(text).toBe('Only Dom may ask Lance to chase a commitment from Slack.');
+    expect(harness.chased).toEqual([]);
   });
 });
 

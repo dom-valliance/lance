@@ -1,0 +1,36 @@
+{
+  "id": "e14-bramley-one-each-way",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Sofia Alvarez",
+      "email": "sofia.alvarez@bramleyfoods.example.test"
+    }
+  ],
+  "text": "Subject: Contract and kickoff\nDate: Thursday 15 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Sofia Alvarez <sofia.alvarez@bramleyfoods.example.test>\n\nSofia,\n\nOnce the signed contract you promised for this week arrives, I will circulate the kickoff agenda within two working days.\n\nNothing else outstanding from my side.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Sofia Alvarez to send the signed contract",
+      "counterpartyName": "Sofia Alvarez",
+      "counterpartyEmail": "sofia.alvarez@bramleyfoods.example.test",
+      "dueAt": "2026-10-16",
+      "dueConfidence": 0.5,
+      "evidenceQuote": "Once the signed contract you promised for this week arrives, I will circulate the kickoff agenda within two working days."
+    },
+    {
+      "direction": "outbound",
+      "description": "Circulate the kickoff agenda to Sofia Alvarez",
+      "counterpartyName": "Sofia Alvarez",
+      "counterpartyEmail": "sofia.alvarez@bramleyfoods.example.test",
+      "dueAt": null,
+      "dueConfidence": 0,
+      "evidenceQuote": "Once the signed contract you promised for this week arrives, I will circulate the kickoff agenda within two working days."
+    }
+  ],
+  "notes": "One sentence carrying both directions. The outbound date is conditional on the inbound, so it is left null."
+}

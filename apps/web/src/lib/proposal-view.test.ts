@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { diffPayload, editableFields, formatInstant } from './proposal-view';
+import {
+  allowedActions,
+  diffPayload,
+  editableFields,
+  formatInstant,
+  statusSentence,
+  type ProposalStatus,
+} from './proposal-view';
 
 describe('formatInstant', () => {
   it('shows a stored UTC instant in London time', () => {
@@ -48,5 +55,64 @@ describe('editableFields', () => {
     expect(editableFields({ subject: 'Hello', attempts: 2, flags: ['a'] })).toEqual([
       ['subject', 'Hello'],
     ]);
+  });
+});
+
+describe('allowedActions', () => {
+  it('offers every decision on a pending proposal', () => {
+    expect(allowedActions('pending')).toEqual(['approve', 'edit', 'reject', 'snooze']);
+  });
+
+  it('offers approve, edit and reject but not snooze on a held proposal', () => {
+    expect(allowedActions('held')).toEqual(['approve', 'edit', 'reject']);
+  });
+
+  it.each<ProposalStatus>([
+    'approved',
+    'edited',
+    'rejected',
+    'expired',
+    'executing',
+    'executed',
+    'failed',
+  ])('offers nothing once a proposal is %s', (status) => {
+    expect(allowedActions(status)).toEqual([]);
+  });
+
+  it('never allows approve on a status other than pending or held', () => {
+    const statuses: ProposalStatus[] = [
+      'approved',
+      'edited',
+      'rejected',
+      'expired',
+      'executing',
+      'executed',
+      'failed',
+    ];
+    for (const status of statuses) {
+      expect(allowedActions(status)).not.toContain('approve');
+    }
+  });
+});
+
+describe('statusSentence', () => {
+  it('says nothing while the proposal still has actions to offer', () => {
+    expect(statusSentence('pending')).toBeNull();
+    expect(statusSentence('held')).toBeNull();
+  });
+
+  it('explains an approved proposal in plain words', () => {
+    expect(statusSentence('approved')).toBe('Approved and waiting for the executor.');
+  });
+
+  it.each<[ProposalStatus, string]>([
+    ['edited', 'Edited and waiting for the executor.'],
+    ['executing', 'Executing now.'],
+    ['executed', 'Executed.'],
+    ['rejected', 'Rejected.'],
+    ['expired', 'Expired before it was decided.'],
+    ['failed', 'Execution failed. Check the status history below.'],
+  ])('gives %s its own sentence', (status, expected) => {
+    expect(statusSentence(status)).toBe(expected);
   });
 });

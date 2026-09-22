@@ -1,0 +1,27 @@
+{
+  "id": "t15-mirefield-hedged-and-real",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Eleanor Vance",
+      "email": "eleanor.vance@mirefield.example.test"
+    }
+  ],
+  "text": "# Mirefield Council: second conversation\n\n**Date:** Thursday 8 October 2026\n\n###### 00:00 - 00:20\n**Eleanor Vance**\n\nI might have a look at the benefits caseload data if there is time, but I would not count on it.\n\n###### 00:20 - 00:44\n**Dom Selvon**\n\nUnderstood. What would help most is the committee timetable.\n\n###### 00:44 - 01:07\n**Eleanor Vance**\n\nThat I can do. I will email you the committee timetable on Monday.\n\n###### 01:07 - 01:20\n**Dom Selvon**\n\nThank you, that is enough to plan around.\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Eleanor Vance to email the committee timetable",
+      "counterpartyName": "Eleanor Vance",
+      "counterpartyEmail": "eleanor.vance@mirefield.example.test",
+      "dueAt": "2026-10-12",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will email you the committee timetable on Monday."
+    }
+  ],
+  "notes": "A hedged intention sits next to a firm commitment. Only the firm one counts."
+}

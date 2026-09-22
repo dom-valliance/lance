@@ -1,4 +1,4 @@
-import { nowIso, SystemModeSchema } from '@lance/shared';
+import { nowIso, SystemModeSchema, UlidSchema } from '@lance/shared';
 import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { DOM_ACTOR, type ApiDeps, resumeAndRequeue } from '../deps.js';
@@ -112,6 +112,39 @@ const handleMode = async (
       ? 'Proposals held in dry run stay held: run /lance pause then /lance resume to queue them for execution.'
       : 'Writes are held from now on; nothing already executed is undone.';
   return ephemeral(`${opening} ${next}`);
+};
+
+/**
+ * `/lance chase <commitment id>` (spec 9.2). The command enqueues and
+ * answers inside Slack's three seconds; the worker loads the commitment,
+ * drafts the email and posts it as a proposal, so nothing is sent from
+ * here (non-negotiable 2).
+ */
+const handleChase = async (
+  deps: ApiDeps,
+  rest: string,
+  displayName: string,
+): Promise<SlackReply> => {
+  const id = rest.trim();
+  if (id === '') {
+    return ephemeral('Usage: /lance chase <commitment id>. The id is on the Commitments page.');
+  }
+  const parsed = UlidSchema.safeParse(id);
+  if (!parsed.success) {
+    return ephemeral(
+      `"${id}" is not a commitment id. Copy the 26 character id from the Commitments page.`,
+    );
+  }
+  const commitment = await deps.commitments.get(parsed.data);
+  if (commitment === null) {
+    return ephemeral(
+      `No commitment has id ${parsed.data}. Check the id on the Commitments page and try again.`,
+    );
+  }
+  await deps.enqueueChase(parsed.data);
+  return ephemeral(
+    `${displayName} is preparing a chase draft for "${commitment.description}". It will arrive here as a proposal for you to approve.`,
+  );
 };
 
 const handleStatus = async (deps: ApiDeps): Promise<SlackReply> => {
@@ -236,7 +269,9 @@ export const slackRoutes =
         case 'task':
           return ephemeral(laterPhase('task', 'No task has been created.'));
         case 'chase':
-          return ephemeral(laterPhase('chase', 'No chase has been drafted.'));
+          return mayControl(deps, parsed.data.user_id)
+            ? handleChase(deps, rest, displayName)
+            : ephemeral(`Only Dom may ask ${displayName} to chase a commitment from Slack.`);
         default:
           return ephemeral(usage());
       }

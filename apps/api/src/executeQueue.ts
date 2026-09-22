@@ -13,14 +13,22 @@ import { PgBoss } from 'pg-boss';
 
 export const BOSS_SCHEMA = 'pgboss';
 export const EXECUTE_QUEUE = 'execute';
+export const CHASE_QUEUE = 'chase';
 
 /** The job body the worker's executor consumes. */
 export interface ExecuteJob {
   proposalId: string;
 }
 
+/** The job body the worker's chase handler consumes (spec 9.2, 10.1 item 4). */
+export interface ChaseJob {
+  commitmentId: string;
+}
+
 export interface ExecuteQueue {
   enqueueExecute(proposalId: string): Promise<void>;
+  /** Returns the pg-boss job id, which the caller shows to Dom. */
+  enqueueChase(commitmentId: string): Promise<string>;
   stop(): Promise<void>;
 }
 
@@ -47,6 +55,7 @@ export function createExecuteQueue(db: Db): ExecuteQueue {
   const start = async (): Promise<void> => {
     await boss.start();
     await boss.createQueue(EXECUTE_QUEUE);
+    await boss.createQueue(CHASE_QUEUE);
   };
 
   return {
@@ -55,6 +64,19 @@ export function createExecuteQueue(db: Db): ExecuteQueue {
       await started;
       const job: ExecuteJob = { proposalId };
       await boss.send(EXECUTE_QUEUE, job);
+    },
+
+    async enqueueChase(commitmentId: string): Promise<string> {
+      started ??= start();
+      await started;
+      const job: ChaseJob = { commitmentId };
+      const jobId = await boss.send(CHASE_QUEUE, job);
+      if (jobId === null) {
+        throw new Error(
+          `The chase queue refused the job for commitment ${commitmentId}. Check that the worker is running and that the pgboss schema is present.`,
+        );
+      }
+      return jobId;
     },
     async stop(): Promise<void> {
       if (started === null) return;

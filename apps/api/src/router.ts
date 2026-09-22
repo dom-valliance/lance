@@ -1,6 +1,8 @@
 import type { LedgerQuery, ProposalAction, ProposalFilter } from '@lance/ledger';
 import {
   ActionClassSchema,
+  CommitmentDirectionSchema,
+  CommitmentStatusSchema,
   CounterpartyClassSchema,
   LedgerKindSchema,
   ProposalStatusSchema,
@@ -10,6 +12,14 @@ import {
 } from '@lance/shared';
 import { z } from 'zod';
 import { actorFromUpn } from './actor.js';
+import {
+  chaseCommitment,
+  getCommitment,
+  listCommitments,
+  resolveCommitment,
+  MAX_PAGE_SIZE,
+} from './commitments/service.js';
+import { listTasks } from './tasks/service.js';
 import { procedure, router } from './trpc.js';
 
 /**
@@ -106,6 +116,28 @@ export const DecideInputSchema = z.object({
 });
 export type DecideInput = z.infer<typeof DecideInputSchema>;
 
+/** The Commitments page's two tabs and its filters (spec 12). */
+export const CommitmentListInputSchema = z
+  .object({
+    direction: CommitmentDirectionSchema.optional(),
+    status: CommitmentStatusSchema.optional(),
+    limit: z.int().positive().max(MAX_PAGE_SIZE).optional(),
+    cursor: UlidSchema.optional(),
+  })
+  .default({});
+export type CommitmentListInput = z.infer<typeof CommitmentListInputSchema>;
+
+/** The Tasks page's source badges and its open or done filter (spec 12). */
+export const TaskListInputSchema = z
+  .object({
+    source: z.enum(['notion', 'jamie']).optional(),
+    status: z.enum(['open', 'done']).optional(),
+    limit: z.int().positive().max(MAX_PAGE_SIZE).optional(),
+    cursor: UlidSchema.optional(),
+  })
+  .default({});
+export type TaskListInput = z.infer<typeof TaskListInputSchema>;
+
 export const appRouter = router({
   systemState: router({
     get: procedure.query(({ ctx }) => ctx.deps.control.read()),
@@ -128,6 +160,38 @@ export const appRouter = router({
         ...(input.snoozeHours === undefined ? {} : { snoozeHours: input.snoozeHours }),
       }),
     ),
+  }),
+  commitments: router({
+    list: procedure
+      .input(CommitmentListInputSchema)
+      .query(({ ctx, input }) => listCommitments(ctx.deps, input)),
+    get: procedure
+      .input(z.object({ id: UlidSchema }))
+      .query(({ ctx, input }) => getCommitment(ctx.deps, input.id)),
+    markDone: procedure
+      .input(z.object({ id: UlidSchema }))
+      .mutation(({ ctx, input }) =>
+        resolveCommitment(ctx.deps, { id: input.id, to: 'done', actor: actorFromUpn(ctx.upn) }),
+      ),
+    drop: procedure
+      .input(z.object({ id: UlidSchema, reason: z.string().min(1) }))
+      .mutation(({ ctx, input }) =>
+        resolveCommitment(ctx.deps, {
+          id: input.id,
+          to: 'dropped',
+          reason: input.reason,
+          actor: actorFromUpn(ctx.upn),
+        }),
+      ),
+    /** Queues the draft; the worker writes it and it arrives as a proposal. */
+    chase: procedure
+      .input(z.object({ id: UlidSchema }))
+      .mutation(({ ctx, input }) => chaseCommitment(ctx.deps, input.id, actorFromUpn(ctx.upn))),
+  }),
+  tasks: router({
+    list: procedure
+      .input(TaskListInputSchema)
+      .query(({ ctx, input }) => listTasks(ctx.deps, input)),
   }),
   ledger: router({
     query: procedure

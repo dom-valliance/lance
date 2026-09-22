@@ -1,0 +1,17 @@
+{
+  "id": "e02-wyndham-thanks-no-commitment",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Imogen Fairlie",
+      "email": "imogen.fairlie@wyndhamretail.example.test"
+    }
+  ],
+  "text": "Subject: Thank you for yesterday\nDate: Thursday 1 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Imogen Fairlie <imogen.fairlie@wyndhamretail.example.test>\n\nImogen,\n\nThank you for making the space yesterday. The returns process was the right one to look at first and your operations leads were generous with their time.\n\nNothing needed from you at this stage.\n\nBest,\nDom\n",
+  "expected": [],
+  "notes": "Courtesy mail with nothing owed in either direction."
+}

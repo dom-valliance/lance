@@ -1,0 +1,27 @@
+{
+  "id": "e05-kestrel-no-date",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Callum Reeve",
+      "email": "callum.reeve@kestrelanalytics.example.test"
+    }
+  ],
+  "text": "Subject: Vendor comparison\nDate: Thursday 1 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Callum Reeve <callum.reeve@kestrelanalytics.example.test>\n\nCallum,\n\nYou asked how the two vector stores compare for your volumes.\n\nI will put together a short comparison of the two vendors with the licensing implications. No date promised, it depends when our platform lead surfaces.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Put together a short comparison of the two vendors with licensing implications",
+      "counterpartyName": "Callum Reeve",
+      "counterpartyEmail": "callum.reeve@kestrelanalytics.example.test",
+      "dueAt": null,
+      "dueConfidence": 0,
+      "evidenceQuote": "I will put together a short comparison of the two vendors with the licensing implications."
+    }
+  ],
+  "notes": "Firm commitment with the date explicitly withheld."
+}

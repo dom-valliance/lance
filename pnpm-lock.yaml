@@ -220,6 +220,9 @@ importers:
       '@lance/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
+      '@lance/ontology':
+        specifier: workspace:*
+        version: link:../../packages/ontology
       '@lance/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -324,6 +327,9 @@ importers:
       '@lance/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
+      '@lance/ontology':
+        specifier: workspace:*
+        version: link:../../packages/ontology
       '@lance/policy':
         specifier: workspace:*
         version: link:../../packages/policy
@@ -383,6 +389,9 @@ importers:
       '@types/node':
         specifier: 26.6.2
         version: 26.6.2
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
 
   packages/connectors:
     dependencies:
@@ -471,7 +480,39 @@ importers:
         specifier: 8.23.0
         version: 8.23.0
 
-  packages/ontology: {}
+  packages/ontology:
+    dependencies:
+      '@lance/db':
+        specifier: workspace:*
+        version: link:../db
+      '@lance/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@lance/shared':
+        specifier: workspace:*
+        version: link:../shared
+      drizzle-orm:
+        specifier: ^0.45.0
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@testcontainers/postgresql':
+        specifier: 12.1.0
+        version: 12.1.0
+      '@types/node':
+        specifier: 26.6.2
+        version: 26.6.2
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
 
   packages/policy:
     dependencies:
