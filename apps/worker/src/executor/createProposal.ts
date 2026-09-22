@@ -12,7 +12,7 @@ import {
   type ProposalStatus,
 } from '@lance/shared';
 import { eq } from 'drizzle-orm';
-import { recordPush } from '../alerts/engine/budget.js';
+import { recordPush, remainingPushes } from '../alerts/engine/budget.js';
 import type { CriticVerdict } from '../critic/index.js';
 
 export interface ProposalContext {
@@ -29,7 +29,7 @@ export interface ProposalContext {
 
 export interface CreateProposalDeps {
   db: Db;
-  config: Pick<Config, 'agentDisplayName' | 'timeZone' | 'proposals'>;
+  config: Pick<Config, 'agentDisplayName' | 'timeZone' | 'proposals' | 'interruption'>;
   control: Pick<SystemControl, 'read'>;
   loadRules: () => Promise<PolicyRule[]>;
   /** The critic (spec 7.4), given the draft, its context and the rule policy matched. */
@@ -182,7 +182,18 @@ export function createProposalHandler(
       });
     }
 
-    if (status === 'pending' && deps.slack !== null) {
+    // A card is an unsolicited post and counts against the hourly push
+    // budget (spec 9.4). When the hour is spent the proposal stays pending
+    // without a card; alert delivery posts it once the budget allows.
+    const allowance =
+      status === 'pending' && deps.slack !== null
+        ? await remainingPushes({
+            db: deps.db,
+            perHour: deps.config.interruption.pushBudgetPerHour,
+            now,
+          })
+        : 0;
+    if (status === 'pending' && deps.slack !== null && allowance > 0) {
       const rows = await deps.db
         .select()
         .from(proposals)
@@ -202,7 +213,6 @@ export function createProposalHandler(
           .update(proposals)
           .set({ slackChannel: posted.channel, slackTs: posted.ts, updatedAt: new Date(now()) })
           .where(eq(proposals.id, proposalId));
-        // A card is an unsolicited post and counts against the hourly push budget (spec 9.4).
         await recordPush(deps.db, {
           reason: 'proposal_card',
           correlationId: context.correlationId,
