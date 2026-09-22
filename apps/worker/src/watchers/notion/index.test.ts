@@ -117,6 +117,19 @@ describe('createNotionWatcher', () => {
     expect(await watcher.partitions()).toEqual([TASK_PARTITION, MEETING_PARTITION]);
   });
 
+  it('watches only the tasks partition when no meetings data source is configured', async () => {
+    const reads = fakeReads();
+    const watcher = createNotionWatcher({
+      reads,
+      tasksDataSourceId: TASKS_DATA_SOURCE_ID,
+      meetingsDataSourceId: null,
+      now: () => NOW,
+    });
+    expect(await watcher.partitions()).toEqual([TASK_PARTITION]);
+    await expect(watcher.poll(MEETING_PARTITION, null)).rejects.toThrow(/stale cursor row/);
+    expect(reads.meetingCalls).toEqual([]);
+  });
+
   it('reads the whole database when the partition has no cursor yet', async () => {
     const reads = fakeReads();
     await watcherWith(reads).poll(TASK_PARTITION, null);

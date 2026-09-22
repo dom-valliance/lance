@@ -84,7 +84,7 @@ Stack decisions and versions are in the ADRs. Model ids live in `packages/shared
 | Q4 | Anthropic direct or Foundry | Anthropic direct. `ANTHROPIC_BASE_URL` configurable. |
 | Q5 | AGE or Neo4j | AGE behind `OntologyRepository`. Revisit if meeting-prep p95 exceeds 500 ms at 10k nodes. |
 | Q6 | Slack channel | Reuse `dom-claude-agent`; Lance bot posts. |
-| Q7 | Notion databases | All Tasks and Meetings only. Add via config. |
+| Q7 | Notion databases | All Tasks only. The Meetings DB is not in use; `NOTION_MEETINGS_DATA_SOURCE_ID` adds it. Others via config. |
 
 ## Gotchas
 

@@ -120,7 +120,8 @@ export interface Config {
   notion: {
     tasksDataSourceId: string;
     tasksDatabaseId: string;
-    meetingsDataSourceId: string;
+    /** Null when the Meetings database is not watched (spec 16 Q7: All Tasks only in dev; add the Meetings data source id to watch it). */
+    meetingsDataSourceId: string | null;
     domUserId: string;
     permittedTaskProperties: readonly string[];
   };
@@ -592,13 +593,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       '20257534-6e48-8190-9ebb-cfb6997b3bb4',
       'must be a non-empty string',
     ),
-    meetingsDataSourceId: readField(
+    meetingsDataSourceId: readField<string | null>(
       errors,
       env,
       'NOTION_MEETINGS_DATA_SOURCE_ID',
-      z.string().min(1),
-      '1fc57534-6e48-804e-a193-000bec4176ab',
-      'must be a non-empty string',
+      z.string().min(1).nullable(),
+      null,
+      'must be a non-empty string when set',
     ),
     domUserId: readField(
       errors,

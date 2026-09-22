@@ -58,8 +58,8 @@ export interface NotionWatcherOptions {
   reads: NotionWatcherReads;
   /** `notion.tasksDataSourceId` from config. */
   tasksDataSourceId: string;
-  /** `notion.meetingsDataSourceId` from config. */
-  meetingsDataSourceId: string;
+  /** `notion.meetingsDataSourceId` from config; null leaves the meetings partition out entirely. */
+  meetingsDataSourceId: string | null;
   now?: () => string;
   schedules?: readonly string[];
 }
@@ -124,7 +124,10 @@ export function createNotionWatcher(options: NotionWatcherOptions): Watcher {
     sourceSystem: 'notion',
     schedules: [...(options.schedules ?? NOTION_SCHEDULES)],
 
-    partitions: () => Promise.resolve([...NOTION_PARTITIONS]),
+    partitions: () =>
+      Promise.resolve(
+        options.meetingsDataSourceId === null ? [TASK_PARTITION] : [...NOTION_PARTITIONS],
+      ),
 
     async poll(partition: string, cursor: string | null): Promise<PollResult> {
       const kind = partitionOf(partition);
@@ -135,6 +138,11 @@ export function createNotionWatcher(options: NotionWatcherOptions): Watcher {
           since,
         });
         return pollResultFor(result.tasks);
+      }
+      if (options.meetingsDataSourceId === null) {
+        throw new Error(
+          'The notion watcher was asked to poll the meetings partition but NOTION_MEETINGS_DATA_SOURCE_ID is not set. Remove the stale cursor row, or set the variable to watch the Meetings database.',
+        );
       }
       const result = await options.reads.queryMeetingsEditedSince({
         dataSourceId: options.meetingsDataSourceId,
