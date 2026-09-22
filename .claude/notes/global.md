@@ -153,3 +153,10 @@
 **Correction**: Found by reading the worker console log after the deploy, as the gotcha says; Dom saw nothing new.
 **Rule**: CI runs every image it builds: the api and worker import their entry module inside the container (`scripts/smoke-image.sh`), the web image is started and asked for a page. A new `workspace:*` dependency is not done until that step passes. The migration job is started by hand after a deploy that adds a migration; the deploy alone never runs it.
 **Applies to**: .github/workflows/ci.yml, scripts/smoke-image.sh, apps/*/Dockerfile, docs/runbooks/deploy.md
+
+### [2026-09-22] The verification set is every CI step, formatting included
+
+**Context**: The web design branch passed root lint, typecheck, test and build locally and then failed CI on `pnpm format:check`: nine files written by heredoc and by subagents had never been through Prettier.
+**Correction**: Dom pasted the CI log.
+**Rule**: Before calling a branch done, run every command the workflow runs, read from `.github/workflows/ci.yml` rather than from memory; today that is lint, format:check, typecheck, test, build and the image builds. A subagent's "prettier was run over my files" is not evidence; the root `pnpm format:check` is.
+**Applies to**: global

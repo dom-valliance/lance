@@ -31,7 +31,11 @@ describe('shellStatusLine', () => {
 
   it('reports every watcher healthy in live mode', () => {
     expect(
-      shellStatusLine({ paused: false, mode: 'live', cursors: [{ watcher: 'notion', ageMinutes: 2 }] }),
+      shellStatusLine({
+        paused: false,
+        mode: 'live',
+        cursors: [{ watcher: 'notion', ageMinutes: 2 }],
+      }),
     ).toEqual({ tone: 'green', text: 'Live, all watchers healthy' });
   });
 

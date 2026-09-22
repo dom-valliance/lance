@@ -11,7 +11,10 @@ describe('londonDay', () => {
 
 describe('dueLabel', () => {
   it('says overdue with the day count for a past date', () => {
-    expect(dueLabel('2026-09-19', NOW)).toEqual({ label: 'overdue by 2 days', emphasis: 'overdue' });
+    expect(dueLabel('2026-09-19', NOW)).toEqual({
+      label: 'overdue by 2 days',
+      emphasis: 'overdue',
+    });
   });
 
   it('says due today with the soon emphasis', () => {

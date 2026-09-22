@@ -76,7 +76,13 @@ export function Td({ className, ...props }: ComponentProps<'td'>) {
 }
 
 /** The count and paging line under a table ("9 of 61", "Show older"). */
-export function TableFooterBar({ children, className }: { children: ReactNode; className?: string }) {
+export function TableFooterBar({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <div
       className={cn(

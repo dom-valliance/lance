@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { expiryLabel, formatDate, formatDayTitle, formatDuration, formatTime, relativeTo } from './time';
+import {
+  expiryLabel,
+  formatDate,
+  formatDayTitle,
+  formatDuration,
+  formatTime,
+  relativeTo,
+} from './time';
 
 const NOW = new Date('2026-09-21T13:05:00Z');
 

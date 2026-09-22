@@ -21,7 +21,10 @@ export function PageHeader({
   return (
     <div className="flex flex-col gap-3">
       {back === undefined ? null : (
-        <TextLink href={back.href} className="inline-flex items-center gap-1.5 self-start text-[13px]">
+        <TextLink
+          href={back.href}
+          className="inline-flex items-center gap-1.5 self-start text-[13px]"
+        >
           <ArrowLeft aria-hidden className="size-3.5" />
           {back.label}
         </TextLink>

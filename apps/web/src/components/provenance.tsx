@@ -39,13 +39,20 @@ export function ProvenanceLink({
           {id}
         </span>
       ) : (
-        <TextLink href={source.url} mono className="inline-flex items-center gap-1" title={source.recordId}>
+        <TextLink
+          href={source.url}
+          mono
+          className="inline-flex items-center gap-1"
+          title={source.recordId}
+        >
           {id}
           <ExternalLink aria-hidden className="size-3" />
         </TextLink>
       )}
       {seen && source.observedAt !== undefined ? (
-        <span className="text-xs text-muted-foreground">seen {formatInstant(source.observedAt)}</span>
+        <span className="text-xs text-muted-foreground">
+          seen {formatInstant(source.observedAt)}
+        </span>
       ) : null}
     </span>
   );
