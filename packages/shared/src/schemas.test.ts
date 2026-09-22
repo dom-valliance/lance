@@ -306,6 +306,7 @@ describe('SystemStateSchema', () => {
         quietHoursStart: '19:00',
         quietHoursEnd: '07:00',
         pushBudgetPerHour: 3,
+        costCeilingGbp: 15,
       }).success,
     ).toBe(true);
   });

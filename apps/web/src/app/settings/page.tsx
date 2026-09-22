@@ -19,7 +19,13 @@ import {
 } from '@/lib/settings-view';
 import { formatDuration } from '@/lib/time';
 import { apiClient } from '@/lib/trpc';
-import { pauseAction, resumeAction, setInterruptionBudgetAction, setModeAction } from './actions';
+import {
+  pauseAction,
+  resumeAction,
+  setCostCeilingAction,
+  setInterruptionBudgetAction,
+  setModeAction,
+} from './actions';
 import { PauseForm } from './pause-form';
 
 export const dynamic = 'force-dynamic';
@@ -203,6 +209,33 @@ export default async function SettingsPage() {
             <p className="text-xs text-muted-foreground">
               Weekends are always quiet. P0 alerts ignore quiet hours and the budget. Everything
               else waits for 07:00 and appears in the morning brief.
+            </p>
+            <SubmitButton pendingLabel="Saving" className={SUBMIT_HEIGHT}>
+              Save
+            </SubmitButton>
+          </ActionForm>
+        </section>
+
+        <section className={CARD}>
+          <div className={CARD_TITLE_ROW}>
+            <h2 className="text-base font-semibold">Daily model spend ceiling</h2>
+          </div>
+          <ActionForm action={setCostCeilingAction} className="flex flex-col gap-4">
+            <Field label="Ceiling in pounds per day" className="w-36">
+              <Input
+                type="number"
+                name="costCeilingGbp"
+                min={0.01}
+                max={1000}
+                step={0.5}
+                defaultValue={state.costCeilingGbp}
+                required
+                className="tabular-nums"
+              />
+            </Field>
+            <p className="text-xs text-muted-foreground">
+              At 80 percent Lance raises a P1. At the ceiling triage, the planner, the critic and
+              the chase stop until midnight or until you raise it here. Watchers keep observing.
             </p>
             <SubmitButton pendingLabel="Saving" className={SUBMIT_HEIGHT}>
               Save

@@ -1,6 +1,6 @@
 import { renderAlertCard, renderProposalCard, type SlackSurface } from '@lance/connectors';
 import { alerts, proposals, type Alert as AlertRow, type Db } from '@lance/db';
-import { LedgerWriter, toAlert, toProposal } from '@lance/ledger';
+import { LedgerWriter, toAlert, toProposal, type SystemControl } from '@lance/ledger';
 import { newUlid, nowIso, type Config } from '@lance/shared';
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { recordPush, remainingPushes } from './budget.js';
@@ -25,6 +25,8 @@ export interface DeliverDeps {
   slack: Pick<SlackSurface, 'post' | 'update'> | null;
   /** Where the Alerts page lives, for the overflow post. */
   webUrl: string | null;
+  /** Quiet hours and the push budget as Settings last saved them; config is the fallback. */
+  control?: Pick<SystemControl, 'read'>;
   /** While the kill switch is on only P0 goes out (non-negotiable 7: reads continue, writes stop, and a P0 is how Dom learns why). */
   paused?: boolean;
   now?: () => string;
@@ -122,7 +124,16 @@ export async function deliverAlerts(deps: DeliverDeps): Promise<DeliveryResult> 
   if (deps.slack === null) return result;
   const slack = deps.slack;
   const render = { displayName: deps.config.agentDisplayName, timeZone: deps.config.timeZone };
-  const quiet = isQuiet(at, deps.config.timeZone, deps.config.interruption);
+  const saved = await deps.control?.read();
+  const interruption =
+    saved === undefined
+      ? deps.config.interruption
+      : {
+          quietHoursStart: saved.quietHoursStart,
+          quietHoursEnd: saved.quietHoursEnd,
+          pushBudgetPerHour: saved.pushBudgetPerHour,
+        };
+  const quiet = isQuiet(at, deps.config.timeZone, interruption);
 
   const pending = await pendingAlerts(deps.db, at);
   const due = pending.filter((row) => row.severity === 'P0' || (!quiet && !paused));
@@ -130,7 +141,7 @@ export async function deliverAlerts(deps: DeliverDeps): Promise<DeliveryResult> 
 
   let allowance = await remainingPushes({
     db: deps.db,
-    perHour: deps.config.interruption.pushBudgetPerHour,
+    perHour: interruption.pushBudgetPerHour,
     now,
   });
   const overflow: AlertRow[] = [];
@@ -252,9 +263,7 @@ export async function deliverAlerts(deps: DeliverDeps): Promise<DeliveryResult> 
         proposalCards: result.proposalCards,
         quiet,
         paused,
-        nextQuietEnd: quiet
-          ? nextQuietEnd(at, deps.config.timeZone, deps.config.interruption)
-          : null,
+        nextQuietEnd: quiet ? nextQuietEnd(at, deps.config.timeZone, interruption) : null,
       },
     });
   }

@@ -35,6 +35,11 @@ export interface InterruptionBudget {
   pushBudgetPerHour: number;
 }
 
+/** Spec 13: the daily model spend ceiling in GBP. */
+export interface CostCeiling {
+  costCeilingGbp: number;
+}
+
 /** Proposal statuses that are waiting for the executor and can be held. */
 const HOLDABLE_STATUSES = ['approved', 'edited'] as const;
 export type HoldableStatus = (typeof HOLDABLE_STATUSES)[number];
@@ -305,6 +310,44 @@ export class SystemControl {
             quietHoursStart: budget.quietHoursStart,
             quietHoursEnd: budget.quietHoursEnd,
             pushBudgetPerHour: budget.pushBudgetPerHour,
+          },
+        },
+        tx,
+      );
+      return { changed, eventId: event.id };
+    });
+  }
+
+  /**
+   * Sets the daily model spend ceiling (spec 13). Recorded as a state change
+   * like the interruption budget; the worker reads the row on every model
+   * call and every budget-guard run, so the new ceiling applies at once.
+   */
+  async setCostCeiling(
+    ceiling: CostCeiling,
+    options: ActorOptions,
+  ): Promise<{ changed: boolean; eventId: string }> {
+    return this.db.transaction(async (tx) => {
+      const current = await this.readWith(tx);
+      const ts = nowIso();
+      const changed = current.costCeilingGbp !== ceiling.costCeilingGbp;
+      if (changed) {
+        await tx
+          .update(systemState)
+          .set({ costCeilingGbp: ceiling.costCeilingGbp, updatedAt: new Date(ts) })
+          .where(eq(systemState.id, SYSTEM_STATE_ID));
+      }
+      const event = await this.writer.append(
+        {
+          ts,
+          actor: options.actor,
+          kind: 'state_changed',
+          sourceSystem: 'lance',
+          correlationId: newUlid(),
+          payload: {
+            change: 'cost_ceiling',
+            costCeilingGbp: ceiling.costCeilingGbp,
+            previousCostCeilingGbp: current.costCeilingGbp,
           },
         },
         tx,

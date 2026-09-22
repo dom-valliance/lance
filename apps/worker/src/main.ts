@@ -48,7 +48,7 @@ import { reflectProposal } from './executor/reflect.js';
 import { postDryRunDigest } from './digest/dryRunDigest.js';
 import { ensureSeedRules, loadActiveRules } from './policy/rules.js';
 import { runChase } from './chase/run.js';
-import { createBoss, startBoss } from './scheduler/boss.js';
+import { createBoss, startBoss, work } from './scheduler/boss.js';
 import { PauseGate } from './scheduler/gate.js';
 import { QUEUES, type ChaseJob } from './scheduler/queues.js';
 import { runTriage } from './triage/run.js';
@@ -210,7 +210,7 @@ function buildSlack(config: Config): SlackSurface | null {
   });
 }
 
-function buildAgentDeps(config: Config, db: Db): AgentDeps | null {
+function buildAgentDeps(config: Config, db: Db, control: SystemControl): AgentDeps | null {
   if (env('ANTHROPIC_API_KEY') === undefined) return null;
   const client = createAnthropicClient(config);
   const startOfLondonDay = (): Date => {
@@ -231,13 +231,15 @@ function buildAgentDeps(config: Config, db: Db): AgentDeps | null {
     ledger: new LedgerWriter(db),
     config,
     readSpendUsd: dbSpendReader(db, startOfLondonDay),
+    // Spec 13: the ceiling Settings last saved, read on every run so a change applies at once.
+    readCeilingGbp: async () => (await control.read()).costCeilingGbp,
   };
 }
 
 async function registerExpiry(boss: PgBoss, db: Db): Promise<void> {
   await boss.createQueue(EXPIRY_QUEUE);
   await boss.schedule(EXPIRY_QUEUE, '*/15 * * * *', {}, { key: EXPIRY_QUEUE });
-  await boss.work(EXPIRY_QUEUE, async () => {
+  await work(boss, EXPIRY_QUEUE, async () => {
     const expired = await expireProposals(db);
     if (expired.length > 0) console.info({ expired: expired.length }, 'proposals expired');
   });
@@ -254,7 +256,7 @@ async function registerDigest(
 ): Promise<void> {
   await boss.createQueue(DIGEST_QUEUE);
   await boss.schedule(DIGEST_QUEUE, '0 17 * * 1-5', {}, { tz: config.timeZone, key: DIGEST_QUEUE });
-  await boss.work(DIGEST_QUEUE, async () => {
+  await work(boss, DIGEST_QUEUE, async () => {
     const state = await new SystemControl(db).read();
     if (state.mode !== 'dry_run') return;
     const since = new Date(Date.now() - 24 * 3600 * 1000);
@@ -281,7 +283,7 @@ async function main(): Promise<void> {
   const graph = buildGraph(db);
   const notion = buildNotion(config, db);
   const slack = buildSlack(config);
-  const agent = buildAgentDeps(config, db);
+  const agent = buildAgentDeps(config, db, control);
   const jamie = buildJamie(db);
   const ontology = new OntologyRepository(db);
   const extractCommitments =
@@ -403,12 +405,19 @@ async function main(): Promise<void> {
   // Alerts (spec 9.4, 11): delivery every minute, detectors on their own crons.
   await boss.createQueue(ALERT_DELIVERY_QUEUE);
   await boss.schedule(ALERT_DELIVERY_QUEUE, '* * * * *', {}, { key: ALERT_DELIVERY_QUEUE });
-  await boss.work(ALERT_DELIVERY_QUEUE, async () => {
+  await work(boss, ALERT_DELIVERY_QUEUE, async () => {
     // Paused is not silent: P0 still goes out, everything else waits (spec 9.4).
     const paused = !(await gate.check()).runnable;
-    await deliverAlerts({ db, config, slack, webUrl: env('PUBLIC_WEB_URL') ?? null, paused });
+    await deliverAlerts({
+      db,
+      config,
+      slack,
+      webUrl: env('PUBLIC_WEB_URL') ?? null,
+      paused,
+      control,
+    });
   });
-  const detectorContext = { db, config, ontology, now: nowIso };
+  const detectorContext = { db, config, ontology, control, now: nowIso };
   const detectors: Detector[] = [
     createAgentLogsDetector({ db, maxWatermarkAgeHours: STALE_WATERMARK_HOURS }),
     ...allDetectors(),
@@ -479,7 +488,7 @@ async function main(): Promise<void> {
   await registerWeeklyReview(boss, { db, config, agent, slack });
 
   if (agent !== null) {
-    await boss.work<TriageJob>(QUEUES.triage, async (jobs) => {
+    await work<TriageJob>(boss, QUEUES.triage, async (jobs) => {
       for (const job of jobs) {
         if (!(await gate.check()).runnable) {
           // Paused: the job is put back for later rather than dropped, so a
@@ -504,7 +513,7 @@ async function main(): Promise<void> {
     });
   }
   if (agent !== null) {
-    await boss.work<ChaseJob>(QUEUES.chase, async (jobs) => {
+    await work<ChaseJob>(boss, QUEUES.chase, async (jobs) => {
       for (const job of jobs) {
         if (!(await gate.check()).runnable) {
           // Paused: the chase goes back on the queue rather than being

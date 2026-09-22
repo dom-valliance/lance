@@ -3,6 +3,7 @@ import type { SystemState } from '@lance/db';
 import type {
   AppendResult,
   DecisionResult,
+  CostCeiling,
   InterruptionBudget,
   LedgerEventRow,
   LedgerQuery,
@@ -39,6 +40,11 @@ export interface SystemControlLike {
   /** Sets the quiet hours and the hourly push ceiling (spec 9.1). */
   setInterruptionBudget(
     budget: InterruptionBudget,
+    options: { actor: string },
+  ): Promise<{ changed: boolean; eventId: string }>;
+  /** Sets the daily model spend ceiling (spec 13). */
+  setCostCeiling(
+    ceiling: CostCeiling,
     options: { actor: string },
   ): Promise<{ changed: boolean; eventId: string }>;
 }

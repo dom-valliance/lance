@@ -8,6 +8,7 @@ export { rebuildObservations } from './rebuild.js';
 export { SystemControl } from './control.js';
 export type {
   ActorOptions,
+  CostCeiling,
   HeldProposal,
   HoldableStatus,
   InterruptionBudget,

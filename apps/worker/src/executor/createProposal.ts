@@ -189,7 +189,7 @@ export function createProposalHandler(
       status === 'pending' && deps.slack !== null
         ? await remainingPushes({
             db: deps.db,
-            perHour: deps.config.interruption.pushBudgetPerHour,
+            perHour: (await deps.control.read()).pushBudgetPerHour,
             now,
           })
         : 0;

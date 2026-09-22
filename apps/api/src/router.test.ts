@@ -322,6 +322,20 @@ describe('systemState.setInterruptionBudget', () => {
   });
 });
 
+describe('systemState.setCostCeiling', () => {
+  it('stores the daily spend ceiling as the verified caller', async () => {
+    const result = await caller.systemState.setCostCeiling({ costCeilingGbp: 25 });
+    expect(harness.control.ceilingCalls).toEqual([
+      { ceiling: { costCeilingGbp: 25 }, actor: 'user:dom' },
+    ]);
+    expect(result.changed).toBe(true);
+  });
+
+  it('rejects a ceiling of zero or below', async () => {
+    await expect(caller.systemState.setCostCeiling({ costCeilingGbp: 0 })).rejects.toThrow();
+  });
+});
+
 describe('settings.retention', () => {
   it('returns the configured retention windows', async () => {
     expect(await caller.settings.retention()).toEqual(harness.deps.config.retention);

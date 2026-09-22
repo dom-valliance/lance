@@ -6,6 +6,7 @@ import {
   BriefKindSchema,
   CommitmentDirectionSchema,
   CommitmentStatusSchema,
+  CostCeilingInputSchema,
   CounterpartyClassSchema,
   LedgerKindSchema,
   ProposalStatusSchema,
@@ -218,6 +219,12 @@ export const appRouter = router({
       .input(InterruptionBudgetInputSchema)
       .mutation(({ ctx, input }) =>
         ctx.deps.control.setInterruptionBudget(input, { actor: actorFromUpn(ctx.upn) }),
+      ),
+    /** Spec 13: the daily model spend ceiling; model-backed agents stop at it until midnight or until it is raised. */
+    setCostCeiling: procedure
+      .input(CostCeilingInputSchema)
+      .mutation(({ ctx, input }) =>
+        ctx.deps.control.setCostCeiling(input, { actor: actorFromUpn(ctx.upn) }),
       ),
   }),
   settings: router({
