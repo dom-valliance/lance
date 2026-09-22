@@ -567,15 +567,18 @@ async function main(): Promise<void> {
   }
   if (slack !== null) {
     const workspaceId = env('LOG_ANALYTICS_WORKSPACE_ID');
+    const reads = slackReads(createSlackClient({ token: readSecret('SLACK_BOT_TOKEN') }));
+    // The watcher skips Lance's own posts; the bot's identity comes from the
+    // token itself rather than from configuration that could drift.
+    const self = await reads.authTest();
     await registerWatcher(
       boss,
       phaseTwoRunnerDeps,
       createAgentLogsWatcher({
-        slack: slackReads(createSlackClient({ token: readSecret('SLACK_BOT_TOKEN') })),
+        slack: reads,
         channelId: config.slack.channelId,
-        ...(env('SLACK_BOT_USER_ID') === undefined
-          ? {}
-          : { ownBotUserId: env('SLACK_BOT_USER_ID') as string }),
+        ownBotUserId: self.userId,
+        ...(self.botId === null ? {} : { ownBotId: self.botId }),
         appInsights: workspaceId === undefined ? null : createAppInsightsClient({ workspaceId }),
       }),
       config.timeZone,

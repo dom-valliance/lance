@@ -126,6 +126,19 @@ describe('Slack connector', () => {
     });
   });
 
+  it("reports the bot token's own identity from auth.test", async () => {
+    const { fetchImpl, captured } = stubFetch([
+      { body: { ok: true, user_id: 'U0BOT', bot_id: 'B0BOT', team_id: 'T1' } },
+    ]);
+    const client = createSlackClient({ token: 't', fetchImpl, clock: new FakeClock() });
+    expect(await slackReads(client).authTest()).toEqual({
+      userId: 'U0BOT',
+      botId: 'B0BOT',
+      teamId: 'T1',
+    });
+    expect(captured[0]?.url).toBe('https://slack.com/api/auth.test');
+  });
+
   it('exposes exactly the four writes spec 8 allows', () => {
     const client = createSlackClient({
       token: 't',
