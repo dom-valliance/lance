@@ -1,10 +1,10 @@
-import { PageHeading } from '@/components/page-heading';
+import { PageHeader } from '@/components/page-header';
 
 export default function AlertsPage() {
   return (
-    <PageHeading
+    <PageHeader
       title="Alerts"
-      description="Open, acknowledged and muted alerts, each with the option to acknowledge, mute or follow its provenance link."
+      summary="Open, acknowledged and muted alerts, each with the option to acknowledge, mute or follow its provenance link."
     />
   );
 }

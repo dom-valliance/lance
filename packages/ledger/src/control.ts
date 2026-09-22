@@ -25,6 +25,16 @@ export interface ResumeResult {
   eventId: string;
 }
 
+/**
+ * How often Lance may interrupt Dom: the quiet-hours window in `HH:MM`
+ * 24-hour local time, and the ceiling on pushes in any one hour (spec 9.1).
+ */
+export interface InterruptionBudget {
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  pushBudgetPerHour: number;
+}
+
 /** Proposal statuses that are waiting for the executor and can be held. */
 const HOLDABLE_STATUSES = ['approved', 'edited'] as const;
 export type HoldableStatus = (typeof HOLDABLE_STATUSES)[number];
@@ -253,6 +263,53 @@ export class SystemControl {
         tx,
       );
       return { changed: current.mode !== mode, eventId: event.id };
+    });
+  }
+
+  /**
+   * Sets the quiet hours and the push budget that shape how often Lance
+   * interrupts Dom (spec 9.1). Like every other change to `system_state`,
+   * it goes through here so the ledger carries it.
+   */
+  async setInterruptionBudget(
+    budget: InterruptionBudget,
+    options: ActorOptions,
+  ): Promise<{ changed: boolean; eventId: string }> {
+    return this.db.transaction(async (tx) => {
+      const current = await this.readWith(tx);
+      const ts = nowIso();
+      const changed =
+        current.quietHoursStart !== budget.quietHoursStart ||
+        current.quietHoursEnd !== budget.quietHoursEnd ||
+        current.pushBudgetPerHour !== budget.pushBudgetPerHour;
+      if (changed) {
+        await tx
+          .update(systemState)
+          .set({
+            quietHoursStart: budget.quietHoursStart,
+            quietHoursEnd: budget.quietHoursEnd,
+            pushBudgetPerHour: budget.pushBudgetPerHour,
+            updatedAt: new Date(ts),
+          })
+          .where(eq(systemState.id, SYSTEM_STATE_ID));
+      }
+      const event = await this.writer.append(
+        {
+          ts,
+          actor: options.actor,
+          kind: 'state_changed',
+          sourceSystem: 'lance',
+          correlationId: newUlid(),
+          payload: {
+            change: 'interruption_budget',
+            quietHoursStart: budget.quietHoursStart,
+            quietHoursEnd: budget.quietHoursEnd,
+            pushBudgetPerHour: budget.pushBudgetPerHour,
+          },
+        },
+        tx,
+      );
+      return { changed, eventId: event.id };
     });
   }
 

@@ -43,6 +43,17 @@ export type ActionClass = (typeof ACTION_CLASSES)[number];
 export const SYSTEMS = ['graph', 'jamie', 'notion', 'slack', 'lance'] as const;
 export type TargetSystem = (typeof SYSTEMS)[number];
 
+export const COUNTERPARTY_CLASSES = [
+  'self',
+  'internal',
+  'client',
+  'prospect',
+  'partner',
+  'vendor',
+  'unknown',
+] as const;
+export type CounterpartyClass = (typeof COUNTERPARTY_CLASSES)[number];
+
 export const LEDGER_KINDS = [
   'observed',
   'resolved',
@@ -79,10 +90,17 @@ const text = (value: string | string[] | undefined): string | undefined => {
   return first === undefined || first.trim() === '' ? undefined : first.trim();
 };
 
+const CALENDAR_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
 /**
  * A date the filter form supplies as `YYYY-MM-DD`, widened to the instant
  * the api wants. `from` starts the day, `to` ends it, both in UTC, so a
  * one-day range covers that whole day.
+ *
+ * A full ISO instant passes through unwidened, normalised to UTC: the
+ * ledger's "Show older" link carries the oldest shown event's timestamp,
+ * and widening that to the end of its day would page backwards by nothing.
  */
 const instant = (
   value: string | string[] | undefined,
@@ -90,14 +108,33 @@ const instant = (
 ): string | undefined => {
   const day = text(value);
   if (day === undefined) return undefined;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return undefined;
+  if (ISO_INSTANT.test(day)) {
+    const parsed = new Date(day);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+  }
+  if (!CALENDAR_DAY.test(day)) return undefined;
   return edge === 'start' ? `${day}T00:00:00.000Z` : `${day}T23:59:59.999Z`;
+};
+
+/**
+ * A ULID is 26 Crockford base32 characters, which is what the api's
+ * `UlidSchema` accepts. Anything else in the `cursor` param is a typed or
+ * tampered URL, so it is dropped here and the first page is served rather
+ * than sending the api a value it would reject.
+ */
+const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+
+const ulid = (value: string | string[] | undefined): string | undefined => {
+  const first = Array.isArray(value) ? value[0] : value;
+  return first !== undefined && ULID.test(first) ? first : undefined;
 };
 
 export interface ProposalFilter {
   status?: ProposalStatus;
   actionClass?: ActionClass;
   targetSystem?: TargetSystem;
+  /** The id of the last proposal on the previous page; ULIDs sort in creation order. */
+  cursor?: string;
 }
 
 export const proposalFilterFrom = (params: SearchParams): ProposalFilter => {
@@ -105,9 +142,11 @@ export const proposalFilterFrom = (params: SearchParams): ProposalFilter => {
   const status = oneOf(PROPOSAL_STATUSES, params['status']);
   const actionClass = oneOf(ACTION_CLASSES, params['actionClass']);
   const targetSystem = oneOf(SYSTEMS, params['system']);
+  const cursor = ulid(params['cursor']);
   if (status !== undefined) filter.status = status;
   if (actionClass !== undefined) filter.actionClass = actionClass;
   if (targetSystem !== undefined) filter.targetSystem = targetSystem;
+  if (cursor !== undefined) filter.cursor = cursor;
   return filter;
 };
 

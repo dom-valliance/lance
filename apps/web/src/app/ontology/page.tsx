@@ -1,10 +1,10 @@
-import { PageHeading } from '@/components/page-heading';
+import { PageHeader } from '@/components/page-header';
 
 export default function OntologyPage() {
   return (
-    <PageHeading
+    <PageHeader
       title="Ontology"
-      description="Entity search across people, organisations and projects, each with a timeline of interactions, open commitments and related tasks, plus a SAME_AS review queue for merging or dismissing duplicates."
+      summary="Entity search across people, organisations and projects, each with a timeline of interactions, open commitments and related tasks, plus a SAME_AS review queue for merging or dismissing duplicates."
     />
   );
 }

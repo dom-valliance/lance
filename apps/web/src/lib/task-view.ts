@@ -1,14 +1,14 @@
 /**
  * View model for the Tasks page (spec 12: "Aggregated across Notion, Jamie,
  * Ian-native. Source badges... Jamie has no completion endpoint; show as
- * read-only with a link."). Mirrors the `tasks.list` contract another
- * engineer is adding to `apps/api` at the same time; the api router is the
- * source of truth once it lands. Kept local for the same reason as
+ * read-only with a link."). The page reads `client.tasks.list`, whose types
+ * are the source of truth; `TaskView` below is the local mirror the pure
+ * helpers and their tests take, kept here for the same reason as
  * `commitment-view.ts`: the web app cannot depend on api-side packages.
  */
 
 import { oneOf, selected, type SearchParams } from '@/lib/filters';
-import type { ApiClient } from '@/lib/trpc';
+import { humanise } from '@/lib/humanise';
 
 export const TASK_SOURCES = ['notion', 'jamie'] as const;
 export type TaskSource = (typeof TASK_SOURCES)[number];
@@ -76,26 +76,45 @@ export function taskStatusFilterFrom(params: SearchParams): TaskStatus | undefin
   return value === 'all' ? undefined : value;
 }
 
-/**
- * The `tasks` router as another engineer is adding it to `apps/api` at the
- * same time as this page (see the tRPC contract in the task brief).
- * `AppRouter` (imported in `@/lib/trpc`) does not carry `tasks` yet, so
- * this narrow contract stands in for it; the api router is the source of
- * truth once it lands, and this interface and the cast in `tasksRouter`
- * are deleted then in favour of calling `client.tasks` directly.
- */
-export interface TasksRouterContract {
-  list: {
-    query(input: {
-      source?: TaskSource;
-      status?: TaskStatus;
-      limit?: number;
-      cursor?: string;
-    }): Promise<{ items: TaskView[]; nextCursor: string | null }>;
-  };
+/** The source's own status beneath a row title: "In progress in Notion". */
+export function sourceStatusLine(view: Pick<TaskView, 'source' | 'status'>): string {
+  return `${humanise(view.status)} in ${SOURCE_BADGE_LABELS[view.source]}`;
 }
 
-/** The one place the stand-in cast above lives. */
-export function tasksRouter(client: ApiClient): TasksRouterContract {
-  return (client as unknown as { tasks: TasksRouterContract }).tasks;
+/** The little a task needs for the pending-proposal match. */
+export interface CompletionTask {
+  id: string;
+  sourceId: string;
+}
+
+/** The little a proposal needs for it: which record it would complete. */
+export interface CompletionProposal {
+  id: string;
+  targetRecordId: string | null;
+}
+
+/**
+ * The task rows a pending complete-task proposal already covers, as a map
+ * from the task's id to that proposal's id, so the Complete column can
+ * offer "Proposal pending" rather than a second Mark done. A proposal
+ * carries the source's own record id, which is the task's `sourceId`; the
+ * first pending proposal for a record wins, so a duplicate does not change
+ * where the link goes.
+ */
+export function pendingCompletionFor(
+  tasks: readonly CompletionTask[],
+  proposals: readonly CompletionProposal[],
+): Map<string, string> {
+  const byRecord = new Map<string, string>();
+  for (const proposal of proposals) {
+    if (proposal.targetRecordId === null) continue;
+    if (!byRecord.has(proposal.targetRecordId)) byRecord.set(proposal.targetRecordId, proposal.id);
+  }
+
+  const pending = new Map<string, string>();
+  for (const task of tasks) {
+    const proposalId = byRecord.get(task.sourceId);
+    if (proposalId !== undefined) pending.set(task.id, proposalId);
+  }
+  return pending;
 }

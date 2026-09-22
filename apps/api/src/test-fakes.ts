@@ -2,6 +2,7 @@ import type { SlackSurface } from '@lance/connectors';
 import type { Commitment, SystemState } from '@lance/db';
 import type {
   DecisionResult,
+  InterruptionBudget,
   LedgerEventRow,
   LedgerQuery,
   PauseResult,
@@ -11,6 +12,7 @@ import type {
 import {
   loadConfig,
   newUlid,
+  type BriefKind,
   type Config,
   type LedgerEventInputCandidate,
   type Proposal,
@@ -27,6 +29,7 @@ import type {
   SystemControlLike,
   TokenVerifier,
 } from './deps.js';
+import type { BriefRecord, BriefStoreLike } from './briefs/store.js';
 import type { CommitmentQuery, CommitmentStoreLike } from './commitments/store.js';
 import type { TaskQuery, TaskStoreLike } from './tasks/store.js';
 import { toTaskView, type ObservationRecord } from './tasks/view.js';
@@ -125,6 +128,21 @@ export class FakeSystemControl implements SystemControlLike {
     const changed = this.state.mode !== mode;
     this.state = { ...this.state, mode };
     return Promise.resolve({ changed, eventId: '01K5S9V6QW3SWCCPVB0N0E30E3' });
+  }
+
+  readonly budgetCalls: { budget: InterruptionBudget; actor: string }[] = [];
+
+  setInterruptionBudget(
+    budget: InterruptionBudget,
+    options: { actor: string },
+  ): Promise<{ changed: boolean; eventId: string }> {
+    this.budgetCalls.push({ budget, actor: options.actor });
+    const changed =
+      this.state.quietHoursStart !== budget.quietHoursStart ||
+      this.state.quietHoursEnd !== budget.quietHoursEnd ||
+      this.state.pushBudgetPerHour !== budget.pushBudgetPerHour;
+    this.state = { ...this.state, ...budget };
+    return Promise.resolve({ changed, eventId: '01K5S9V6QW3SWCCPVB0N0E30E4' });
   }
 
   resume(options: { actor: string }): Promise<ResumeResult> {
@@ -304,6 +322,28 @@ export class FakeTaskStore implements TaskStoreLike {
   }
 }
 
+export const fakeBrief = (overrides: Partial<BriefRecord> = {}): BriefRecord => ({
+  id: '01K5S9V6QW3SWCCPVB0N0E305A',
+  kind: 'morning_brief',
+  correlationId: '01K5S9V6QW3SWCCPVB0N0E305B',
+  content: {},
+  markdown: '# Morning brief',
+  generatedAt: '2026-09-22T05:30:00.000Z',
+  ...overrides,
+});
+
+/** The briefs table without a database; `latest` picks the newest of a kind. */
+export class FakeBriefStore implements BriefStoreLike {
+  rows: BriefRecord[] = [];
+
+  latest(kind: BriefKind): Promise<BriefRecord | null> {
+    const matched = [...this.rows]
+      .filter((row) => row.kind === kind)
+      .sort((left, right) => (left.generatedAt < right.generatedAt ? 1 : -1));
+    return Promise.resolve(matched[0] ?? null);
+  }
+}
+
 /** Person nodes keyed by id; an id it does not hold reads as a missing node. */
 export class FakeOntology implements OntologyLike {
   readonly nodes = new Map<string, OntologyNodeLike>([
@@ -448,6 +488,7 @@ export interface FakeDeps {
   status: FakeStatusSource;
   commitments: FakeCommitmentStore;
   tasks: FakeTaskStore;
+  briefs: FakeBriefStore;
   ontology: FakeOntology;
   /** Proposal ids handed to `enqueueExecute`, in order. */
   enqueued: string[];
@@ -470,6 +511,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
   const chased: string[] = [];
   const commitments = new FakeCommitmentStore();
   const tasks = new FakeTaskStore();
+  const briefs = new FakeBriefStore();
   const ontology = new FakeOntology();
 
   const deps: ApiDeps = {
@@ -485,6 +527,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     },
     commitments,
     tasks,
+    briefs,
     ontology,
     enqueueChase: (commitmentId) => {
       chased.push(commitmentId);
@@ -521,6 +564,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     status,
     commitments,
     tasks,
+    briefs,
     ontology,
     enqueued,
     chased,

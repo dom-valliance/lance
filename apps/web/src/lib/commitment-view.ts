@@ -1,10 +1,8 @@
 /**
  * View model for the Commitments page (spec 12: "Two tabs: I owe, owed to
- * me. Ageing, chase button, mark done, drop with reason."). The shape below
- * mirrors the `commitments.list`/`markDone`/`drop`/`chase` contract another
- * engineer is adding to `apps/api` at the same time; the api router is the
- * source of truth once it lands, and this file is the one place a drift
- * would need fixing.
+ * me. Ageing, chase button, mark done, drop with reason."). The page reads
+ * `client.commitments`, whose types are the source of truth; `CommitmentView`
+ * below is the local mirror the pure helpers and their tests take.
  *
  * Kept local, rather than imported from `@lance/shared`, because the web
  * app cannot depend on api or worker-side packages (see
@@ -12,8 +10,7 @@
  * `ProposalStatus`).
  */
 
-import { oneOf, selected, type SearchParams } from '@/lib/filters';
-import type { ApiClient } from '@/lib/trpc';
+import { oneOf, selected, type SearchParams, type SourceSystem } from '@/lib/filters';
 
 export const COMMITMENT_DIRECTIONS = ['outbound', 'inbound'] as const;
 export type CommitmentDirection = (typeof COMMITMENT_DIRECTIONS)[number];
@@ -32,11 +29,11 @@ export interface CommitmentPerson {
 }
 
 export interface CommitmentSourceRef {
-  system: string;
+  system: SourceSystem;
   recordId: string;
   hash: string;
   observedAt: string;
-  url?: string;
+  url?: string | undefined;
 }
 
 export interface CommitmentView {
@@ -89,7 +86,10 @@ const daysBetween = (from: Date, to: Date): number =>
  * only for computing how many days remain on a commitment that is not yet
  * overdue, and defaults to the real time so callers do not normally pass it.
  */
-export function ageingLabel(view: CommitmentView, now: Date = new Date()): string {
+export function ageingLabel(
+  view: Pick<CommitmentView, 'status' | 'updatedAt' | 'overdueDays' | 'dueAt'>,
+  now: Date = new Date(),
+): string {
   if (view.status === 'done') {
     const since = daysBetween(new Date(view.updatedAt), now);
     if (since <= 0) return 'done today';
@@ -120,7 +120,9 @@ export function ageingLabel(view: CommitmentView, now: Date = new Date()): strin
  * first), then soonest due date, then oldest commitment first as the final
  * tie-break. A commitment with no due date sorts after every dated one.
  */
-export function commitmentSort(a: CommitmentView, b: CommitmentView): number {
+export type SortableCommitment = Pick<CommitmentView, 'overdueDays' | 'dueAt' | 'ageDays'>;
+
+export function commitmentSort(a: SortableCommitment, b: SortableCommitment): number {
   const aOverdue = a.overdueDays ?? 0;
   const bOverdue = b.overdueDays ?? 0;
   if (aOverdue !== bOverdue) return bOverdue - aOverdue;
@@ -133,39 +135,73 @@ export function commitmentSort(a: CommitmentView, b: CommitmentView): number {
 }
 
 /** Sorts a copy of `views`; the source array is left untouched. */
-export function sortCommitments(views: readonly CommitmentView[]): CommitmentView[] {
+export function sortCommitments<T extends SortableCommitment>(views: readonly T[]): T[] {
   return [...views].sort(commitmentSort);
 }
 
 /** Whether the row still accepts "mark done" or "drop". */
-export function isCommitmentOpenForAction(view: CommitmentView): boolean {
+export function isCommitmentOpenForAction(view: Pick<CommitmentView, 'status'>): boolean {
   return view.status !== 'done' && view.status !== 'dropped';
 }
 
-/**
- * The `commitments` router as another engineer is adding it to `apps/api`
- * at the same time as this page (see the tRPC contract in the task
- * brief). `AppRouter` (imported in `@/lib/trpc`) does not carry
- * `commitments` yet, so this narrow contract stands in for it; the api
- * router is the source of truth once it lands, and this interface and the
- * cast in `commitmentsRouter` are deleted then in favour of calling
- * `client.commitments` directly.
- */
-export interface CommitmentsRouterContract {
-  list: {
-    query(input: {
-      direction?: CommitmentDirection;
-      status?: CommitmentStatus;
-      limit?: number;
-      cursor?: string;
-    }): Promise<{ items: CommitmentView[]; nextCursor: string | null }>;
-  };
-  markDone: { mutate(input: { id: string }): Promise<CommitmentView> };
-  drop: { mutate(input: { id: string; reason: string }): Promise<CommitmentView> };
-  chase: { mutate(input: { id: string }): Promise<{ enqueued: true; jobId: string }> };
+/** Whether the row is past its due date and still running. */
+export function isCommitmentOverdue(view: Pick<CommitmentView, 'overdueDays'>): boolean {
+  return view.overdueDays !== null && view.overdueDays > 0;
 }
 
-/** The one place the stand-in cast above lives. */
-export function commitmentsRouter(client: ApiClient): CommitmentsRouterContract {
-  return (client as unknown as { commitments: CommitmentsRouterContract }).commitments;
+/** How many rows of a list still accept an action. */
+export function openCount(views: readonly Pick<CommitmentView, 'status'>[]): number {
+  return views.filter((view) => isCommitmentOpenForAction(view)).length;
+}
+
+/** How many rows of a list are past their due date. */
+export function overdueCount(views: readonly Pick<CommitmentView, 'overdueDays'>[]): number {
+  return views.filter((view) => isCommitmentOverdue(view)).length;
+}
+
+/**
+ * The badge that sits beside a row's description, as a key into
+ * `COMMITMENT_STATUS_TONES` and the label table. Overdue beats the stored
+ * status, since it is what the reader has to act on; an open row that is
+ * not overdue carries no badge, and neither does a dropped one, whose cell
+ * already says there is nothing left to do.
+ */
+export function commitmentBadgeFor(
+  view: Pick<CommitmentView, 'status' | 'overdueDays'>,
+): CommitmentStatus | 'overdue' | null {
+  if (isCommitmentOverdue(view)) return 'overdue';
+  if (view.status === 'chased') return 'chased';
+  if (view.status === 'done') return 'done';
+  return null;
+}
+
+/** The Chased column's first line: "not yet", "1 time", "4 times". */
+export function chaseLabel(count: number): string {
+  if (count <= 0) return 'not yet';
+  return count === 1 ? '1 time' : `${String(count)} times`;
+}
+
+/** The same count in the phone card's sentence: "chased once", "chased twice". */
+export function chasePhrase(count: number): string | null {
+  if (count <= 0) return null;
+  if (count === 1) return 'chased once';
+  if (count === 2) return 'chased twice';
+  return `chased ${String(count)} times`;
+}
+
+/**
+ * The evidence line beneath a description: the verbatim quote in straight
+ * double quotes, and on the "I owe" tab who it was said to, since the
+ * counterparty column reads as the person waiting either way.
+ */
+export function evidenceLine(
+  view: Pick<CommitmentView, 'direction' | 'evidenceQuote' | 'counterparty'>,
+): string {
+  const quoted = `"${view.evidenceQuote}"`;
+  return view.direction === 'outbound' ? `${quoted} to ${view.counterparty.name}` : quoted;
+}
+
+/** The name the drop form uses in "Nothing is sent to Marcus." */
+export function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? name;
 }

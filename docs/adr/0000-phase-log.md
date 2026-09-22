@@ -86,3 +86,12 @@ Accepted with a decision to make in Phase 5: evidence quotes copied into the tri
 
 Also settled in Phase 2: the mail-derived commitment path and the transcript path share one extractor and one golden set; Jamie exposes `tasks.update` and Lance does not use it (ADR 0005 addendum).
 
+
+### Web UI design pass, 2026-09-22
+
+The web app was rebuilt from the Claude Design package described in `docs/design/README.md`, on branch `feat/web-design-system`. Seven pages (Today, Proposals, Proposal detail, Tasks, Commitments, Ledger with its trail and CSV export, Settings) plus sign-in follow the package; Alerts, Ontology, Policies and Agents wait for the next design pass. Two contracts were fixed on the way and belong to later phases:
+
+- `MorningBriefContentSchema` and `AfternoonBoardContentSchema` in `@lance/shared` are the shape the Phase 3 planner must write into `briefs.content`; `briefs.latest` validates against them and the Today page renders them.
+- Regenerate on Today, Mark done and Create task on Tasks are wired as server actions that answer with a plain-words sentence until the Phase 3 planner and the create-task and complete-task proposals exist; each is one call away from the real mutation.
+
+The api gained `systemState.status`, `pause`, `resume`, `setMode` and `setInterruptionBudget`, `settings.retention` and `briefs.latest`; `SystemControl.setInterruptionBudget` records quiet hours and the push budget as a `state_changed` event (spec 9.4, "Configurable in Settings"). Sign-in moved to `/sign-in` inside the app; Auth.js's `error=AccessDenied` code is the one query parameter read, and the copy shown is the app's own.

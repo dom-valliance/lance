@@ -1,17 +1,21 @@
 import type { LedgerQuery, ProposalAction, ProposalFilter } from '@lance/ledger';
 import {
   ActionClassSchema,
+  BriefKindSchema,
   CommitmentDirectionSchema,
   CommitmentStatusSchema,
   CounterpartyClassSchema,
   LedgerKindSchema,
   ProposalStatusSchema,
   SourceSystemSchema,
+  SystemModeSchema,
   SystemSchema,
   UlidSchema,
 } from '@lance/shared';
 import { z } from 'zod';
 import { actorFromUpn } from './actor.js';
+import { latestBrief } from './briefs/service.js';
+import { resumeAndRequeue } from './deps.js';
 import {
   chaseCommitment,
   getCommitment,
@@ -138,9 +142,48 @@ export const TaskListInputSchema = z
   .default({});
 export type TaskListInput = z.infer<typeof TaskListInputSchema>;
 
+/** `HH:MM`, 24-hour, as the quiet-hours columns store it. */
+const HhMmSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be "HH:MM" in 24-hour time');
+
+/** The Settings page's interruption budget (spec 9.1). */
+export const InterruptionBudgetInputSchema = z.object({
+  quietHoursStart: HhMmSchema,
+  quietHoursEnd: HhMmSchema,
+  pushBudgetPerHour: z.int().min(0).max(50),
+});
+export type InterruptionBudgetInput = z.infer<typeof InterruptionBudgetInputSchema>;
+
 export const appRouter = router({
   systemState: router({
     get: procedure.query(({ ctx }) => ctx.deps.control.read()),
+    /** The same payload as `GET /admin/status`: pause, mode, cursors, cost. */
+    status: procedure.query(({ ctx }) => ctx.deps.status.snapshot()),
+    pause: procedure
+      .input(z.object({ reason: z.string().min(1) }))
+      .mutation(({ ctx, input }) =>
+        ctx.deps.control.pause({ reason: input.reason, actor: actorFromUpn(ctx.upn) }),
+      ),
+    /** Releases every held proposal and puts each one back on the execute queue. */
+    resume: procedure.mutation(({ ctx }) => resumeAndRequeue(ctx.deps)),
+    setMode: procedure
+      .input(z.object({ mode: SystemModeSchema }))
+      .mutation(({ ctx, input }) =>
+        ctx.deps.control.setMode(input.mode, { actor: actorFromUpn(ctx.upn) }),
+      ),
+    setInterruptionBudget: procedure
+      .input(InterruptionBudgetInputSchema)
+      .mutation(({ ctx, input }) =>
+        ctx.deps.control.setInterruptionBudget(input, { actor: actorFromUpn(ctx.upn) }),
+      ),
+  }),
+  settings: router({
+    /** The retention windows the Settings page shows (spec 16, Q3). */
+    retention: procedure.query(({ ctx }) => ctx.deps.config.retention),
+  }),
+  briefs: router({
+    latest: procedure
+      .input(z.object({ kind: BriefKindSchema }))
+      .query(({ ctx, input }) => latestBrief(ctx.deps, input.kind)),
   }),
   proposals: router({
     list: procedure

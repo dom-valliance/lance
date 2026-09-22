@@ -10,6 +10,7 @@ export type {
   ActorOptions,
   HeldProposal,
   HoldableStatus,
+  InterruptionBudget,
   PauseOptions,
   PauseResult,
   ResumeResult,
