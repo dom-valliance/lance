@@ -1,0 +1,27 @@
+{
+  "id": "e04-thorne-veck-restated-inbound",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Marcus Oyelaran",
+      "email": "marcus.oyelaran@thorneveck.example.test"
+    }
+  ],
+  "text": "Subject: Security questionnaire\nDate: Wednesday 30 September 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Marcus Oyelaran <marcus.oyelaran@thorneveck.example.test>\n\nMarcus,\n\nQuick note so we both have the same picture. You said your team would return the security questionnaire by Friday, and I will watch for it.\n\nOnce it lands I can give you a date for the penetration test.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Marcus Oyelaran team to return the completed security questionnaire",
+      "counterpartyName": "Marcus Oyelaran",
+      "counterpartyEmail": "marcus.oyelaran@thorneveck.example.test",
+      "dueAt": "2026-10-02",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "You said your team would return the security questionnaire by Friday, and I will watch for it."
+    }
+  ],
+  "notes": "An inbound commitment restated in a sent mail. Watching for something is not itself a commitment."
+}

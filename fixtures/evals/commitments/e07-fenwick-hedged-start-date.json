@@ -1,0 +1,17 @@
+{
+  "id": "e07-fenwick-hedged-start-date",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Felix Arundel",
+      "email": "felix.arundel@fenwicklabs.example.test"
+    }
+  ],
+  "text": "Subject: Start date\nDate: Wednesday 7 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Felix Arundel <felix.arundel@fenwicklabs.example.test>\n\nFelix,\n\nOn bringing the start forward, we may be able to do it, but I cannot promise anything until resourcing is confirmed next month. I would rather not commit and then move it.\n\nBest,\nDom\n",
+  "expected": [],
+  "notes": "An explicit refusal to commit. Nothing should be extracted."
+}

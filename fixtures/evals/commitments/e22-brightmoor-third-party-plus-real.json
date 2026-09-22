@@ -1,0 +1,27 @@
+{
+  "id": "e22-brightmoor-third-party-plus-real",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Rosa Delaney",
+      "email": "rosa.delaney@brightmoor.example.test"
+    }
+  ],
+  "text": "Subject: Licence keys and the trial\nDate: Wednesday 28 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Rosa Delaney <rosa.delaney@brightmoor.example.test>\n\nRosa,\n\nTwo separate things.\n\nGus at Wyndham tells me he will send your team the environment details this week, so that one is between you.\n\nOn our trial, I will send you our evaluation criteria by Friday.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Rosa Delaney the evaluation criteria for the trial",
+      "counterpartyName": "Rosa Delaney",
+      "counterpartyEmail": "rosa.delaney@brightmoor.example.test",
+      "dueAt": "2026-10-30",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send you our evaluation criteria by Friday."
+    }
+  ],
+  "notes": "A third party promise sits beside a genuine outbound commitment."
+}

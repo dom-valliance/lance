@@ -1,0 +1,27 @@
+{
+  "id": "e19-kestrel-chase",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Callum Reeve",
+      "email": "callum.reeve@kestrelanalytics.example.test"
+    }
+  ],
+  "text": "Subject: Sandbox tenant\nDate: Friday 23 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Callum Reeve <callum.reeve@kestrelanalytics.example.test>\n\nCallum,\n\nChasing gently. You were going to confirm the sandbox tenant with your platform team by 15 October and we have not heard back.\n\nThe integration work is stopped until it exists.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Callum Reeve to confirm the sandbox tenant with the platform team",
+      "counterpartyName": "Callum Reeve",
+      "counterpartyEmail": "callum.reeve@kestrelanalytics.example.test",
+      "dueAt": "2026-10-15",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "You were going to confirm the sandbox tenant with your platform team by 15 October and we have not heard back."
+    }
+  ],
+  "notes": "An overdue inbound commitment restated in a chase mail."
+}

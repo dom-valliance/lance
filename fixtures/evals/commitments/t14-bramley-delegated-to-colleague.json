@@ -1,0 +1,31 @@
+{
+  "id": "t14-bramley-delegated-to-colleague",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Jack Merrow",
+      "email": "jack.merrow@bramleyfoods.example.test"
+    },
+    {
+      "name": "Nadia Kaur",
+      "email": "nadia.kaur@valliance.ai"
+    }
+  ],
+  "text": "# Bramley Foods: model assurance\n\n**Date:** Wednesday 7 October 2026\n\n###### 00:00 - 00:22\n**Jack Merrow**\n\nOur risk committee wants to see how the model was evaluated before we go further.\n\n###### 00:22 - 00:49\n**Dom Selvon**\n\nNadia will send you the model card and the evaluation results by Thursday next week.\n\n###### 00:49 - 01:03\n**Nadia Kaur**\n\nI have most of it already, so that is achievable.\n\n###### 01:03 - 01:16\n**Jack Merrow**\n\nGood. Send it to me rather than the committee directly.\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Nadia Kaur to send Jack Merrow the model card and evaluation results",
+      "counterpartyName": "Jack Merrow",
+      "counterpartyEmail": "jack.merrow@bramleyfoods.example.test",
+      "dueAt": "2026-10-15",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "Nadia will send you the model card and the evaluation results by Thursday next week."
+    }
+  ],
+  "notes": "A Valliance colleague commits on Dom side, so the direction is outbound and the counterparty is the client."
+}

@@ -118,8 +118,18 @@ jobs:
           context: .
           file: apps/${{ matrix.app }}/Dockerfile
           push: false
+          load: true
+          tags: lance-${{ matrix.app }}:ci
           cache-from: type=gha,scope=${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+      # A built image can still be missing a workspace package the app
+      # imports, which only shows at start-up. The api and worker images
+      # run TypeScript under tsx, so importing the app's entry module inside
+      # the image proves every module resolves; the web image is a compiled
+      # standalone server, so it is started and asked for a page instead.
+      - name: Start the ${{ matrix.app }} image and resolve its modules
+        run: scripts/smoke-image.sh ${{ matrix.app }} lance-${{ matrix.app }}:ci
 
   migration-guard:
     name: Forward-only migration guard

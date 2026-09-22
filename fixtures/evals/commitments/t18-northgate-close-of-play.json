@@ -1,0 +1,27 @@
+{
+  "id": "t18-northgate-close-of-play",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Tobias Renn",
+      "email": "tobias.renn@northgaterail.example.test"
+    }
+  ],
+  "text": "# Northgate Rail: incident follow-up\n\n**Date:** Monday 12 October 2026\n\n###### 00:00 - 00:19\n**Tobias Renn**\n\nThe operations director wants to know what we changed after the outage.\n\n###### 00:19 - 00:47\n**Dom Selvon**\n\nI will write the change summary and send it to you by close of play tomorrow.\n\n###### 00:47 - 01:01\n**Tobias Renn**\n\nThat gives me enough time to brief him on Wednesday.\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Write the change summary and send it to Tobias Renn",
+      "counterpartyName": "Tobias Renn",
+      "counterpartyEmail": "tobias.renn@northgaterail.example.test",
+      "dueAt": "2026-10-13",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will write the change summary and send it to you by close of play tomorrow."
+    }
+  ],
+  "notes": "Close of play tomorrow relative to the meeting date."
+}

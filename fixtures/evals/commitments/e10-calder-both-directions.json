@@ -1,0 +1,36 @@
+{
+  "id": "e10-calder-both-directions",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Ravi Khatri",
+      "email": "ravi.khatri@calderhealth.example.test"
+    }
+  ],
+  "text": "Subject: Pilot extension\nDate: Monday 12 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Ravi Khatri <ravi.khatri@calderhealth.example.test>\n\nRavi,\n\nFollowing the programme board, I will send the extension paper on Wednesday with the costs for the third ward.\n\nYou mentioned you would confirm the ward manager sign-off by Thursday. That is the only dependency I have on you.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Ravi Khatri the pilot extension paper with third ward costs",
+      "counterpartyName": "Ravi Khatri",
+      "counterpartyEmail": "ravi.khatri@calderhealth.example.test",
+      "dueAt": "2026-10-14",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the extension paper on Wednesday with the costs for the third ward."
+    },
+    {
+      "direction": "inbound",
+      "description": "Ravi Khatri to confirm the ward manager sign-off",
+      "counterpartyName": "Ravi Khatri",
+      "counterpartyEmail": "ravi.khatri@calderhealth.example.test",
+      "dueAt": "2026-10-15",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "You mentioned you would confirm the ward manager sign-off by Thursday."
+    }
+  ],
+  "notes": "One commitment in each direction in a sent mail."
+}

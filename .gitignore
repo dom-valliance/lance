@@ -7,7 +7,11 @@ dist/
 coverage/
 .next/
 playwright-report/
-fixtures/evals/
+# Eval sets are private by default: the real ones are anonymised extracts of Dom's
+# mail and transcripts. The synthetic commitment set is the exception and is committed.
+fixtures/evals/*
+!fixtures/evals/README.md
+!fixtures/evals/commitments/
 *.log
 .DS_Store
 apps/web/test-results/

@@ -1,0 +1,27 @@
+{
+  "id": "e24-northgate-before-we-meet",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Hannah Cleave",
+      "email": "hannah.cleave@northgaterail.example.test"
+    }
+  ],
+  "text": "Subject: Before the 21st\nDate: Monday 2 November 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Hannah Cleave <hannah.cleave@northgaterail.example.test>\n\nHannah,\n\nSo that the session is useful, I will send the draft service model before we meet on the 21st.\n\nIt will be rough. That is the point at this stage.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Hannah Cleave the draft service model",
+      "counterpartyName": "Hannah Cleave",
+      "counterpartyEmail": "hannah.cleave@northgaterail.example.test",
+      "dueAt": "2026-11-21",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the draft service model before we meet on the 21st."
+    }
+  ],
+  "notes": "Bare day of month in a mail."
+}

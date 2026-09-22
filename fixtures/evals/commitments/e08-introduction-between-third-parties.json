@@ -1,0 +1,21 @@
+{
+  "id": "e08-introduction-between-third-parties",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Felix Arundel",
+      "email": "felix.arundel@fenwicklabs.example.test"
+    },
+    {
+      "name": "Owen Pritchard",
+      "email": "owen.pritchard@oakleyrowe.example.test"
+    }
+  ],
+  "text": "Subject: Introduction: Felix Arundel and Owen Pritchard\nDate: Thursday 8 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Felix Arundel <felix.arundel@fenwicklabs.example.test>, Owen Pritchard <owen.pritchard@oakleyrowe.example.test>\n\nFelix, Owen,\n\nConnecting you both as promised. Felix runs the labs side at Fenwick, Owen is head of data at Oakley Rowe and is looking at the same retrieval problem.\n\nOwen has said he will send Felix the anonymised sample this week, and Felix will come back with a view on feasibility. I will leave you to it.\n\nBest,\nDom\n",
+  "expected": [],
+  "notes": "Both undertakings are between two counterparties. Dom owes nothing and is owed nothing."
+}

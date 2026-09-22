@@ -27,9 +27,6 @@ param postgresEntraAdminObjectId string
 @description('Principal name of the Postgres Entra administrator, normally Dom\'s UPN.')
 param postgresEntraAdminPrincipalName string
 
-@description('Public IPv4 address allowed to reach Postgres from outside Azure for the psql runbook steps. Supply from the shell at deploy time; empty means no rule.')
-param postgresAdminClientIp string = ''
-
 @description('Enable Postgres password authentication alongside Entra. Off by default: the admin password is the one credential that could disable the ledger guard, and nothing in the running system uses it (ADR 0008 keeps it as a fallback only).')
 param postgresPasswordAuthEnabled bool = false
 
@@ -135,7 +132,6 @@ module postgres 'modules/postgres.bicep' = {
     uniqueSuffix: uniqueSuffix
     entraAdminObjectId: postgresEntraAdminObjectId
     entraAdminPrincipalName: postgresEntraAdminPrincipalName
-    adminClientIp: postgresAdminClientIp
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     passwordAuthEnabled: postgresPasswordAuthEnabled
     administratorLogin: postgresAdministratorLogin

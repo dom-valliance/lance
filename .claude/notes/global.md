@@ -112,6 +112,13 @@
 **Rule**: Every registration `main.ts` performs (queues, schedules, workers) has a test that performs it against real pg-boss in a container. When a boot path only runs with credentials that are absent locally, stub the credentials and run it anyway. After a deploy, read each container's console log, not only its revision state.
 **Applies to**: apps/worker/src/main.ts, apps/worker/src/watchers/
 
+### [2026-09-21] Chain every Flexible Server child resource in series
+
+**Context**: The redeploy after the Phase 1 merge failed on the `log_connections` configuration with ServerIsBusy. The template had two resources depending on the same parent (the database and the `shared_preload_libraries` write, then the firewall rules and `log_connections`), so ARM started them in parallel and Flexible Server, which accepts one management operation at a time, refused the second. The first deploy had passed by timing.
+**Correction**: Dom pasted the deployment error.
+**Rule**: On a Postgres Flexible Server, every child resource (administrator, configuration, database, firewall rule) depends on the one before it, forming one chain, never a fan-out from the parent. Treat any ServerIsBusy as a template ordering fault, not a transient to retry.
+**Applies to**: infra/modules/postgres.bicep
+
 ### [2026-09-21] Verification output is read by exit code, never by grep
 
 **Context**: The consent button branch failed CI lint on two unused parameters. The local check had piped eslint through `grep -E "error|✖"` and printed "checks done" regardless of the exit code, and the lines that mattered were lost.
@@ -131,4 +138,45 @@
 **Context**: I built and deployed main at 0978615 and told Dom it carried the shared role fix and the inline error handling. Those were on `fix/pgboss-shared-role`, which had not been merged; the merged branch was the mode switch. Dom found out when the runbook step named a script that did not exist on main.
 **Correction**: Dom: "There is no scripts/psql-admin.sh".
 **Rule**: Before building or deploying, run `git log main..<branch>` for every branch handed over that day and list, in the message to Dom, exactly which commits the tag contains and which are still unmerged. A deployment report names the SHA and what is in it; it never assumes a branch was merged because a merge happened.
+
+### [2026-09-21] Runtime database objects belong to the shared role, never to one identity
+
+**Context**: The first approval in the web app failed with "permission denied for table version". pg-boss had created its tables under the worker's Container App identity, and the api's identity, a member of the same `lance_app` role, could not read them. Membership grants a role's privileges, not ownership of what a member creates.
+**Correction**: Dom reported the failed approval.
+**Rule**: Every app session starts as the shared role (`PG_ROLE=lance_app`, applied by the db client through the connection options) so anything created at runtime is owned by `lance_app`. Anything else that creates objects at runtime gets the same treatment. An environment that predates the setting is repaired once with `REASSIGN OWNED BY "<identity>" TO lance_app`, and the runbook records it.
+**Applies to**: packages/db/src/client.ts, infra/modules/containerapps.bicep, docs/runbooks/deploy.md
+
+### [2026-09-21] A failure message never travels in a URL
+
+**Context**: The proposal decision actions redirected back to the page with the failure in an `error` query parameter, so the message landed in access logs, browser history and bookmarks and reappeared on every refresh.
+**Correction**: Dom: "errors should not be passed in as query string params".
+**Rule**: A server action answers `useActionState` with its failure and the form renders it from React state. No redirect carries a message, an error or anything user-facing in the query string.
+**Applies to**: apps/web
+
+### [2026-09-21] The admin firewall rule is one address and goes stale with the network
+
+**Context**: psql to the dev server timed out for Dom and for me. The `AllowAdminClient` rule still held the morning's public IP; the address had changed during the day.
+**Correction**: Dom pasted the timeout.
+**Rule**: A psql timeout against Flexible Server is checked first against the current public IP and the `AllowAdminClient` rule. The fix is `export LANCE_ADMIN_CLIENT_IP=$(curl -s https://api.ipify.org)` and a redeploy, never a hand-edited rule. The runbook says to take the value from `curl` every time.
+**Applies to**: docs/runbooks/deploy.md, infra/modules/postgres.bicep
+
+### [2026-09-21] The template owns no client firewall rule
+
+**Context**: The single-address rule from `LANCE_ADMIN_CLIENT_IP` went stale within a day because Dom moves between home, work and elsewhere. Supersedes the entry above about refreshing the variable.
+**Correction**: Dom: "I will not always be on the same IP as I move between work and home".
+**Rule**: Access for a laptop is opened per session by `scripts/psql-admin.sh`, which adds a rule for the current address, waits for it, runs psql with an Entra token, and removes the rule on exit. The template's only firewall rule is the Azure services one. Anything tied to where a person happens to be is never a deployment parameter.
+**Applies to**: scripts/psql-admin.sh, infra/modules/postgres.bicep, docs/runbooks/deploy.md
+
+### [2026-09-22] An image that builds is not an image that starts
+
+**Context**: The Phase 2 deploy at 7bd63f5 succeeded, then the api and worker crashed at start with ERR_MODULE_NOT_FOUND on @lance/ontology: the new package was never added to the two Dockerfiles' source lists. CI's image job built all three images green, because a Dockerfile that omits a source directory still builds; the failure only exists at start-up.
+**Correction**: Found by reading the worker console log after the deploy, as the gotcha says; Dom saw nothing new.
+**Rule**: CI runs every image it builds: the api and worker import their entry module inside the container (`scripts/smoke-image.sh`), the web image is started and asked for a page. A new `workspace:*` dependency is not done until that step passes. The migration job is started by hand after a deploy that adds a migration; the deploy alone never runs it.
+**Applies to**: .github/workflows/ci.yml, scripts/smoke-image.sh, apps/*/Dockerfile, docs/runbooks/deploy.md
+
+### [2026-09-22] The verification set is every CI step, formatting included
+
+**Context**: The web design branch passed root lint, typecheck, test and build locally and then failed CI on `pnpm format:check`: nine files written by heredoc and by subagents had never been through Prettier.
+**Correction**: Dom pasted the CI log.
+**Rule**: Before calling a branch done, run every command the workflow runs, read from `.github/workflows/ci.yml` rather than from memory; today that is lint, format:check, typecheck, test, build and the image builds. A subagent's "prettier was run over my files" is not evidence; the root `pnpm format:check` is.
 **Applies to**: global

@@ -9,13 +9,11 @@ import { expect, test } from '@playwright/test';
 // deliberately avoids TS-only syntax such as `as` casts and type
 // annotations; Playwright still type-checks it on its own via esbuild.
 
-test('visiting /today unauthenticated redirects to the Auth.js sign-in page', async ({ page }) => {
+test('visiting /today unauthenticated redirects to the sign-in page', async ({ page }) => {
   await page.goto('/today');
 
-  await expect(page).toHaveURL(/\/api\/auth\/signin/);
-  await expect(
-    page.getByRole('button', { name: /sign in with microsoft entra id/i }),
-  ).toBeVisible();
+  await expect(page).toHaveURL(/\/sign-in/);
+  await expect(page.getByRole('button', { name: /continue with microsoft/i })).toBeVisible();
 });
 
 test('the providers endpoint lists microsoft-entra-id', async ({ request }) => {
@@ -26,19 +24,16 @@ test('the providers endpoint lists microsoft-entra-id', async ({ request }) => {
   expect(Object.keys(body)).toContain('microsoft-entra-id');
 });
 
-test('visiting /proposals unauthenticated redirects to the Auth.js sign-in page', async ({
-  page,
-}) => {
+test('visiting /proposals unauthenticated redirects to the sign-in page', async ({ page }) => {
   await page.goto('/proposals');
 
-  await expect(page).toHaveURL(/\/api\/auth\/signin/);
-  await expect(
-    page.getByRole('button', { name: /sign in with microsoft entra id/i }),
-  ).toBeVisible();
+  await expect(page).toHaveURL(/\/sign-in/);
+  await expect(page.getByRole('button', { name: /continue with microsoft/i })).toBeVisible();
 });
 
-test('visiting /ledger unauthenticated redirects to the Auth.js sign-in page', async ({ page }) => {
+test('visiting /ledger unauthenticated redirects to the sign-in page', async ({ page }) => {
   await page.goto('/ledger');
 
-  await expect(page).toHaveURL(/\/api\/auth\/signin/);
+  await expect(page).toHaveURL(/\/sign-in/);
+  await expect(page.getByRole('button', { name: /continue with microsoft/i })).toBeVisible();
 });

@@ -1,0 +1,17 @@
+{
+  "id": "t03-mirefield-intro-call",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Eleanor Vance",
+      "email": "eleanor.vance@mirefield.example.test"
+    }
+  ],
+  "text": "# Mirefield Council: introductory call\n\n**Date:** Tuesday 22 September 2026\n\n###### 00:00 - 00:18\n**Eleanor Vance**\n\nI wanted to understand what you do before I take anything to the directorate.\n\n###### 00:18 - 00:46\n**Dom Selvon**\n\nWe build internal agents for regulated organisations. Would it be worth looking at the housing dataset first, or is that too sensitive to start with?\n\n###### 00:46 - 01:10\n**Eleanor Vance**\n\nPossibly. It depends where the appetite sits. Do you ever work through the framework, or only direct?\n\n###### 01:10 - 01:28\n**Dom Selvon**\n\nEither. What tends to move faster in your experience?\n\n###### 01:28 - 01:41\n**Eleanor Vance**\n\nHard to say. Let us see where this goes.\n",
+  "expected": [],
+  "notes": "Questions and speculation only. Nothing is owed by anyone."
+}

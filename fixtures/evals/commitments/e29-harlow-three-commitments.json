@@ -1,0 +1,45 @@
+{
+  "id": "e29-harlow-three-commitments",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Priya Nandra",
+      "email": "priya.nandra@harlowbrook.example.test"
+    }
+  ],
+  "text": "Subject: Week ahead\nDate: Monday 9 November 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Priya Nandra <priya.nandra@harlowbrook.example.test>\n\nPriya,\n\nSetting out the week so nothing slips.\n\nI will send the updated migration plan on Tuesday. I will also send the test strategy by Friday, once our test lead has reviewed it.\n\nOn your side, you said you would confirm the go live date with the operations team by Wednesday.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Priya Nandra the updated migration plan",
+      "counterpartyName": "Priya Nandra",
+      "counterpartyEmail": "priya.nandra@harlowbrook.example.test",
+      "dueAt": "2026-11-10",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the updated migration plan on Tuesday."
+    },
+    {
+      "direction": "outbound",
+      "description": "Send Priya Nandra the test strategy after the test lead review",
+      "counterpartyName": "Priya Nandra",
+      "counterpartyEmail": "priya.nandra@harlowbrook.example.test",
+      "dueAt": "2026-11-13",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will also send the test strategy by Friday, once our test lead has reviewed it."
+    },
+    {
+      "direction": "inbound",
+      "description": "Priya Nandra to confirm the go live date with the operations team",
+      "counterpartyName": "Priya Nandra",
+      "counterpartyEmail": "priya.nandra@harlowbrook.example.test",
+      "dueAt": "2026-11-11",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "you said you would confirm the go live date with the operations team by Wednesday"
+    }
+  ],
+  "notes": "Three commitments with one counterparty across both directions."
+}

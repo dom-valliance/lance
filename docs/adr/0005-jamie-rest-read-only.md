@@ -16,3 +16,8 @@ The Jamie connector uses REST with an API key from Key Vault and exposes reads o
 ## Consequences
 
 Jamie tagging from Lance waits for Jamie to ship REST writes; a new ADR then adds the connector and the seed rows. Debrief proposals (spec 10.4) omit Jamie tags. The delete hard floor has a second lock in the key scope, matching the `Mail.Send` pattern in section 4.1.
+
+## Addendum, 2026-09-21
+
+Observed against the live API while building the connector. The API is tRPC over HTTP: personal keys use `/v1/me/<procedure>`, a GET carries its input as `?input={"json":{...}}`, replies are wrapped as `result.data.json`, and the rate limit is 100 requests per minute per personal key with `X-RateLimit-*` headers on a 429. Jamie now documents one write, `POST tasks.update` (change a task's text or completed flag). It does not change this decision: task state lives in Notion (ADR 0009), so Lance has no reason to write to a Jamie task, and the connector still wraps no write. Jamie exposes no key scope query, so the "refuse a key that can delete" guard is structural (no delete wrapper exists) and `checkAccess` proves the key answers on the personal routes. The `meetings.get` reply carries `event.externalId`, the Graph event id, which is how a Jamie meeting is joined to the calendar watcher's event in the ontology.
+

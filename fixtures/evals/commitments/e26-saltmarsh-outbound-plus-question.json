@@ -1,0 +1,27 @@
+{
+  "id": "e26-saltmarsh-outbound-plus-question",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Martina Sacco",
+      "email": "martina.sacco@saltmarsh.example.test"
+    }
+  ],
+  "text": "Subject: Phase two shaping\nDate: Wednesday 4 November 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Martina Sacco <martina.sacco@saltmarsh.example.test>\n\nMartina,\n\nI will send the phase two scope on Friday with the two options we discussed.\n\nWould it help if I joined your planning session, or would that crowd it? Entirely your call.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Martina Sacco the phase two scope with the two options",
+      "counterpartyName": "Martina Sacco",
+      "counterpartyEmail": "martina.sacco@saltmarsh.example.test",
+      "dueAt": "2026-11-06",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send the phase two scope on Friday with the two options we discussed."
+    }
+  ],
+  "notes": "An offer phrased as a question is not a commitment."
+}

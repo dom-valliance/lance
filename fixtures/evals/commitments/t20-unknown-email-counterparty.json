@@ -1,0 +1,27 @@
+{
+  "id": "t20-unknown-email-counterparty",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Ben Thistle",
+      "email": null
+    }
+  ],
+  "text": "# Referral conversation: Ben Thistle\n\n**Date:** Wednesday 14 October 2026\n\n###### 00:00 - 00:22\n**Ben Thistle**\n\nDelphine passed on your name. We are looking at document review and nobody internally owns it.\n\n###### 00:22 - 00:48\n**Dom Selvon**\n\nHappy to look. I will send you a short note on how we have approached document review elsewhere by Friday.\n\n###### 00:48 - 01:04\n**Ben Thistle**\n\nSend it to the address Delphine has. I am between mailboxes at the moment.\n",
+  "expected": [
+    {
+      "direction": "outbound",
+      "description": "Send Ben Thistle a note on previous document review work",
+      "counterpartyName": "Ben Thistle",
+      "counterpartyEmail": null,
+      "dueAt": "2026-10-16",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "I will send you a short note on how we have approached document review elsewhere by Friday."
+    }
+  ],
+  "notes": "The counterparty email is unknown, so matching has to fall back to the normalised name."
+}

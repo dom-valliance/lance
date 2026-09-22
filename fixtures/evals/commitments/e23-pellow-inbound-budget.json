@@ -1,0 +1,36 @@
+{
+  "id": "e23-pellow-inbound-budget",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Delphine Roux",
+      "email": "delphine.roux@pellowventures.example.test"
+    }
+  ],
+  "text": "Subject: Budget for the diagnostic\nDate: Thursday 29 October 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Delphine Roux <delphine.roux@pellowventures.example.test>\n\nDelphine,\n\nNoting where we are. You said you would let me know the budget for the diagnostic by the 20th of next month, once the investment committee has met.\n\nI will hold two weeks in December provisionally.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Delphine Roux to confirm the budget for the diagnostic",
+      "counterpartyName": "Delphine Roux",
+      "counterpartyEmail": "delphine.roux@pellowventures.example.test",
+      "dueAt": "2026-11-20",
+      "dueConfidence": 0.9,
+      "evidenceQuote": "You said you would let me know the budget for the diagnostic by the 20th of next month, once the investment committee has met."
+    },
+    {
+      "direction": "outbound",
+      "description": "Hold two weeks of December capacity provisionally for Pellow Ventures",
+      "counterpartyName": "Delphine Roux",
+      "counterpartyEmail": "delphine.roux@pellowventures.example.test",
+      "dueAt": null,
+      "dueConfidence": 0,
+      "evidenceQuote": "I will hold two weeks in December provisionally."
+    }
+  ],
+  "notes": "A relative date in a different month, plus a short undated outbound commitment."
+}

@@ -1,0 +1,27 @@
+{
+  "id": "e25-oakley-fortnight",
+  "kind": "sent_mail",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Owen Pritchard",
+      "email": "owen.pritchard@oakleyrowe.example.test"
+    }
+  ],
+  "text": "Subject: DPO review\nDate: Tuesday 3 November 2026\nFrom: Dom Selvon <dom@valliance.ai>\nTo: Owen Pritchard <owen.pritchard@oakleyrowe.example.test>\n\nOwen,\n\nThank you for putting the assessment in front of the DPO.\n\nYou said the DPO will come back with comments within a fortnight, which I have noted.\n\nBest,\nDom\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Owen Pritchard to return the DPO comments on the impact assessment",
+      "counterpartyName": "Owen Pritchard",
+      "counterpartyEmail": "owen.pritchard@oakleyrowe.example.test",
+      "dueAt": "2026-11-17",
+      "dueConfidence": 0.5,
+      "evidenceQuote": "You said the DPO will come back with comments within a fortnight, which I have noted."
+    }
+  ],
+  "notes": "A fortnight resolved to fourteen days after the mail date."
+}
