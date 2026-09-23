@@ -7,6 +7,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, scopedDb } from './client.js';
 import { MIGRATIONS_FOLDER, runMigrations } from './migrate.js';
+import { seed } from './seed.js';
 import { startPostgresContainer } from './testing.js';
 
 /**
@@ -15,7 +16,8 @@ import { startPostgresContainer } from './testing.js';
  * written the way the running apps wrote them, then 0009 runs.
  */
 
-const DOM_ID = '01K5S9V6QW3SWCCPVB0N0E300H';
+// Not the seed's principal id, as dev's users row need not be either.
+const DOM_ID = '01K5S9V6QW3SWCCPVB0N0E300J';
 const LEDGER_ID = '01K5S9V6QW3SWCCPVB0N0E301A';
 const RULE_ID = '01K5S9V6QW3SWCCPVB0N0E301B';
 const ALERT_ID = '01K5S9V6QW3SWCCPVB0N0E301C';
@@ -127,6 +129,19 @@ describe('migration 0009 over existing data', () => {
     ]);
     const global = await client.query('SELECT paused, mode, cost_ceiling_gbp FROM system_state');
     expect(global.rows).toEqual([{ paused: false, mode: 'live', cost_ceiling_gbp: '30.01' }]);
+  });
+
+  it('lets the seed run after the migration and keeps the migrated principal', async () => {
+    const db = createDb({ connectionString: container.getConnectionUri() });
+    try {
+      await seed(db);
+    } finally {
+      await db.$client.end();
+    }
+    const principalRows = await client.query('SELECT id FROM principals');
+    expect(principalRows.rows).toEqual([{ id: DOM_ID }]);
+    const stateRows = await client.query('SELECT principal_id FROM principal_state');
+    expect(stateRows.rows).toEqual([{ principal_id: DOM_ID }]);
   });
 
   it("serves the existing rows to the principal's own scope and to no other", async () => {
