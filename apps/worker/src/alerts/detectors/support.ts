@@ -1,6 +1,6 @@
-import { observations, type Db } from '@lance/db';
+import { newestObservationFirst, observations, type Db } from '@lance/db';
 import { ProvenanceRefSchema, type ProvenanceRef } from '@lance/shared';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 /**
  * The reading a detector does before it decides anything (spec 11). Nothing
@@ -46,7 +46,7 @@ export async function latestObservations(
         sql`${observations.payload} ->> 'watcher' = ${options.watcher}`,
       ),
     )
-    .orderBy(observations.sourceRecordId, desc(observations.ts), desc(observations.id));
+    .orderBy(...newestObservationFirst());
 
   return rows.flatMap((row) => {
     const payload = row.payload as Record<string, unknown> | null;

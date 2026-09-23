@@ -102,6 +102,8 @@ Promoted here when the same lesson appears more than twice in `.claude/notes/`.
 - Nothing user-facing travels in a query string. A server action returns its failure through `useActionState`; a redirect never carries a message.
 - Each Dockerfile enumerates the workspace sources it copies. Adding a `workspace:*` dependency or a cross-app type import means updating that Dockerfile and building the image locally in the same change; CI builds all three images on every pull request.
 - New identifiers name the role, `principal`, never the person. Dom is the only principal in v1 and his identifiers come from config; a new function, parameter, type or column that filters or speaks for him says `principal` (`isPrincipalsLiveTask`, not `isDomsLiveTask`). Existing `dom*` names (`config.dom`, `domUserId`, `assignedToDom`) stay until a deliberate wider rename.
+- The newest observation of a record is the most recently recorded one, ordered by the ledger event id (a monotonic ULID) through `newestObservationFirst()` from `@lance/db`, never by `ts`. `ts` is the source's own stamp and a later, fuller read can carry an earlier one.
+- A data repair (resync, backfill, cursor reset) is verified by running the consuming page's own query against the repaired rows and reading the result before telling Dom what the page will show. Rows landing is not the page changing.
 
 ## Memory
 

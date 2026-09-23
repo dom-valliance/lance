@@ -215,3 +215,10 @@
 **Correction**: Dom: "The predicate cannot be isDomsLiveTask. It needs to be isPrincipalsLiveTask as this will probably become a multi user system very soon."
 **Rule**: New identifiers (functions, parameters, types, columns) name the role, `principal`, never the person. Dom is the only principal in v1 and his identifiers live in config; code that reads them says `principal`. Existing `dom*` names in config and payloads (`config.dom`, `domUserId`, `assignedToDom`) stay until a deliberate rename, but nothing new joins them.
 **Applies to**: global
+
+### [2026-09-23] "Newest observation" means most recently recorded, never the source's stamp
+
+**Context**: The calendar resync recorded the full recurring occurrences, but the Today page still showed "(no subject)". Every "latest observation per record" read ordered by `ts`, which is the source's own stamp (lastModifiedDateTime, last edit); the cut-down rows had fallen back to the poll time, so one of them outranked the full row recorded later. I had told Dom the resync and a regenerate would clear it without checking a live row.
+**Correction**: Dom: "I've waited a while and the calendar entries in today are still showing no subject".
+**Rule**: A DISTINCT ON "latest" read orders by the ledger event id (a monotonic ULID minted at append time) through `newestObservationFirst()` from `@lance/db`, never by `ts`. Before promising that a data repair will show on a page, run the page's own query against the repaired rows and read the result.
+**Applies to**: apps/worker/src/briefs/data.ts, apps/worker/src/alerts/detectors/support.ts, apps/api/src/tasks/store.ts, apps/worker/src/watchers/notion/known.ts
