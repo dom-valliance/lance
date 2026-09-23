@@ -17,3 +17,4 @@ One file per decision, numbered, never edited after acceptance except to add a `
 | 0011 | Retention nulls ledger payloads without lifting immutability | Accepted |
 | 0012 | Lance's own Slack channel is a surface, not a connector write | Accepted |
 | 0013 | Budget guard alerts share the cost_spike kind | Accepted |
+| 0014 | Continuous deployment to dev from GitHub Actions | Accepted |

@@ -235,3 +235,24 @@
 **Correction**: Dom asked whether the work had been lost.
 **Rule**: When handing over a UI change, give the file paths as links and say what the user will see on screen (the control's position, its label, what it does when clicked) and which pages will show nothing because they have too few rows. A feature that reads as "pagination" to me is not one until Dom can point at it.
 **Applies to**: global
+
+### [2026-09-23] A merge Dom made is deployed straight after, not folded into a later batch
+
+**Context**: The row hover change merged as PR #24 while dev still ran the image built from the totals branch. I had said I would fold the redeploy into the next batch; Dom looked for the hover and found nothing.
+**Correction**: Dom asked why the pushed change was not visible.
+**Rule**: When Dom merges anything user-visible, build and deploy main at once and say which SHA dev runs. Never describe a merged change as done while dev runs an older image; "merged, not yet deployed" is the honest state and needs a time.
+**Applies to**: global
+
+### [2026-09-23] An OIDC subject is copied from a real token, never composed from the docs
+
+**Context**: The three federated credentials for the GitHub identities were written as `repo:dom-valliance/lance:pull_request` from the documented pattern. The first CI login failed with AADSTS700213: GitHub presents `repo:dom-valliance@215853107/lance@1378678734:pull_request`, the owner and repository names each followed by their numeric id, and Entra matches the whole string.
+**Correction**: Dom pasted the failed azure/login step.
+**Rule**: Before writing a federated credential, read the subject a real token carries (the `subject claim` line azure/login prints on a failed run, or the repository's ids from the GitHub API) and put every part of it in the parameter file. Expect the first login of a new identity to fail and treat that run as the source of the value.
+**Applies to**: infra/deployer.bicep, infra/params/deployer-*.bicepparam, docs/runbooks/github-deploy-setup.md
+
+### [2026-09-23] A what-if needs deploy rights, so a read-only what-if on pull requests does not exist
+
+**Context**: A second managed identity with Reader on the resource group was meant to run `az deployment sub what-if` on every pull request. Its first run failed with `Authorization failed` for every resource in the template: what-if runs the same authorisation pre-flight as a deployment and checks write permission on each resource.
+**Correction**: Dom pasted the failed CI step.
+**Rule**: Treat what-if as a write-privileged operation when designing identities. The plan runs where the deploy identity runs, immediately before the deploy, and a pull request is reviewed on its diff, build, lint and guards. Never give a `pull_request` token deploy rights to get a plan.
+**Applies to**: infra/deployer.bicep, .github/workflows/ci.yml, .github/workflows/deploy.yml
