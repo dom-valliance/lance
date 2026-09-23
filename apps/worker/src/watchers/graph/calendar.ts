@@ -77,7 +77,7 @@ export type GraphCalendarRecord = {
 };
 
 export interface GraphCalendarWatcherOptions {
-  reads: Pick<GraphReads, 'deltaCalendarView'>;
+  reads: Pick<GraphReads, 'deltaCalendarView' | 'getEvent'>;
   now?: () => string;
   schedules?: readonly string[];
 }
@@ -180,8 +180,29 @@ function addDays(iso: string, days: number): string {
   return new Date(new Date(iso).getTime() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
+/**
+ * The calendar delta returns an occurrence of a recurring series in a
+ * cut-down form: id, start and end, with nothing else. Every full event
+ * carries `subject`, `organizer` and `attendees` (null or empty when
+ * blank), so all three missing at once marks the cut-down form. Stored as
+ * it arrives it would reach the brief as "(no subject)" with nobody in it.
+ */
+export function isAbbreviatedOccurrence(event: CalendarEvent): boolean {
+  return (
+    event.subject === undefined &&
+    event.organizer === undefined &&
+    event.attendees === undefined &&
+    event.start !== undefined &&
+    event.start !== null
+  );
+}
+
 export function createGraphCalendarWatcher(options: GraphCalendarWatcherOptions): Watcher {
   const now = options.now ?? nowIso;
+
+  /** Reads an abbreviated occurrence in full; anything else passes through. */
+  const hydrate = (event: CalendarEvent): Promise<CalendarEvent> =>
+    isAbbreviatedOccurrence(event) ? options.reads.getEvent(event.id) : Promise.resolve(event);
 
   return {
     name: GRAPH_CALENDAR_WATCHER_NAME,
@@ -197,7 +218,10 @@ export function createGraphCalendarWatcher(options: GraphCalendarWatcherOptions)
         end: addDays(start, CALENDAR_WINDOW_DAYS),
         ...(cursor === null ? {} : { deltaLink: cursor }),
       });
-      const records: SourceRecord[] = delta.events.map((event) => ({
+      // A hydration failure fails the poll, and the cursor stays where it
+      // was, so the next poll asks for the same occurrences again.
+      const events = await Promise.all(delta.events.map(hydrate));
+      const records: SourceRecord[] = events.map((event) => ({
         id: event.id,
         observedAt: event.lastModifiedDateTime ?? start,
         raw: event,

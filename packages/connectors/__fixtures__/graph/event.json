@@ -1,0 +1,26 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('dom%40example.com')/events/$entity",
+  "@odata.etag": "W/\"EVT0003\"",
+  "id": "AAMkAGI2-evt-0003",
+  "subject": "Northwind weekly sync",
+  "start": { "dateTime": "2026-09-23T10:45:00.0000000", "timeZone": "UTC" },
+  "end": { "dateTime": "2026-09-23T11:00:00.0000000", "timeZone": "UTC" },
+  "isCancelled": false,
+  "isAllDay": false,
+  "organizer": {
+    "emailAddress": { "name": "Priya Raman", "address": "priya.raman@northwind.example.com" }
+  },
+  "attendees": [
+    {
+      "type": "required",
+      "status": { "response": "none", "time": "0001-01-01T00:00:00Z" },
+      "emailAddress": { "name": "Dom Selvon", "address": "dom@example.com" }
+    }
+  ],
+  "location": { "displayName": "Microsoft Teams Meeting", "locationType": "default" },
+  "onlineMeeting": { "joinUrl": "https://teams.example.com/l/meetup-join/evt-0003" },
+  "webLink": "https://outlook.office365.com/owa/?itemid=AAMkAGI2-evt-0003",
+  "lastModifiedDateTime": "2026-09-19T08:12:40Z",
+  "iCalUId": "040000008200E00074C5B7101A82E00800000000EVT0003",
+  "seriesMasterId": "AAMkAGI2-series-0003"
+}

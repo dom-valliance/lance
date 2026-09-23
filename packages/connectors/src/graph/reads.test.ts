@@ -192,6 +192,25 @@ describe('getMessage', () => {
   });
 });
 
+describe('getEvent', () => {
+  it('reads one event with the fields the calendar delta selects', async () => {
+    const urls: string[] = [];
+    server.use(
+      http.get(`${GRAPH_BASE_URL}/me/events/:id`, ({ request }) => {
+        urls.push(request.url);
+        return json('event');
+      }),
+    );
+
+    const event = await readsOver().getEvent('AAMkAGI2-evt-0003');
+
+    expect(event.subject).toBe('Northwind weekly sync');
+    expect(event.seriesMasterId).toBe('AAMkAGI2-series-0003');
+    expect(urls[0]).toContain('/me/events/AAMkAGI2-evt-0003?');
+    expect(urls[0]).toContain('$select=id,subject,start,end');
+  });
+});
+
 describe('the retry policy', () => {
   it('retries once after a 429 and honours Retry-After without sleeping in the test', async () => {
     let calls = 0;

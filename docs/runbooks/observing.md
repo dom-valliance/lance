@@ -42,6 +42,18 @@ The ceiling itself is set on the Settings page and read on every model call. The
 
 Every read, proposal, decision, alert and state change is a ledger event; the Ledger page filters by kind, actor and correlation id. A brief's correlation id links the planner run, its proposals and the Slack posts.
 
+## 6. Resynchronising a watcher
+
+A watcher's cursor is one row in `cursors`, keyed by watcher and partition. Deleting the row makes the next scheduled poll read the whole window again. Ingestion is idempotent (non-negotiable 6): a record whose content is unchanged produces no new observation, a record whose content changed produces one, so a resync is safe to run at any time and costs one full delta pass.
+
+```
+scripts/psql-admin.sh lance -X -P pager=off \
+  -c "select watcher, key, updated_at from cursors order by watcher, key;" \
+  -c "delete from cursors where watcher = 'graph-calendar' and key = 'calendar';"
+```
+
+The calendar poll runs every fifteen minutes. Once it has run, regenerate the brief from the Today page or with `/lance brief` so the new observations reach it.
+
 ## What each symptom usually means
 
 | Symptom | Look at | Usual cause |
@@ -50,3 +62,4 @@ Every read, proposal, decision, alert and state change is a ledger event; the Le
 | `/lance brief` posted nothing | failed `brief-morning` job | The Slack breaker was open, or the brief failed to assemble; the brief is stored either way and shown on Today |
 | Spend ceiling reached | `agent_runs` by agent | A first-day backfill, or a labeller failing on every message |
 | A detector's alert count climbs by three at a time | failed `detector-*` jobs | The job failed after writing the alert and was retried |
+| A meeting shows as "(no subject)" with no attendees | the `graph-calendar` observation for the event id | The calendar delta abbreviated an occurrence of a recurring series to id, start and end and the watcher stored it before it read occurrences in full. Resynchronise the watcher (section 6) and regenerate the brief |
