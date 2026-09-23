@@ -38,11 +38,21 @@ az deployment sub create \
 
 On a clean environment the what-if lists six creations (identity, credential, two group role assignments, role definition, subscription role assignment) and the existing resources to ignore. Anything reported as a modification of a resource `main.bicep` owns is a fault in the template; stop and read it.
 
-An environment that received the earlier version of this template also has `id-lance-github-plan-dev` and the `Lance deployment reader` role, which nothing uses now. The template no longer declares them and a redeploy leaves them in place; remove them once:
+An environment that received the earlier version of this template also has `id-lance-github-plan-dev`, its two role assignments and the `Lance deployment reader` role, which nothing uses now. The template no longer declares them and a redeploy leaves them in place. Remove them once, assignments first: deleting an identity does not delete its role assignments, they stay behind with an empty principal name, and a role definition cannot be deleted while an assignment references it.
 
 ```
+principal=$(az identity show -g rg-lance-dev -n id-lance-github-plan-dev --query principalId -o tsv)
+az role assignment list --all --assignee "$principal" --query "[].id" -o tsv | xargs -n1 az role assignment delete --ids
 az identity delete -g rg-lance-dev -n id-lance-github-plan-dev
 az role definition delete --name "Lance deployment reader"
+```
+
+If the identity was deleted first, find the orphaned assignments by the role and by the group instead, and delete each by id:
+
+```
+az role assignment list --all --role "Lance deployment reader" --query "[].id" -o tsv
+az role assignment list -g rg-lance-dev --query "[?principalName==''].{id:id, role:roleDefinitionName}" -o table
+az role assignment delete --ids <id>
 ```
 
 ## 2. Read the values GitHub needs
@@ -102,11 +112,13 @@ The workflow and the runbook share `scripts/deploy.sh`, `scripts/run-migration-j
 
 ## Removing the identity
 
-Delete the role definition last, since the assignment references it:
+Role assignments first, because deleting an identity leaves its assignments behind and a role definition cannot be deleted while one references it:
 
 ```
+principal=$(az identity show -g rg-lance-dev -n id-lance-github-deploy-dev --query principalId -o tsv)
+az role assignment list --all --assignee "$principal" --query "[].id" -o tsv | xargs -n1 az role assignment delete --ids
 az identity delete -g rg-lance-dev -n id-lance-github-deploy-dev
 az role definition delete --name "Lance deployment writer"
 ```
 
-Then remove the GitHub environment and the two repository secrets. Deleting an identity removes its role assignments with it.
+Then remove the GitHub environment and the two repository secrets.
