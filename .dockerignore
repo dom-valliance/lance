@@ -18,4 +18,4 @@ infra
 !**/.env.example
 *.log
 .DS_Store
-Ian-Assistant_Spec_v1.md
+Lance-Assistant_Spec_v1.md

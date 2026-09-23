@@ -1,8 +1,8 @@
-# Ian: Specification v1
+# Lance: Specification v1
 
 Personal operating agent for Dom Selvon. Watches mail, calendar, meetings and tasks; keeps a ledger of everything it sees and does; proposes actions through Slack; executes only what policy allows; prepares the day. Built with the Anthropic Agent SDK in TypeScript on Azure Container Apps, backed by Postgres with a graph ontology, fronted by Next.js.
 
-Ian is the personal half of the Val/Ian pair. Val (company-wide, own Entra identity) is out of scope for v1 and shares this substrate later. Every design choice below should survive a second agent identity being added without a rewrite.
+Lance is the personal half of the Val/Lance pair. Val (company-wide, own Entra identity) is out of scope for v1 and shares this substrate later. Every design choice below should survive a second agent identity being added without a rewrite.
 
 ---
 
@@ -22,7 +22,7 @@ Read the whole file before writing code. Then:
 
 ## 1. Purpose and scope
 
-### 1.1 What Ian does
+### 1.1 What Lance does
 
 - Watches Outlook mail and calendar, Jamie meetings and tasks, Notion tasks and meeting notes, and the logs of other agents.
 - Records every observation, proposal, decision and action in an append-only ledger.
@@ -37,7 +37,7 @@ Read the whole file before writing code. Then:
 ### 1.2 In scope for v1
 
 - Single user (Dom), single tenant, delegated permissions only.
-- Sources: Microsoft Graph (mail, calendar), Jamie, Notion, Ian's own telemetry, the existing inbox-agent Slack channel, a generic log-ingest webhook.
+- Sources: Microsoft Graph (mail, calendar), Jamie, Notion, Lance's own telemetry, the existing inbox-agent Slack channel, a generic log-ingest webhook.
 - Adjudication: Slack bot user posting into the existing `dom-claude-agent` channel (C0BU7P278N5), plus the Next.js UI.
 - Write actions limited to: create Outlook draft, apply Outlook category, move mail to a folder Dom created, create or update Notion task, create Jamie task, apply Jamie tag, create calendar hold, post Slack message. Nothing else in v1.
 - Azure: Container Apps, Azure Database for PostgreSQL Flexible Server with the `age` extension, Key Vault, Container Registry, Log Analytics and Application Insights.
@@ -45,7 +45,7 @@ Read the whole file before writing code. Then:
 ### 1.3 Out of scope for v1
 
 - HubSpot (v2, first Val-shared source).
-- Sending email. Ian drafts; Dom sends. Hard floor in v1.
+- Sending email. Lance drafts; Dom sends. Hard floor in v1.
 - Deleting anything in any external system. Hard floor, permanent.
 - Teams as a surface.
 - Multi-user, Val identity, Foundry Agent Service hosting.
@@ -64,7 +64,7 @@ These are enforced in code and tested. They go into `CLAUDE.md` verbatim.
 5. **Provenance on every claim.** Every alert, brief line and proposal carries the source system, record id, record hash and observed-at timestamp. The UI renders these as links.
 6. **Idempotent ingestion.** Every watcher keeps a cursor; every observation has an idempotency key of `system:record_id:content_hash`. Re-running a watcher over the same window produces no new events.
 7. **Kill switch.** One command pauses all watchers and the executor within one scheduler tick (default 30 s) and cancels queued proposals' execution. Reads may continue; writes stop.
-8. **Non-destructive by construction.** Ian never overwrites content it did not create. Updates to Notion tasks touch only fields Ian set or Dom approved in the proposal preview.
+8. **Non-destructive by construction.** Lance never overwrites content it did not create. Updates to Notion tasks touch only fields Lance set or Dom approved in the proposal preview.
 
 ---
 
@@ -76,7 +76,7 @@ These are enforced in code and tested. They go into `CLAUDE.md` verbatim.
 ┌─────────────────────────────────────────────────────────────────────┐
 │ apps/web  Next.js 15 App Router, React 19, Tailwind, shadcn         │
 │   Today · Proposals · Tasks · Commitments · Alerts · Ontology       │
-│   Policies · Ledger · Agents · Settings                              │
+│   Policies · Ledger · Agents · Settings                             │
 └─────────────────────────────────────────────────────────────────────┘
                         ▲ tRPC over HTTPS + SSE for live updates
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -100,7 +100,7 @@ These are enforced in code and tested. They go into `CLAUDE.md` verbatim.
                         ▲
 ┌─────────────────────────────────────────────────────────────────────┐
 │ Azure Database for PostgreSQL Flexible Server                       │
-│   relational schema (section 5) + AGE graph `ian_ontology`          │
+│   relational schema (section 5) + AGE graph `lance_ontology`        │
 │   pgvector for embeddings                                           │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -137,9 +137,9 @@ Three Container Apps: `web`, `api`, `worker`. One Postgres. One Key Vault. No Re
 
 ## 4. Identity, security and compliance
 
-### 4.1 Ian's identity
+### 4.1 Lance's identity
 
-One Entra app registration, `Ian (Valliance)`, single-tenant, delegated permissions only. Ian acts as Dom via OAuth 2.0 authorisation code with PKCE and refresh tokens. Tokens live in Key Vault, never in Postgres.
+One Entra app registration, `Lance (Valliance)`, single-tenant, delegated permissions only. Lance acts as Dom via OAuth 2.0 authorisation code with PKCE and refresh tokens. Tokens live in Key Vault, never in Postgres.
 
 Graph scopes requested in v1:
 
@@ -153,9 +153,9 @@ Graph scopes requested in v1:
 
 `Mail.Send` is not requested in v1. The absence of the scope is the second lock behind the policy hard floor.
 
-Jamie: API token from Dom's account, stored in Key Vault. Notion: internal integration token, shared only with the databases and pages Ian needs. Slack: a new app `Ian` with a bot user; scopes `chat:write`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `reactions:read`, `reactions:write`, `commands`, `users:read`. Interactivity and events over HTTPS to `api`, signed-request verification on every call.
+Jamie: API token from Dom's account, stored in Key Vault. Notion: internal integration token, shared only with the databases and pages Lance needs. Slack: a new app `Lance` with a bot user; scopes `chat:write`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `reactions:read`, `reactions:write`, `commands`, `users:read`. Interactivity and events over HTTPS to `api`, signed-request verification on every call.
 
-The Slack bot posts as `Ian`, never as Dom. This is what makes messages arrive unread.
+The Slack bot posts as `Lance`, never as Dom. This is what makes messages arrive unread.
 
 ### 4.2 Secrets and rotation
 
@@ -165,13 +165,13 @@ The Slack bot posts as `Ian`, never as Dom. This is what makes messages arrive u
 
 ### 4.3 Kill switch
 
-- `POST /admin/pause` (Entra-authenticated, Dom only), `/ian pause` in Slack, and a button in Settings. All three set `system_state.paused = true` with a reason and actor, recorded in the ledger.
+- `POST /admin/pause` (Entra-authenticated, Dom only), `/lance pause` in Slack, and a button in Settings. All three set `system_state.paused = true` with a reason and actor, recorded in the ledger.
 - Scheduler checks the flag every tick. Watchers and executor exit early when paused. Queued executions are marked `held`, not cancelled; `resume` re-queues them after a fresh policy evaluation.
 - A pause survives restarts because it lives in Postgres.
 
 ### 4.4 Data protection
 
-Ian holds mail, transcripts and notes that name people who have not consented to an agent reading them. Requirements:
+Lance holds mail, transcripts and notes that name people who have not consented to an agent reading them. Requirements:
 
 - Data map in `docs/compliance/data-map.md` listing every table, what personal data it holds, source, purpose, lawful basis (legitimate interests, with the LIA documented), retention.
 - Retention defaults: raw mail bodies 90 days; transcripts 180 days; ontology facts indefinite; ledger 2 years; model prompt and response logs 30 days. Retention job runs nightly and writes a `retention_applied` ledger event with counts. Ledger rows are never deleted by the job; the raw payload column is nulled and the hash kept.
@@ -194,7 +194,7 @@ Ids are ULIDs. Timestamps are `timestamptz`. All tables have `created_at`. Table
 | ts | timestamptz | Event time, not insert time. |
 | actor | text | `agent:triage@1.4.0`, `agent:executor@1.4.0`, `user:dom`, `system:retention` |
 | kind | enum | `observed`, `resolved`, `proposed`, `decided`, `executed`, `failed`, `alert_raised`, `alert_acked`, `rule_changed`, `state_changed`, `retention_applied`, `cost_recorded` |
-| source_system | text nullable | `graph`, `jamie`, `notion`, `slack`, `ian`, `webhook` |
+| source_system | text nullable | `graph`, `jamie`, `notion`, `slack`, `lance`, `webhook` |
 | source_record_id | text nullable | |
 | source_record_hash | text nullable | SHA-256 of the canonicalised record. |
 | idempotency_key | text unique nullable | `system:record_id:hash` for `observed`. |
@@ -204,7 +204,7 @@ Ids are ULIDs. Timestamps are `timestamptz`. All tables have `created_at`. Table
 | payload | jsonb | Event-specific. Nulled by retention for raw content; structure kept. |
 | payload_hash | text | Kept after retention. |
 
-Grants: `ian_app` role has `SELECT, INSERT`. Trigger `ledger_immutable` raises on UPDATE or DELETE. A test in `packages/ledger` asserts both.
+Grants: `lance_app` role has `SELECT, INSERT`. Trigger `ledger_immutable` raises on UPDATE or DELETE. A test in `packages/ledger` asserts both.
 
 **observations**: normalised view of `observed` events for query convenience. Materialised from the ledger; rebuildable.
 
@@ -238,7 +238,7 @@ Grants: `ian_app` role has `SELECT, INSERT`. Trigger `ledger_immutable` raises o
 
 **alerts**: id, severity, kind, dedupe_key, title, body, provenance, status (`open`, `acked`, `resolved`, `suppressed`), first_seen, last_seen, count, acked_by, acked_at, slack_ts.
 
-**tasks_ian**: Ian-native tasks that have no home in Notion or Jamie. Everything else is read from source and referenced by ontology.
+**tasks_lance**: Lance-native tasks that have no home in Notion or Jamie. Everything else is read from source and referenced by ontology.
 
 **commitments**: id, direction (`outbound` = Dom owes, `inbound` = owed to Dom), owner_person_id, counterparty_person_id, description, due_at (nullable), due_confidence, evidence_quote, source refs, status (`open`, `chased`, `done`, `dropped`), chase_count, next_chase_at.
 
@@ -250,7 +250,7 @@ Grants: `ian_app` role has `SELECT, INSERT`. Trigger `ledger_immutable` raises o
 
 **users**: one row in v1. UPN, Slack user id, time zone.
 
-### 5.2 Graph ontology (Apache AGE, graph `ian_ontology`)
+### 5.2 Graph ontology (Apache AGE, graph `lance_ontology`)
 
 Node labels and required properties. Every node carries `id`, `created_at`, `updated_at`, `source_refs: [{system, id, url, observed_at}]`, `confidence`.
 
@@ -259,12 +259,12 @@ Node labels and required properties. Every node carries `id`, `created_at`, `upd
 | Person | display_name, emails[], slack_id, notion_user_id, jamie_participant_ids[], org_id, role, is_internal |
 | Organisation | name, domains[], type (`client`, `prospect`, `partner`, `vendor`, `internal`, `unknown`) |
 | Meeting | title, start, end, jamie_id, graph_event_id, transcript_ref, tags[] |
-| Task | title, status, due, source (`notion`, `jamie`, `ian`), source_id, assignee_id |
+| Task | title, status, due, source (`notion`, `jamie`, `lance`), source_id, assignee_id |
 | Commitment | mirrors `commitments` row id; graph holds relationships only |
 | Thread | graph_conversation_id, subject, last_message_at, participants |
 | Document | title, url, system, last_modified |
 | Project | name, notion_page_id, client_org_id, status. Valliance calls these missions; keep both names in `aliases[]`. |
-| Agent | name, version, owner. Ian's own agents and external agents whose logs it watches. |
+| Agent | name, version, owner. Lance's own agents and external agents whose logs it watches. |
 
 Edges: `WORKS_AT`, `ATTENDED`, `ORGANISED`, `MENTIONS`, `ASSIGNED_TO`, `OWES` (Commitment → Person), `OWED_TO` (Commitment → Person), `ABOUT` (Commitment/Task/Meeting → Project or Organisation), `DERIVED_FROM` (Commitment/Task → Meeting or Thread), `PARTICIPATED_IN` (Person → Thread), `RELATES_TO`, `SAME_AS` (candidate identity merge, with `confidence`, `status`).
 
@@ -293,9 +293,9 @@ Pure TypeScript. No model calls. Deterministic. 100% branch coverage required in
 
 **counterparty_class**: `self`, `internal`, `client`, `prospect`, `partner`, `vendor`, `unknown`. Derived from the ontology: the Organisation type of the most external participant. `unknown` when any participant cannot be resolved.
 
-**system**: `graph`, `jamie`, `notion`, `slack`, `ian`.
+**system**: `graph`, `jamie`, `notion`, `slack`, `lance`.
 
-**reversibility**: `reversible` (a category, a tag, an Ian-native task), `compensatable` (a Notion task that can be marked cancelled, a draft that can be discarded), `irreversible` (a sent email, a delete). Assigned per action class in code.
+**reversibility**: `reversible` (a category, a tag, an Lance-native task), `compensatable` (a Notion task that can be marked cancelled, a draft that can be discarded), `irreversible` (a sent email, a delete). Assigned per action class in code.
 
 ### 6.2 Rules
 
@@ -339,12 +339,12 @@ Seed rules for v1 (`packages/policy/seed.ts`):
 | apply_category | * | graph | auto (newsletters, notifications only, by classifier label) |
 | move_mail | * | graph | auto for `Newsletters` and `Notifications` labels into the `AI-Filed` folder; propose otherwise |
 | apply_tag | * | jamie | auto for existing tags; propose for `create_tag` |
-| create_task | self, internal | notion, ian | propose |
+| create_task | self, internal | notion, lance | propose |
 | create_task | client, prospect, partner, vendor, unknown | * | propose |
 | update_task, complete_task | * | notion | propose |
 | draft_email | * | graph | propose |
 | create_calendar_hold | * | graph | propose |
-| post_slack | self | slack | auto (Ian's own channel only) |
+| post_slack | self | slack | auto (Lance's own channel only) |
 
 ### 6.3 Modes
 
@@ -392,8 +392,8 @@ The runner handles cursors, idempotency keys, ledger writes, ontology upserts of
 | `graph-mail` | every 10 min 07:00 to 19:00 UK weekdays, hourly otherwise | Graph delta token per folder | Inbox and Sent. Haiku labels each message into the existing taxonomy (Deals, Internal, Action, Calendar, Alerts, Newsletters, Priority). Sent mail feeds commitment extraction. |
 | `graph-calendar` | every 15 min | delta token | Next 14 days. Detects new, moved, cancelled events and attendee changes. |
 | `jamie` | every 15 min | last meeting updated_at | Meetings, transcripts when ready, tasks assigned to Dom, tags. Uses Jamie's API or MCP endpoint per section 16 Q1. |
-| `notion` | every 15 min | last_edited_time | All Tasks DB (`20257534-6e48-81fe-b4b5-000b69ecace6`, Dom's user id `1fdd872b-594c-8146-b22f-00028f1f5a41`), Meetings DB, project pages Ian is shared on. |
-| `agent-logs` | continuous | per stream | Three streams: Ian's own OTel spans via App Insights query; the `dom-claude-agent` Slack channel history (the inbox agent's digests and watermark lines); `POST /ingest/agent-log` webhook for any other agent with a shared secret. Emits `observed` with `kind: agent_log`. |
+| `notion` | every 15 min | last_edited_time | All Tasks DB (`20257534-6e48-81fe-b4b5-000b69ecace6`, Dom's user id `1fdd872b-594c-8146-b22f-00028f1f5a41`), Meetings DB, project pages Lance is shared on. |
+| `agent-logs` | continuous | per stream | Three streams: Lance's own OTel spans via App Insights query; the `dom-claude-agent` Slack channel history (the inbox agent's digests and watermark lines); `POST /ingest/agent-log` webhook for any other agent with a shared secret. Emits `observed` with `kind: agent_log`. |
 
 Watcher failures: three consecutive failures on a partition trip the circuit breaker, raise a P1 alert with the last error, and stop that partition until reset or until the next successful health probe. Never skip silently.
 
@@ -465,7 +465,7 @@ Fixtures: every connector ships recorded responses under `__fixtures__` and test
 
 ## 9. Slack protocol
 
-Bot user `Ian`. Channel `dom-claude-agent` (C0BU7P278N5) for v1; migrate the inbox agent's posting into Ian by the end of Phase 1 so the channel has one voice. Everything Ian posts in Slack is also in the UI, and vice versa; the proposal id is the join.
+Bot user `Lance`. Channel `dom-claude-agent` (C0BU7P278N5) for v1; migrate the inbox agent's posting into Lance by the end of Phase 1 so the channel has one voice. Everything Lance posts in Slack is also in the UI, and vice versa; the proposal id is the join.
 
 ### 9.1 Message types
 
@@ -483,7 +483,7 @@ Bot user `Ian`. Channel `dom-claude-agent` (C0BU7P278N5) for v1; migrate the inb
 
 ### 9.2 Commands
 
-`/ian task <text>` creates an Ian-native task (auto) and, if the text names a project or person the ontology resolves, proposes a Notion task instead. `/ian brief` regenerates the morning brief now. `/ian status` prints paused state, mode, watcher cursors and last-run ages, today's cost. `/ian pause [reason]` and `/ian resume`. `/ian chase <commitment id>` drafts a chase email as a proposal.
+`/lance task <text>` creates an Lance-native task (auto) and, if the text names a project or person the ontology resolves, proposes a Notion task instead. `/lance brief` regenerates the morning brief now. `/lance status` prints paused state, mode, watcher cursors and last-run ages, today's cost. `/lance pause [reason]` and `/lance resume`. `/lance chase <commitment id>` drafts a chase email as a proposal.
 
 ### 9.3 Free text
 
@@ -505,7 +505,7 @@ Generated by the Planner, stored in `briefs`, rendered to Slack and to the Today
 
 1. Day shape: first and last meeting, total meeting hours, longest free block. Proposed holds if free time is under a configurable minimum (default 2 h).
 2. Meetings, in order. For each: attendees resolved to Person nodes with organisation, last three interactions with each (mail, meetings), open commitments in both directions with those people or that organisation, documents and transcripts referenced in the last 30 days, and two suggested objectives. Unknown attendees flagged.
-3. Tasks: due today or overdue across Notion, Jamie and Ian-native, deduplicated by ontology, source badge on each. Top five by the Planner's ranking with a one-line reason each.
+3. Tasks: due today or overdue across Notion, Jamie and Lance-native, deduplicated by ontology, source badge on each. Top five by the Planner's ranking with a one-line reason each.
 4. Waiting for: inbound commitments past their chase date, with a `Chase` button that creates a `draft_email` proposal.
 5. Overnight: alerts raised, proposals awaiting decision (count and the top three), what executed automatically.
 6. Agent health: one line. Watcher ages, breaker states, yesterday's cost.
@@ -558,7 +558,7 @@ Entra sign-in; one allowed UPN. Server components by default; SSE from `api` for
 |---|---|
 | Today | Rendered morning brief with live state; regenerate button; afternoon board below it after 16:00. |
 | Proposals | Queue with the same four actions as Slack. Filters by cell, status, system. Diff view for edited proposals. |
-| Tasks | Aggregated across Notion, Jamie, Ian-native. Source badges. Create task → proposal (or Ian-native auto). Complete → proposal for Notion, auto for Ian-native. Jamie has no completion endpoint; show as read-only with a link. |
+| Tasks | Aggregated across Notion, Jamie, Lance-native. Source badges. Create task → proposal (or Lance-native auto). Complete → proposal for Notion, auto for Lance-native. Jamie has no completion endpoint; show as read-only with a link. |
 | Commitments | Two tabs: I owe, owed to me. Ageing, chase button, mark done, drop with reason. |
 | Alerts | Open, acked, muted. Ack, mute, link to provenance. |
 | Ontology | Search; entity pages (Person, Organisation, Project) with timeline of interactions, open commitments, related tasks; `SAME_AS` review queue with merge and dismiss. |
@@ -596,9 +596,9 @@ Accessibility to WCAG 2.2 AA. Keyboard-complete proposal handling.
 
 ## 15. Phases and acceptance criteria
 
-**Phase 0. Foundations.** Monorepo, Bicep, Postgres with AGE and pgvector, Drizzle schema, ledger with immutability, policy engine with seed rules and hard floors, pg-boss scheduler, Entra sign-in to a blank web shell, Slack app with `/ian status`, OTel wired. Accept when: CI green; ledger UPDATE and DELETE fail in test; policy tests at 100%; `/ian status` answers from production.
+**Phase 0. Foundations.** Monorepo, Bicep, Postgres with AGE and pgvector, Drizzle schema, ledger with immutability, policy engine with seed rules and hard floors, pg-boss scheduler, Entra sign-in to a blank web shell, Slack app with `/lance status`, OTel wired. Accept when: CI green; ledger UPDATE and DELETE fail in test; policy tests at 100%; `/lance status` answers from production.
 
-**Phase 1. Mail and calendar, dry run then live.** `graph-mail` and `graph-calendar` watchers, triage, proposal cards in Slack, executor for `apply_category`, `move_mail`, `draft_email`, `create_calendar_hold`, critic on drafts. Five working days dry run. Accept when: zero duplicate observations across a full re-poll; every proposal in Slack resolves to a ledger trail in the UI Ledger page; Dom has approved at least 20 proposals live; inbox agent's Slack posting is retired in favour of Ian.
+**Phase 1. Mail and calendar, dry run then live.** `graph-mail` and `graph-calendar` watchers, triage, proposal cards in Slack, executor for `apply_category`, `move_mail`, `draft_email`, `create_calendar_hold`, critic on drafts. Five working days dry run. Accept when: zero duplicate observations across a full re-poll; every proposal in Slack resolves to a ledger trail in the UI Ledger page; Dom has approved at least 20 proposals live; inbox agent's Slack posting is retired in favour of Lance.
 
 **Phase 2. Jamie and Notion, commitments, debrief.** Both watchers, task aggregation, commitment extraction from transcripts and sent mail, debrief flow, Tasks and Commitments pages. Accept when: eval F1 for commitment extraction above 0.8 on the golden set; a real meeting produces a debrief card with at least one approved Notion task within one hour of transcript arrival.
 
@@ -617,7 +617,7 @@ Accessibility to WCAG 2.2 AA. Keyboard-complete proposal handling.
 | # | Question | Default if unanswered |
 |---|---|---|
 | Q1 | Jamie access: REST API with token, or its MCP server? Does it offer webhooks for transcript-ready? | Poll every 15 min via whichever the connector team can authenticate first; MCP through the SDK's MCP client if REST is unavailable. |
-| Q2 | Which agents beyond Ian and the inbox agent should the agent-logs watcher cover in v1? | Only those two plus the webhook. Client-project agents are v2. |
+| Q2 | Which agents beyond Lance and the inbox agent should the agent-logs watcher cover in v1? | Only those two plus the webhook. Client-project agents are v2. |
 | Q3 | Retention windows (section 4.4). | As stated. |
 | Q4 | Anthropic direct or Foundry-hosted Claude? | Anthropic direct. Base URL configurable. |
 | Q5 | Apache AGE or Neo4j? | AGE, behind the repository interface. Revisit if p95 of the meeting-prep query exceeds 500 ms at 10k nodes. |
@@ -629,7 +629,7 @@ Accessibility to WCAG 2.2 AA. Keyboard-complete proposal handling.
 ## 17. Repository layout and conventions
 
 ```
-ian/
+lance/
   apps/
     web/            Next.js
     api/            Fastify + tRPC, Slack endpoints, webhooks

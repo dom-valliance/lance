@@ -8,6 +8,6 @@ fixtures/evals
 
 # Pre-existing spec and governance documents, out of scope for WP0.1.
 CLAUDE.md
-Ian-Assistant_Spec_v1.md
+Lance-Assistant_Spec_v1.md
 docs/
 next-env.d.ts
