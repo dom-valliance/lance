@@ -222,3 +222,10 @@
 **Correction**: Dom: "I've waited a while and the calendar entries in today are still showing no subject".
 **Rule**: A DISTINCT ON "latest" read orders by the ledger event id (a monotonic ULID minted at append time) through `newestObservationFirst()` from `@lance/db`, never by `ts`. Before promising that a data repair will show on a page, run the page's own query against the repaired rows and read the result.
 **Applies to**: apps/worker/src/briefs/data.ts, apps/worker/src/alerts/detectors/support.ts, apps/api/src/tasks/store.ts, apps/worker/src/watchers/notion/known.ts
+
+### [2026-09-23] Describe a UI change by where it lives and what the eye will see
+
+**Context**: I reported "every list page has its own table component" and "pagination on every list". Dom could not find `proposals-table.tsx` and saw no pagination in dev. Both existed: the components sit beside their pages rather than under `components/`, and the paging is a footer bar reading "25 shown" with a "Show older" link, not numbered pages.
+**Correction**: Dom asked whether the work had been lost.
+**Rule**: When handing over a UI change, give the file paths as links and say what the user will see on screen (the control's position, its label, what it does when clicked) and which pages will show nothing because they have too few rows. A feature that reads as "pagination" to me is not one until Dom can point at it.
+**Applies to**: global
