@@ -168,11 +168,29 @@ jobs:
           sudo mv bicep /usr/local/bin/bicep
           bicep --version
 
-      - name: Build the Bicep template
-        run: bicep build infra/main.bicep
+      - name: Build the Bicep templates
+        run: |
+          bicep build infra/main.bicep
+          bicep build infra/deployer.bicep
 
-      - name: Lint the Bicep template
-        run: bicep lint infra/main.bicep
+      - name: Lint the Bicep templates
+        run: |
+          bicep lint infra/main.bicep
+          bicep lint infra/deployer.bicep
+
+      # The parameter files take the image tag from the shell (LANCE_IMAGE_TAG) and
+      # refuse to compile without it; any value proves the files compile.
+      - name: Compile the parameter files
+        env:
+          LANCE_IMAGE_TAG: ci
+        run: |
+          bicep build-params infra/params/dev.bicepparam --stdout > /dev/null
+          bicep build-params infra/params/prod.bicepparam --stdout > /dev/null
+          bicep build-params infra/params/deployer-dev.bicepparam --stdout > /dev/null
+
+      # The deploy identity may assign only the roles infra/deployer.bicep lists.
+      - name: Check main.bicep assigns no role the deploy identity cannot
+        run: scripts/check-deployer-roles.sh
 
       - name: Log in to Azure with OIDC
         if: env.AZURE_CLIENT_ID != ''
@@ -182,9 +200,16 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # The what-if runs with the tag dev is running now, read from the api app, so
+      # the report shows the template changes and not an image flip.
       - name: what-if
         if: env.AZURE_CLIENT_ID != ''
         run: |
+          az extension add --name containerapp --upgrade --yes
+          image=$(az containerapp show -g rg-lance-dev -n ca-lance-api-dev \
+            --query "properties.template.containers[0].image" -o tsv)
+          export LANCE_IMAGE_TAG="${image##*:}"
+          echo "what-if against the running tag ${LANCE_IMAGE_TAG}"
           az deployment sub what-if \
             --location uksouth \
             --template-file infra/main.bicep \
