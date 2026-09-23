@@ -228,4 +228,10 @@
 **Context**: The list pages were paged by cursor while every count on them (header sentence, tab counts, overdue figure, the footer) was still computed from the rows fetched or from a second list read capped at 100 or 200. On Commitments the "owed to you" count read 100, then 50 shown, then 9 on the last page; the truth was 109.
 **Correction**: Dom walked through the pages and reported the three different numbers.
 **Rule**: Any number a page states about a collection comes from a count query over the same filters as the list, never from the page's rows and never from a capped read. When adding paging to a page, audit every statistic on it in the same change. A footer states the position ("Showing 51 to 100 of 109") only when the position is known; a keyset filter that moves with the cursor gets honest copy instead.
+
+### [2026-09-23] Describe a UI change by where it lives and what the eye will see
+
+**Context**: I reported "every list page has its own table component" and "pagination on every list". Dom could not find `proposals-table.tsx` and saw no pagination in dev. Both existed: the components sit beside their pages rather than under `components/`, and the paging is a footer bar reading "25 shown" with a "Show older" link, not numbered pages.
+**Correction**: Dom asked whether the work had been lost.
+**Rule**: When handing over a UI change, give the file paths as links and say what the user will see on screen (the control's position, its label, what it does when clicked) and which pages will show nothing because they have too few rows. A feature that reads as "pagination" to me is not one until Dom can point at it.
 **Applies to**: global
