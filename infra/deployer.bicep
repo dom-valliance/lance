@@ -37,6 +37,12 @@ param resourceGroupName string = 'rg-lance-${environmentName}'
 @description('GitHub repository, owner/name, whose workflows may use the identities.')
 param githubRepository string = 'dom-valliance/lance'
 
+@description('Numeric id of the repository owner. GitHub puts it in the OIDC subject after the owner name (repo:owner@ownerId/name@repoId:...), and Entra matches the subject exactly.')
+param githubOwnerId string
+
+@description('Numeric id of the repository, appended to its name in the OIDC subject.')
+param githubRepositoryId string
+
 @description('GitHub Actions environment that deploy.yml deploys through. Its OIDC subject is the only one the deploy identity trusts.')
 param githubEnvironment string = environmentName
 
@@ -71,6 +77,8 @@ module identities 'modules/deployer.bicep' = {
     location: location
     tags: tags
     githubRepository: githubRepository
+    githubOwnerId: githubOwnerId
+    githubRepositoryId: githubRepositoryId
     githubEnvironment: githubEnvironment
     assignableRoleIds: assignableRoleIds
     deployIdentityName: deployIdentityName

@@ -11,9 +11,11 @@ Run `deploy.md` steps 1 to 4 first: the resource group and the registry must exi
 | Resource | Purpose |
 | --- | --- |
 | `id-lance-github-deploy-dev` managed identity | What `deploy.yml` runs as. Contributor on the group; Role Based Access Control Administrator on the group, limited by condition to the four roles `main.bicep` assigns (AcrPull, Key Vault Secrets User, Key Vault Secrets Officer, Log Analytics Reader); the custom `Lance deployment writer` role at subscription scope, which allows subscription deployments and nothing else. |
-| Federated credential `github-environment-dev` on it | Trusts tokens from GitHub whose subject is `repo:dom-valliance/lance:environment:dev`. No client secret exists. |
+| Federated credential `github-environment-dev` on it | Trusts tokens from GitHub whose subject is `repo:dom-valliance@215853107/lance@1378678734:environment:dev`. No client secret exists. |
 | `id-lance-github-plan-dev` managed identity | What the CI what-if runs as. Reader on the group and the custom `Lance deployment reader` role at subscription scope. |
-| Federated credentials `github-pull-request` and `github-branch-main` on it | Subjects `repo:dom-valliance/lance:pull_request` and `repo:dom-valliance/lance:ref:refs/heads/main`, the two contexts `ci.yml` runs in. |
+| Federated credentials `github-pull-request` and `github-branch-main` on it | Subjects `repo:dom-valliance@215853107/lance@1378678734:pull_request` and `repo:dom-valliance@215853107/lance@1378678734:ref:refs/heads/main`, the two contexts `ci.yml` runs in. |
+
+The numbers in the subjects are the owner id and the repository id. GitHub appends them to the names in every token it issues for this repository, and Entra compares the whole string, so a credential written without them never matches. Both ids are in `infra/params/deployer-dev.bicepparam`; if the repository is ever transferred or recreated, read the new ones from the `subject claim` line that azure/login prints on the failed run and redeploy step 1.
 
 Nothing in `main.bicep` changes, and the template touches nothing that `main.bicep` owns. CI never deploys this template.
 
@@ -52,6 +54,8 @@ Known values:
 | --- | --- |
 | Tenant id | `ac995b50-b931-4d4b-b0ea-c0617e8141f9` |
 | Subscription id | `d28312a1-6e66-4302-ac89-510f2d686a12` |
+| GitHub owner id | `215853107` (in the parameter file; part of every OIDC subject) |
+| GitHub repository id | `1378678734` (same) |
 | Plan client id | From the command above (`planClientId`). Created by the deploy, so it is not known before step 1. |
 | Deploy client id | From the command above (`deployClientId`). Same. |
 
@@ -82,7 +86,7 @@ If the run fails:
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `AADSTS700213` or "No matching federated identity record found" at `Log in to Azure with OIDC` | The subject does not match: wrong client id at that level, the environment is not called `dev`, or the repository moved | Step 3; or update `githubRepository` in the parameter file and redeploy step 1 |
+| `AADSTS700213` or "No matching federated identity record found" at `Log in to Azure with OIDC` | The subject does not match: wrong client id at that level, the environment is not called `dev`, or the repository or its ids changed | Compare the `subject claim` line in the job log with the credentials (`az identity federated-credential list -g rg-lance-dev --identity-name id-lance-github-plan-dev`). Step 3 for the client id; for the subject, update `githubRepository`, `githubOwnerId` or `githubRepositoryId` in the parameter file and redeploy step 1 |
 | `AuthorizationFailed` on a `Microsoft.Authorization/roleAssignments` write during `Deploy the environment` | `main.bicep` assigns a role that `assignableRoleIds` in `infra/deployer.bicep` does not list | Add the id, redeploy step 1, re-run the workflow. `scripts/check-deployer-roles.sh` in CI catches this on the pull request |
 | `AuthorizationFailed` on anything else within five minutes of step 1 | Role assignments still propagating | Wait and re-run the workflow |
 | `has no lance-web:<tag>` from `scripts/deploy.sh` | The push jobs did not complete for that tag | Read the `Build and push` job that failed |

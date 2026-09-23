@@ -10,6 +10,12 @@ param tags object
 @description('GitHub repository, owner/name.')
 param githubRepository string
 
+@description('Numeric id of the repository owner.')
+param githubOwnerId string
+
+@description('Numeric id of the repository.')
+param githubRepositoryId string
+
 @description('GitHub Actions environment whose OIDC subject the deploy identity trusts.')
 param githubEnvironment string
 
@@ -23,6 +29,12 @@ param deployIdentityName string
 param planIdentityName string
 
 var githubIssuer = 'https://token.actions.githubusercontent.com'
+
+// The subject GitHub presents names the owner and repository with their numeric ids:
+// repo:dom-valliance@215853107/lance@1378678734:pull_request. Entra compares the
+// whole string, so the ids are part of every subject below. The value a run
+// presents is printed by azure/login under "subject claim" when a login fails.
+var githubRepositorySubject = '${split(githubRepository, '/')[0]}@${githubOwnerId}/${split(githubRepository, '/')[1]}@${githubRepositoryId}'
 var githubAudiences = [
   'api://AzureADTokenExchange'
 ]
@@ -52,7 +64,7 @@ resource deployCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/fede
   name: 'github-environment-${githubEnvironment}'
   properties: {
     issuer: githubIssuer
-    subject: 'repo:${githubRepository}:environment:${githubEnvironment}'
+    subject: 'repo:${githubRepositorySubject}:environment:${githubEnvironment}'
     audiences: githubAudiences
   }
 }
@@ -71,7 +83,7 @@ resource planPullRequestCredential 'Microsoft.ManagedIdentity/userAssignedIdenti
   name: 'github-pull-request'
   properties: {
     issuer: githubIssuer
-    subject: 'repo:${githubRepository}:pull_request'
+    subject: 'repo:${githubRepositorySubject}:pull_request'
     audiences: githubAudiences
   }
 }
@@ -81,7 +93,7 @@ resource planMainCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/fe
   name: 'github-branch-main'
   properties: {
     issuer: githubIssuer
-    subject: 'repo:${githubRepository}:ref:refs/heads/main'
+    subject: 'repo:${githubRepositorySubject}:ref:refs/heads/main'
     audiences: githubAudiences
   }
   dependsOn: [
