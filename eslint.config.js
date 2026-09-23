@@ -18,6 +18,17 @@ const WRITES_BOUNDARY_MESSAGE =
 const CYPHER_BOUNDARY_MESSAGE =
   'Raw Cypher runners (runCypher, sqlRunnerOf, drizzleRunner) are internal to packages/ontology; read and write the graph through OntologyRepository, which enforces the principal scope (ADR 0017)';
 
+const CREATE_DB_MESSAGE =
+  'createDb returns an unscoped handle that row-level security shows nothing to. Only a composition root creates one; everything else takes a handle scoped to a principal (ADR 0015)';
+
+/** Composition roots and tests, the only places that may open an unscoped handle. */
+const CREATE_DB_ALLOWED = [
+  'apps/*/src/main.ts',
+  'packages/ontology/src/rebuild.ts',
+  'packages/db/src/**/*.ts',
+  '**/*.test.ts',
+];
+
 const sdkPath = { name: '@anthropic-ai/sdk', message: SDK_BOUNDARY_MESSAGE };
 const sdkPattern = { group: ['@anthropic-ai/sdk/*'], message: SDK_BOUNDARY_MESSAGE };
 const writesPattern = {
@@ -164,6 +175,25 @@ export default tseslint.config(
     files: ['packages/ontology/src/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': ontologyBoundaryRestriction,
+    },
+  },
+  {
+    files: sourceGlobs,
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "ImportDeclaration[source.value='@lance/db'] > ImportSpecifier[imported.name='createDb']",
+          message: CREATE_DB_MESSAGE,
+        },
+      ],
+    },
+  },
+  {
+    files: CREATE_DB_ALLOWED,
+    rules: {
+      'no-restricted-syntax': 'off',
     },
   },
   {

@@ -107,4 +107,27 @@ describe('import boundary rules', () => {
       }),
     ).toHaveLength(0);
   }, 30000);
+
+  it('rejects createDb outside the composition roots and tests', async () => {
+    const eslint = new ESLint({ cwd: repoRoot });
+    const results = await eslint.lintText("import { createDb } from '@lance/db';\n", {
+      filePath: path.join(repoRoot, workerFixturePath),
+    });
+    const errors = results
+      .flatMap((result) => result.messages)
+      .filter((message) => message.ruleId === 'no-restricted-syntax');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.message).toContain('ADR 0015');
+  }, 30000);
+
+  it('allows createDb in an app composition root', async () => {
+    const eslint = new ESLint({ cwd: repoRoot });
+    const results = await eslint.lintText("import { createDb } from '@lance/db';\n", {
+      filePath: path.join(repoRoot, 'apps/worker/src/main.ts'),
+    });
+    const errors = results
+      .flatMap((result) => result.messages)
+      .filter((message) => message.ruleId === 'no-restricted-syntax');
+    expect(errors).toHaveLength(0);
+  }, 30000);
 });
