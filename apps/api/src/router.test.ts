@@ -85,12 +85,22 @@ describe('proposals.list', () => {
     expect(harness.proposals.filters).toEqual([{ limit: 51 }]);
     expect(page.items).toHaveLength(1);
     expect(page.nextCursor).toBeNull();
+    expect(page.total).toBe(1);
   });
 
   it('rejects a status the schema does not know', async () => {
     await expect(
       caller.proposals.list({ status: 'lingering' } as unknown as { status: 'pending' }),
     ).rejects.toThrow();
+  });
+});
+
+describe('proposals.summary', () => {
+  it('counts the pending queue and names the earliest expiry', async () => {
+    expect(await caller.proposals.summary()).toEqual({
+      pending: 1,
+      oldestExpiresAt: '2026-09-22T09:00:00.000Z',
+    });
   });
 });
 
@@ -159,6 +169,22 @@ describe('ledger', () => {
     expect(harness.ledger.queries).toEqual([{ kind: 'decided', actor: 'user:dom' }]);
   });
 
+  it('pages the ledger with a total through ledger.list', async () => {
+    const page = await caller.ledger.list({ kind: 'decided', limit: 50 });
+
+    expect(harness.ledger.queries).toEqual([{ kind: 'decided', limit: 51 }]);
+    expect(harness.ledger.counts).toEqual([{ kind: 'decided' }]);
+    expect(page).toEqual({ items: [], nextCursor: null, total: 0 });
+  });
+
+  it('refuses a ledger cursor that is not an event id', async () => {
+    await expect(caller.ledger.list({ cursor: '2026-09-21T09:00:00.000Z' })).rejects.toThrow();
+  });
+
+  it('refuses a ledger page larger than the page limit', async () => {
+    await expect(caller.ledger.list({ limit: 201 })).rejects.toThrow();
+  });
+
   it('returns one correlation id trail through ledger.correlation', async () => {
     harness.ledger.rows = [
       {
@@ -193,6 +219,14 @@ describe('commitments', () => {
       { limit: 51, direction: 'inbound', status: 'open' },
     ]);
     expect(page.items[0]?.id).toBe(TEST_COMMITMENT_ID);
+    expect(page.total).toBe(1);
+  });
+
+  it('summarises the open and overdue commitments of both tabs', async () => {
+    expect(await caller.commitments.summary()).toEqual({
+      inbound: { open: 1, overdue: 1 },
+      outbound: { open: 0, overdue: 0 },
+    });
   });
 
   it('rejects a direction the schema does not know', async () => {
@@ -242,6 +276,7 @@ describe('tasks', () => {
 
     expect(harness.tasks.queries).toEqual([{ limit: 51, source: 'notion' }]);
     expect(page.items[0]?.source).toBe('notion');
+    expect(page.total).toBe(1);
   });
 
   it('rejects a source the schema does not know', async () => {

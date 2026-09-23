@@ -3,7 +3,14 @@ import { startPostgresContainer } from '@lance/db/testing';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { getProposal, listProposals, toProposal, type ProposalRow } from './proposalView.js';
+import {
+  countProposals,
+  getProposal,
+  listProposals,
+  pendingProposalSummary,
+  toProposal,
+  type ProposalRow,
+} from './proposalView.js';
 
 let container: StartedPostgreSqlContainer;
 let db: Db;
@@ -11,10 +18,11 @@ let db: Db;
 const NOW = '2026-09-21T12:00:00.000Z';
 
 interface InsertOptions {
-  status?: 'pending' | 'approved' | 'rejected';
+  status?: 'pending' | 'approved' | 'rejected' | 'expired';
   actionClass?: 'draft_email' | 'create_task';
   counterpartyClass?: 'client' | 'internal';
   targetSystem?: 'graph' | 'notion';
+  expiresAt?: Date;
 }
 
 async function insertProposal(options: InsertOptions = {}): Promise<string> {
@@ -33,7 +41,7 @@ async function insertProposal(options: InsertOptions = {}): Promise<string> {
     provenance: [{ system: 'graph', recordId: 'AAMk1', hash: 'h', observedAt: NOW }],
     policyDecision: 'propose',
     status: options.status ?? 'pending',
-    expiresAt: new Date('2026-09-23T12:00:00.000Z'),
+    expiresAt: options.expiresAt ?? new Date('2026-09-23T12:00:00.000Z'),
   });
   return id;
 }
@@ -126,6 +134,31 @@ describe('listProposals', () => {
 
     const next = await listProposals(db, { status: 'rejected', limit: 1, cursor: newer });
     expect(next.map((row) => row.id)).toEqual([older]);
+  });
+});
+
+describe('countProposals', () => {
+  it('counts every proposal the filters match, the rows the list would page through', async () => {
+    await insertProposal({ status: 'expired', targetSystem: 'notion' });
+    await insertProposal({ status: 'expired', targetSystem: 'notion' });
+    await insertProposal({ status: 'expired', targetSystem: 'graph' });
+
+    expect(await countProposals(db, { status: 'expired' })).toBe(3);
+    expect(await countProposals(db, { status: 'expired', targetSystem: 'notion' })).toBe(2);
+    expect(await countProposals(db)).toBe((await listProposals(db, { limit: 200 })).length);
+  });
+});
+
+describe('pendingProposalSummary', () => {
+  it('counts the pending proposals and names the earliest expiry among them', async () => {
+    const before = await pendingProposalSummary(db);
+    await insertProposal({ expiresAt: new Date('2026-09-20T08:00:00.000Z') });
+    await insertProposal({ status: 'approved', expiresAt: new Date('2026-09-01T08:00:00.000Z') });
+
+    const after = await pendingProposalSummary(db);
+
+    expect(after.pending).toBe(before.pending + 1);
+    expect(after.oldestExpiresAt).toBe('2026-09-20T08:00:00.000Z');
   });
 });
 

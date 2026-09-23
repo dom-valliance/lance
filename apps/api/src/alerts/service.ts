@@ -4,6 +4,7 @@ import { toAlert } from '@lance/ledger';
 import { newUlid, nowIso } from '@lance/shared';
 import { TRPCError } from '@trpc/server';
 import { DOM_ACTOR, type ApiDeps } from '../deps.js';
+import type { AlertCountQuery } from './store.js';
 import { toAlertView, type AlertView } from './view.js';
 
 /**
@@ -43,21 +44,30 @@ export interface ListAlertsInput {
 export interface AlertPage {
   items: AlertView[];
   nextCursor: string | null;
+  /** Every alert the filters match, across all pages. */
+  total: number;
 }
 
 export async function listAlerts(deps: AlertDeps, input: ListAlertsInput): Promise<AlertPage> {
   const size = Math.min(input.limit ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
-  // One row beyond the page tells us whether a next page exists without a count.
-  const rows = await deps.alerts.list({
-    limit: size + 1,
+  const filter: AlertCountQuery = {
     ...(input.status === undefined ? {} : { status: input.status }),
     ...(input.severity === undefined ? {} : { severity: input.severity }),
     ...(input.kind === undefined ? {} : { kind: input.kind }),
-    ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
-  });
+  };
+  // One row beyond the page tells us whether a next page exists; the count
+  // runs beside it over the same filters, without the cursor.
+  const [rows, total] = await Promise.all([
+    deps.alerts.list({
+      ...filter,
+      limit: size + 1,
+      ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+    }),
+    deps.alerts.count(filter),
+  ]);
   const page = rows.slice(0, size);
   const nextCursor = rows.length > size ? (page.at(-1)?.id ?? null) : null;
-  return { items: page.map(toAlertView), nextCursor };
+  return { items: page.map(toAlertView), nextCursor, total };
 }
 
 export async function getAlert(deps: AlertDeps, id: string): Promise<AlertView | null> {

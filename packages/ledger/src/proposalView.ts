@@ -6,7 +6,7 @@ import type {
   ProposalStatus,
   System,
 } from '@lance/shared';
-import { and, desc, eq, lt, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, lt, min, type SQL } from 'drizzle-orm';
 import type { DbExecutor } from './writer.js';
 
 /**
@@ -60,6 +60,28 @@ export interface ProposalFilter {
   cursor?: string;
 }
 
+/** The filters a count honours: the list's, without the page it would cut. */
+export type ProposalCountFilter = Omit<ProposalFilter, 'limit' | 'cursor'>;
+
+/** The Proposals header: how much is waiting, and the soonest any of it expires. */
+export interface PendingProposalSummary {
+  pending: number;
+  /** ISO instant of the earliest `expires_at` among pending proposals, or null when none wait. */
+  oldestExpiresAt: string | null;
+}
+
+/** The WHERE clauses `listProposals` and `countProposals` share, so the two cannot drift apart. */
+function clausesFor(filter: ProposalCountFilter): SQL[] {
+  const clauses: SQL[] = [];
+  if (filter.status !== undefined) clauses.push(eq(proposals.status, filter.status));
+  if (filter.actionClass !== undefined) clauses.push(eq(proposals.actionClass, filter.actionClass));
+  if (filter.counterpartyClass !== undefined)
+    clauses.push(eq(proposals.counterpartyClass, filter.counterpartyClass));
+  if (filter.targetSystem !== undefined)
+    clauses.push(eq(proposals.targetSystem, filter.targetSystem));
+  return clauses;
+}
+
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
@@ -68,13 +90,7 @@ export async function listProposals(
   db: DbExecutor,
   filter: ProposalFilter = {},
 ): Promise<Proposal[]> {
-  const clauses: SQL[] = [];
-  if (filter.status !== undefined) clauses.push(eq(proposals.status, filter.status));
-  if (filter.actionClass !== undefined) clauses.push(eq(proposals.actionClass, filter.actionClass));
-  if (filter.counterpartyClass !== undefined)
-    clauses.push(eq(proposals.counterpartyClass, filter.counterpartyClass));
-  if (filter.targetSystem !== undefined)
-    clauses.push(eq(proposals.targetSystem, filter.targetSystem));
+  const clauses = clausesFor(filter);
   if (filter.cursor !== undefined) clauses.push(lt(proposals.id, filter.cursor));
 
   const rows = await db
@@ -85,6 +101,33 @@ export async function listProposals(
     .limit(Math.min(filter.limit ?? DEFAULT_LIMIT, MAX_LIMIT));
 
   return rows.map(toProposal);
+}
+
+/** Every proposal `listProposals` would return across all its pages. */
+export async function countProposals(
+  db: DbExecutor,
+  filter: ProposalCountFilter = {},
+): Promise<number> {
+  const clauses = clausesFor(filter);
+  const rows = await db
+    .select({ total: count() })
+    .from(proposals)
+    .where(clauses.length > 0 ? and(...clauses) : undefined);
+  return rows[0]?.total ?? 0;
+}
+
+/** The pending count and the earliest expiry among them, in one aggregate read. */
+export async function pendingProposalSummary(db: DbExecutor): Promise<PendingProposalSummary> {
+  const rows = await db
+    .select({ pending: count(), oldest: min(proposals.expiresAt) })
+    .from(proposals)
+    .where(eq(proposals.status, 'pending'));
+  const row = rows[0];
+  const oldest = row?.oldest ?? null;
+  return {
+    pending: row?.pending ?? 0,
+    oldestExpiresAt: oldest === null ? null : new Date(oldest).toISOString(),
+  };
 }
 
 /** One proposal, or null when no row carries that id. */

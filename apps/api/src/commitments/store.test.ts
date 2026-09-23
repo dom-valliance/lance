@@ -62,6 +62,31 @@ describe('createCommitmentStore', () => {
     expect(rows.map((row) => row.id)).toEqual([outbound]);
   });
 
+  it('counts every commitment the filters match, the same rows the list would page through', async () => {
+    const rows = await store.list({ limit: 1000, direction: 'inbound', status: 'open' });
+
+    expect(await store.count({ direction: 'inbound', status: 'open' })).toBe(rows.length);
+    expect(await store.count({})).toBe((await store.list({ limit: 1000 })).length);
+  });
+
+  it('summarises open and overdue commitments per direction, overdue being open and past due', async () => {
+    const now = new Date('2026-09-21T09:00:00.000Z');
+    const before = await store.summary(now);
+
+    await insert({ direction: 'outbound', dueAt: new Date('2026-09-20T09:00:00.000Z') });
+    await insert({ direction: 'outbound', dueAt: new Date('2026-09-22T09:00:00.000Z') });
+    await insert({ direction: 'outbound', dueAt: null });
+    await insert({ direction: 'outbound', status: 'chased', dueAt: new Date('2026-09-01') });
+    await insert({ direction: 'inbound', dueAt: new Date('2026-09-19T09:00:00.000Z') });
+
+    const after = await store.summary(now);
+
+    expect(after.outbound.open - before.outbound.open).toBe(3);
+    expect(after.outbound.overdue - before.outbound.overdue).toBe(1);
+    expect(after.inbound.open - before.inbound.open).toBe(1);
+    expect(after.inbound.overdue - before.inbound.overdue).toBe(1);
+  });
+
   it('continues from the cursor it was given, newest first', async () => {
     const page = await store.list({ limit: 1 });
     const next = await store.list({ limit: 50, cursor: page[0]?.id ?? '' });

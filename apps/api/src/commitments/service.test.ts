@@ -6,7 +6,13 @@ import {
   TEST_PERSON_ID,
   type FakeDeps,
 } from '../test-fakes.js';
-import { chaseCommitment, getCommitment, listCommitments, resolveCommitment } from './service.js';
+import {
+  chaseCommitment,
+  commitmentSummary,
+  getCommitment,
+  listCommitments,
+  resolveCommitment,
+} from './service.js';
 
 const SECOND_ID = '01K5S9V6QW3SWCCPVB0N0E302B';
 const NOW = '2026-09-21T09:00:00.000Z';
@@ -47,11 +53,45 @@ describe('listCommitments', () => {
     expect(page.nextCursor).toBe(SECOND_ID);
   });
 
+  it('counts every commitment the filters match, ignoring the cursor and the page size', async () => {
+    harness.commitments.rows = [
+      fakeCommitment(),
+      fakeCommitment({ id: SECOND_ID }),
+      fakeCommitment({ id: '01K5S9V6QW3SWCCPVB0N0E302C', direction: 'outbound' }),
+    ];
+
+    const page = await listCommitments(harness.deps, {
+      direction: 'inbound',
+      limit: 1,
+      cursor: '01K5S9V6QW3SWCCPVB0N0E302Z',
+    });
+
+    expect(page.items).toHaveLength(1);
+    expect(page.total).toBe(2);
+    expect(harness.commitments.counts).toEqual([{ direction: 'inbound' }]);
+  });
+
   it('ages a commitment in whole days from when it was recorded', async () => {
     const page = await listCommitments(harness.deps, {});
 
     expect(page.items[0]?.ageDays).toBe(7);
     expect(page.items[0]?.overdueDays).toBe(2);
+  });
+});
+
+describe('commitmentSummary', () => {
+  it('counts the open and the overdue commitments of each direction at the api clock', async () => {
+    harness.commitments.rows = [
+      fakeCommitment({ dueAt: new Date('2026-09-18T17:00:00.000Z') }),
+      fakeCommitment({ id: SECOND_ID, dueAt: new Date('2026-09-30T17:00:00.000Z') }),
+      fakeCommitment({ id: '01K5S9V6QW3SWCCPVB0N0E302C', status: 'done' }),
+      fakeCommitment({ id: '01K5S9V6QW3SWCCPVB0N0E302D', direction: 'outbound', dueAt: null }),
+    ];
+
+    expect(await commitmentSummary(harness.deps)).toEqual({
+      inbound: { open: 2, overdue: 1 },
+      outbound: { open: 1, overdue: 0 },
+    });
   });
 });
 
