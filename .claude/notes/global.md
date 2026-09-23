@@ -222,3 +222,10 @@
 **Correction**: Dom: "I've waited a while and the calendar entries in today are still showing no subject".
 **Rule**: A DISTINCT ON "latest" read orders by the ledger event id (a monotonic ULID minted at append time) through `newestObservationFirst()` from `@lance/db`, never by `ts`. Before promising that a data repair will show on a page, run the page's own query against the repaired rows and read the result.
 **Applies to**: apps/worker/src/briefs/data.ts, apps/worker/src/alerts/detectors/support.ts, apps/api/src/tasks/store.ts, apps/worker/src/watchers/notion/known.ts
+
+### [2026-09-23] Paging a list changes what its statistics must be computed from
+
+**Context**: The list pages were paged by cursor while every count on them (header sentence, tab counts, overdue figure, the footer) was still computed from the rows fetched or from a second list read capped at 100 or 200. On Commitments the "owed to you" count read 100, then 50 shown, then 9 on the last page; the truth was 109.
+**Correction**: Dom walked through the pages and reported the three different numbers.
+**Rule**: Any number a page states about a collection comes from a count query over the same filters as the list, never from the page's rows and never from a capped read. When adding paging to a page, audit every statistic on it in the same change. A footer states the position ("Showing 51 to 100 of 109") only when the position is known; a keyset filter that moves with the cursor gets honest copy instead.
+**Applies to**: global
