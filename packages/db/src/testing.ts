@@ -34,14 +34,46 @@ export async function startPostgresContainer(attempts = 3): Promise<StartedPostg
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+/** The login role app suites connect as: a lance_app member, as the apps are. */
+const TEST_APP_ROLE = 'lance_test_app';
+const TEST_APP_PASSWORD = 'lance_test_app';
+
 /**
  * A migrated test database's handle, seeded and scoped to the seed
- * principal (ADR 0015), which is how the apps see the database. The
- * container's superuser still bypasses row-level security; the isolation
- * suites in this package connect as a lance_app member instead.
+ * principal (ADR 0015), which is how the apps see the database. It logs in
+ * as a member of lance_app rather than as the container's superuser, who
+ * would bypass row-level security, so a suite that passes has passed under
+ * the same policies the apps run under.
  */
 export async function openSeededTestDb(connectionString: string): Promise<Db> {
   const root = createDb({ connectionString, password: 'postgres' });
-  await seed(root);
-  return scopedDb(root, { principalId: SEED_PRINCIPAL_ID });
+  try {
+    await seed(root);
+    await root.$client.query(
+      `DO $$ BEGIN
+         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${TEST_APP_ROLE}') THEN
+           CREATE ROLE ${TEST_APP_ROLE} LOGIN PASSWORD '${TEST_APP_PASSWORD}';
+         END IF;
+       END $$`,
+    );
+    await root.$client.query(`GRANT lance_app TO ${TEST_APP_ROLE}`);
+  } finally {
+    await root.$client.end();
+  }
+  const url = new URL(connectionString);
+  url.username = TEST_APP_ROLE;
+  url.password = TEST_APP_PASSWORD;
+  const app = createDb({ connectionString: url.toString(), password: TEST_APP_PASSWORD });
+  return scopedDb(app, { principalId: SEED_PRINCIPAL_ID });
+}
+
+/**
+ * A superuser handle scoped to the seed principal, for fixture work the
+ * application role is rightly refused: clearing a table between cases,
+ * creating a second principal. Code under test takes `openSeededTestDb`.
+ */
+export function openFixtureDb(connectionString: string): Db {
+  return scopedDb(createDb({ connectionString, password: 'postgres' }), {
+    principalId: SEED_PRINCIPAL_ID,
+  });
 }

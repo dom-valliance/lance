@@ -6,7 +6,7 @@ import {
   scopedDb,
   type Db,
 } from '@lance/db';
-import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
+import { openFixtureDb, openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -297,9 +297,12 @@ beforeAll(async () => {
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
   dbDom = await openSeededTestDb(connectionString);
-  // principals has no row-level security; principal_state does, so Bea's
-  // row is written in her own scope.
-  await dbDom.insert(principals).values({ id: BEA, upn: 'bea@valliance.ai' });
+  // The apps may only read principals, so the second principal is created
+  // through a fixture handle; principal_state is under row-level security,
+  // so Bea's row is written in her own scope.
+  const fixtures = openFixtureDb(connectionString);
+  await fixtures.insert(principals).values({ id: BEA, upn: 'bea@valliance.ai' });
+  await fixtures.$client.end();
   dbBea = scopedDb(dbDom, { principalId: BEA });
   await dbBea.insert(principalState).values({});
   dom = repository(dbDom, DOM, '01D0M', 'Dom Selvon');
