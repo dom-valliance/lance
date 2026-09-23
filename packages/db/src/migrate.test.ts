@@ -27,6 +27,8 @@ const EXPECTED_TABLES = [
   'observations',
   'policy_decisions',
   'policy_rules',
+  'principal_state',
+  'principals',
   'proposals',
   'system_state',
   'users',
@@ -38,6 +40,7 @@ const LEDGER_GUARD_ROW = `${ULID_PREFIX}1B`;
 const LEDGER_RETENTION_ROW = `${ULID_PREFIX}1C`;
 const LEDGER_RETENTION_LOCKED_ROW = `${ULID_PREFIX}1D`;
 const CORRELATION = `${ULID_PREFIX}9Z`;
+const PRINCIPAL = `${ULID_PREFIX}0P`;
 
 const INSERT_LEDGER_EVENT = `
   INSERT INTO ledger_events (id, ts, actor, kind, correlation_id, payload, payload_hash)
@@ -97,6 +100,14 @@ beforeAll(async () => {
   await client.query('GRANT lance_app TO test_app');
   await client.query("CREATE ROLE test_retention LOGIN PASSWORD 'test'");
   await client.query('GRANT lance_retention TO test_retention');
+
+  // Ledger rows belong to a principal, and forced row-level security shows
+  // a non-superuser only the rows of the principal its session is scoped to
+  // (ADR 0015). The setting survives SET ROLE, so every role below is scoped.
+  await client.query("INSERT INTO principals (id, upn) VALUES ($1, 'principal@example.test')", [
+    PRINCIPAL,
+  ]);
+  await client.query("SELECT set_config('app.principal', $1, false)", [PRINCIPAL]);
 
   for (const id of [LEDGER_GUARD_ROW, LEDGER_RETENTION_ROW, LEDGER_RETENTION_LOCKED_ROW]) {
     await client.query(INSERT_LEDGER_EVENT, [id, CORRELATION, JSON.stringify({ body: 'raw' })]);

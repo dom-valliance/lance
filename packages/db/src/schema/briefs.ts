@@ -1,6 +1,7 @@
 import { index, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
 import { briefKind } from '../enums.js';
 import { createdAt, timestamptz, ulid, ulidCheck } from './columns.js';
+import { principalId } from './principals.js';
 
 /**
  * Generated morning briefs, afternoon boards, meeting preps, debriefs and
@@ -11,6 +12,7 @@ export const briefs = pgTable(
   'briefs',
   {
     id: ulid('id').primaryKey(),
+    principalId: principalId(),
     kind: briefKind('kind').notNull(),
     correlationId: ulid('correlation_id').notNull(),
     content: jsonb('content').notNull(),

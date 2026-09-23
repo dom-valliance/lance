@@ -1,6 +1,6 @@
 {
-  "id": "a22f19f4-18cb-4222-8745-af31674426ae",
-  "prevId": "574ba8c9-9979-4ca7-9868-8bb0dc2e73f2",
+  "id": "153cc451-8e41-4a75-b8b5-93fe422832d2",
+  "prevId": "766b823a-2b15-4927-af08-7051aa3646d4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -13,6 +13,13 @@
           "type": "char(26)",
           "primaryKey": true,
           "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "char(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "app_principal()"
         },
         "ts": {
           "name": "ts",
@@ -96,6 +103,48 @@
         }
       },
       "indexes": {
+        "ledger_events_principal_idempotency_key_idx": {
+          "name": "ledger_events_principal_idempotency_key_idx",
+          "columns": [
+            {
+              "expression": "principal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "idempotency_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ledger_events_principal_id_idx": {
+          "name": "ledger_events_principal_id_idx",
+          "columns": [
+            {
+              "expression": "principal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "ledger_events_correlation_id_idx": {
           "name": "ledger_events_correlation_id_idx",
           "columns": [
@@ -107,9 +156,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "ledger_events_kind_ts_idx": {
           "name": "ledger_events_kind_ts_idx",
@@ -128,9 +177,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "ledger_events_source_record_idx": {
           "name": "ledger_events_source_record_idx",
@@ -149,9 +198,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "ledger_events_ts_idx": {
           "name": "ledger_events_ts_idx",
@@ -164,20 +213,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "ledger_events_principal_id_principals_id_fk": {
+          "name": "ledger_events_principal_id_principals_id_fk",
+          "tableFrom": "ledger_events",
+          "tableTo": "principals",
+          "columnsFrom": ["principal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "ledger_events_idempotency_key_unique": {
-          "name": "ledger_events_idempotency_key_unique",
-          "columns": ["idempotency_key"],
-          "nullsNotDistinct": false
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
         "ledger_events_id_ulid": {
@@ -208,6 +261,13 @@
           "type": "char(26)",
           "primaryKey": true,
           "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "char(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "app_principal()"
         },
         "ts": {
           "name": "ts",
@@ -273,6 +333,48 @@
         }
       },
       "indexes": {
+        "observations_principal_idempotency_key_idx": {
+          "name": "observations_principal_idempotency_key_idx",
+          "columns": [
+            {
+              "expression": "principal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "idempotency_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "observations_principal_id_idx": {
+          "name": "observations_principal_id_idx",
+          "columns": [
+            {
+              "expression": "principal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "observations_correlation_id_idx": {
           "name": "observations_correlation_id_idx",
           "columns": [
@@ -284,9 +386,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "observations_source_record_idx": {
           "name": "observations_source_record_idx",
@@ -305,9 +407,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "observations_ts_idx": {
           "name": "observations_ts_idx",
@@ -320,20 +422,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "observations_principal_id_principals_id_fk": {
+          "name": "observations_principal_id_principals_id_fk",
+          "tableFrom": "observations",
+          "tableTo": "principals",
+          "columnsFrom": ["principal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "observations_idempotency_key_unique": {
-          "name": "observations_idempotency_key_unique",
-          "columns": ["idempotency_key"],
-          "nullsNotDistinct": false
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
         "observations_id_ulid": {
@@ -356,6 +462,13 @@
           "type": "char(26)",
           "primaryKey": true,
           "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "char(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "app_principal()"
         },
         "correlation_id": {
           "name": "correlation_id",
@@ -522,9 +635,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "proposals_correlation_id_idx": {
           "name": "proposals_correlation_id_idx",
@@ -537,9 +650,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "proposals_expires_at_idx": {
           "name": "proposals_expires_at_idx",
@@ -552,12 +665,22 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "proposals_principal_id_principals_id_fk": {
+          "name": "proposals_principal_id_principals_id_fk",
+          "tableFrom": "proposals",
+          "tableTo": "principals",
+          "columnsFrom": ["principal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -590,6 +713,13 @@
           "type": "char(26)",
           "primaryKey": true,
           "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "char(26)",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "app_principal()"
         },
         "version": {
           "name": "version",
@@ -693,9 +823,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "policy_rules_active_idx": {
           "name": "policy_rules_active_idx",
@@ -708,12 +838,22 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "policy_rules_principal_id_principals_id_fk": {
+          "name": "policy_rules_principal_id_principals_id_fk",
+          "tableFrom": "policy_rules",
+          "tableTo": "principals",
+          "columnsFrom": ["principal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -738,6 +878,13 @@
           "type": "char(26)",
           "primaryKey": true,
           "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "char(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "app_principal()"
         },
         "decision": {
           "name": "decision",
@@ -791,12 +938,22 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "policy_decisions_principal_id_principals_id_fk": {
+          "name": "policy_decisions_principal_id_principals_id_fk",
+          "tableFrom": "policy_decisions",
+          "tableTo": "principals",
+          "columnsFrom": ["principal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -816,6 +973,13 @@
       "name": "cursors",
       "schema": "",
       "columns": {
+        "principal_id": {
+          "name": "principal_id",
+          "type": "char(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "app_principal()"
+        },
         "watcher": {
           "name": "watcher",
           "type": "text",
@@ -850,11 +1014,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "cursors_principal_id_principals_id_fk": {
+          "name": "cursors_principal_id_principals_id_fk",
+          "tableFrom": "cursors",
+          "tableTo": "principals",
+          "columnsFrom": ["principal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {
-        "cursors_watcher_key_pk": {
-          "name": "cursors_watcher_key_pk",
-          "columns": ["watcher", "key"]
+        "cursors_principal_id_watcher_key_pk": {
+          "name": "cursors_principal_id_watcher_key_pk",
+          "columns": ["principal_id", "watcher", "key"]
         }
       },
       "uniqueConstraints": {},
@@ -871,6 +1045,13 @@
           "type": "char(26)",
           "primaryKey": true,
           "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "char(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "app_principal()"
         },
         "severity": {
           "name": "severity",
@@ -962,6 +1143,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "batch_ts": {
+          "name": "batch_ts",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -978,6 +1165,27 @@
         }
       },
       "indexes": {
+        "alerts_principal_dedupe_key_idx": {
+          "name": "alerts_principal_dedupe_key_idx",
+          "columns": [
+            {
+              "expression": "principal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "dedupe_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "alerts_status_idx": {
           "name": "alerts_status_idx",
           "columns": [
@@ -989,9 +1197,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "alerts_severity_idx": {
           "name": "alerts_severity_idx",
@@ -1004,9 +1212,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "alerts_last_seen_idx": {
           "name": "alerts_last_seen_idx",
@@ -1019,20 +1227,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "alerts_principal_id_principals_id_fk": {
+          "name": "alerts_principal_id_principals_id_fk",
+          "tableFrom": "alerts",
+          "tableTo": "principals",
+          "columnsFrom": ["principal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "alerts_dedupe_key_unique": {
-          "name": "alerts_dedupe_key_unique",
-          "columns": ["dedupe_key"],
-          "nullsNotDistinct": false
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
         "alerts_id_ulid": {
@@ -1051,6 +1263,13 @@
           "type": "char(26)",
           "primaryKey": true,
           "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "char(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "app_principal()"
         },
         "direction": {
           "name": "direction",
@@ -1149,9 +1368,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "commitments_direction_idx": {
           "name": "commitments_direction_idx",
@@ -1164,9 +1383,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "commitments_next_chase_at_idx": {
           "name": "commitments_next_chase_at_idx",
@@ -1179,12 +1398,22 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "commitments_principal_id_principals_id_fk": {
+          "name": "commitments_principal_id_principals_id_fk",
+          "tableFrom": "commitments",
+          "tableTo": "principals",
+          "columnsFrom": ["principal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -1205,6 +1434,13 @@
           "type": "char(26)",
           "primaryKey": true,
           "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "char(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "app_principal()"
         },
         "kind": {
           "name": "kind",
@@ -1264,9 +1500,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "briefs_correlation_id_idx": {
           "name": "briefs_correlation_id_idx",
@@ -1279,12 +1515,22 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "briefs_principal_id_principals_id_fk": {
+          "name": "briefs_principal_id_principals_id_fk",
+          "tableFrom": "briefs",
+          "tableTo": "principals",
+          "columnsFrom": ["principal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -1309,6 +1555,13 @@
           "type": "char(26)",
           "primaryKey": true,
           "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "char(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "app_principal()"
         },
         "agent": {
           "name": "agent",
@@ -1427,9 +1680,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "agent_runs_correlation_id_idx": {
           "name": "agent_runs_correlation_id_idx",
@@ -1442,12 +1695,22 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "agent_runs_principal_id_principals_id_fk": {
+          "name": "agent_runs_principal_id_principals_id_fk",
+          "tableFrom": "agent_runs",
+          "tableTo": "principals",
+          "columnsFrom": ["principal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -1527,6 +1790,13 @@
           "notNull": true,
           "default": 3
         },
+        "cost_ceiling_gbp": {
+          "name": "cost_ceiling_gbp",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 15
+        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -1604,8 +1874,8 @@
       "uniqueConstraints": {
         "users_upn_unique": {
           "name": "users_upn_unique",
-          "columns": ["upn"],
-          "nullsNotDistinct": false
+          "nullsNotDistinct": false,
+          "columns": ["upn"]
         }
       },
       "policies": {},
@@ -1615,6 +1885,203 @@
           "value": "\"id\" ~ '^[0-9A-HJKMNP-TV-Z]{26}$'"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.principals": {
+      "name": "principals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(26)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "entra_oid": {
+          "name": "entra_oid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "upn": {
+          "name": "upn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slack_user_id": {
+          "name": "slack_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notion_user_id": {
+          "name": "notion_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "foundry_employee_id": {
+          "name": "foundry_employee_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "time_zone": {
+          "name": "time_zone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'Europe/London'"
+        },
+        "status": {
+          "name": "status",
+          "type": "principal_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "principals_entra_oid_unique": {
+          "name": "principals_entra_oid_unique",
+          "nullsNotDistinct": false,
+          "columns": ["entra_oid"]
+        },
+        "principals_upn_unique": {
+          "name": "principals_upn_unique",
+          "nullsNotDistinct": false,
+          "columns": ["upn"]
+        },
+        "principals_slack_user_id_unique": {
+          "name": "principals_slack_user_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["slack_user_id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "principals_id_ulid": {
+          "name": "principals_id_ulid",
+          "value": "\"id\" ~ '^[0-9A-HJKMNP-TV-Z]{26}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.principal_state": {
+      "name": "principal_state",
+      "schema": "",
+      "columns": {
+        "principal_id": {
+          "name": "principal_id",
+          "type": "char(26)",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "app_principal()"
+        },
+        "paused": {
+          "name": "paused",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "paused_reason": {
+          "name": "paused_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "paused_by": {
+          "name": "paused_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "paused_at": {
+          "name": "paused_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "system_mode",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'dry_run'"
+        },
+        "quiet_hours_start": {
+          "name": "quiet_hours_start",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'19:00'"
+        },
+        "quiet_hours_end": {
+          "name": "quiet_hours_end",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'07:00'"
+        },
+        "push_budget_per_hour": {
+          "name": "push_budget_per_hour",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 3
+        },
+        "cost_ceiling_gbp": {
+          "name": "cost_ceiling_gbp",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 15
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "principal_state_principal_id_principals_id_fk": {
+          "name": "principal_state_principal_id_principals_id_fk",
+          "tableFrom": "principal_state",
+          "tableTo": "principals",
+          "columnsFrom": ["principal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },
@@ -1698,6 +2165,11 @@
         "cost_recorded"
       ]
     },
+    "public.principal_status": {
+      "name": "principal_status",
+      "schema": "public",
+      "values": ["onboarding", "active", "paused", "offboarded"]
+    },
     "public.proposal_status": {
       "name": "proposal_status",
       "schema": "public",
@@ -1735,10 +2207,10 @@
     }
   },
   "schemas": {},
-  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
+  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

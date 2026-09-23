@@ -1,6 +1,7 @@
-import { index, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
+import { index, jsonb, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import { ledgerKind } from '../enums.js';
 import { createdAt, timestamptz, ulid, ulidCheck } from './columns.js';
+import { principalId } from './principals.js';
 
 /**
  * The append-only ledger (spec section 5.1, CLAUDE.md non-negotiable 1).
@@ -14,13 +15,14 @@ export const ledgerEvents = pgTable(
   'ledger_events',
   {
     id: ulid('id').primaryKey(),
+    principalId: principalId(),
     ts: timestamptz('ts').notNull(),
     actor: text('actor').notNull(),
     kind: ledgerKind('kind').notNull(),
     sourceSystem: text('source_system'),
     sourceRecordId: text('source_record_id'),
     sourceRecordHash: text('source_record_hash'),
-    idempotencyKey: text('idempotency_key').unique(),
+    idempotencyKey: text('idempotency_key'),
     correlationId: ulid('correlation_id').notNull(),
     parentEventId: ulid('parent_event_id'),
     policyDecisionId: ulid('policy_decision_id'),
@@ -29,6 +31,11 @@ export const ledgerEvents = pgTable(
     createdAt: createdAt(),
   },
   (table) => [
+    uniqueIndex('ledger_events_principal_idempotency_key_idx').on(
+      table.principalId,
+      table.idempotencyKey,
+    ),
+    index('ledger_events_principal_id_idx').on(table.principalId, table.id),
     index('ledger_events_correlation_id_idx').on(table.correlationId),
     index('ledger_events_kind_ts_idx').on(table.kind, table.ts),
     index('ledger_events_source_record_idx').on(table.sourceSystem, table.sourceRecordId),

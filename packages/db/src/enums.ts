@@ -90,6 +90,9 @@ export const BRIEF_KIND_VALUES = [
   'weekly_review',
 ] as const;
 
+/** ADR 0015. `onboarding` is used from Phase 5 (M3). */
+export const PRINCIPAL_STATUS_VALUES = ['onboarding', 'active', 'paused', 'offboarded'] as const;
+
 export const AGENT_RUN_STATUS_VALUES = ['running', 'succeeded', 'failed'] as const;
 
 export const ledgerKind = pgEnum('ledger_kind', LEDGER_KIND_VALUES);
@@ -107,3 +110,4 @@ export const systemMode = pgEnum('system_mode', SYSTEM_MODE_VALUES);
 export const ruleCreator = pgEnum('rule_creator', RULE_CREATOR_VALUES);
 export const briefKind = pgEnum('brief_kind', BRIEF_KIND_VALUES);
 export const agentRunStatus = pgEnum('agent_run_status', AGENT_RUN_STATUS_VALUES);
+export const principalStatus = pgEnum('principal_status', PRINCIPAL_STATUS_VALUES);

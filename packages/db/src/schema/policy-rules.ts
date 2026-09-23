@@ -1,6 +1,7 @@
 import { boolean, index, integer, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
 import { decision, ruleCreator } from '../enums.js';
 import { createdAt, ulid, ulidCheck, updatedAt } from './columns.js';
+import { organisationOrPrincipalId } from './principals.js';
 
 /**
  * Policy rules (spec section 6.2). `action_class`, `counterparty_class` and
@@ -12,6 +13,8 @@ export const policyRules = pgTable(
   'policy_rules',
   {
     id: ulid('id').primaryKey(),
+    /** Null is an organisation default; set is the principal's own rule (ADR 0019). */
+    principalId: organisationOrPrincipalId(),
     version: integer('version').notNull(),
     active: boolean('active').notNull().default(true),
     actionClass: text('action_class').notNull(),

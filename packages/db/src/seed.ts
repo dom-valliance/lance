@@ -1,7 +1,8 @@
 import { pathToFileURL } from 'node:url';
-import { createDb, type CreateDbOptions, type Db } from './client.js';
+import { createDb, scopedDb, type CreateDbOptions, type Db } from './client.js';
+import { principalState } from './schema/principal-state.js';
+import { principals } from './schema/principals.js';
 import { systemState, SYSTEM_STATE_ID } from './schema/system-state.js';
-import { users } from './schema/users.js';
 
 /**
  * Rows the application cannot start without. Policy rules are not seeded
@@ -11,15 +12,26 @@ import { users } from './schema/users.js';
  * changes nothing and never overwrites a value Dom has edited.
  */
 
-const DOM_USER_ID = '01K5S9V6QW3SWCCPVB0N0E300H';
-const DOM_UPN = 'dom@valliance.ai';
-const DOM_NOTION_USER_ID = '1fdd872b-594c-8146-b22f-00028f1f5a41';
+/** The v1 principal. Migration 0009 made his `users` row this principal. */
+export const SEED_PRINCIPAL_ID = '01K5S9V6QW3SWCCPVB0N0E300H';
+const SEED_PRINCIPAL_UPN = 'dom@valliance.ai';
+const SEED_PRINCIPAL_NOTION_USER_ID = '1fdd872b-594c-8146-b22f-00028f1f5a41';
 
 export const seed = async (db: Db): Promise<void> => {
   await db.insert(systemState).values({ id: SYSTEM_STATE_ID }).onConflictDoNothing();
   await db
-    .insert(users)
-    .values({ id: DOM_USER_ID, upn: DOM_UPN, notionUserId: DOM_NOTION_USER_ID })
+    .insert(principals)
+    .values({
+      id: SEED_PRINCIPAL_ID,
+      upn: SEED_PRINCIPAL_UPN,
+      notionUserId: SEED_PRINCIPAL_NOTION_USER_ID,
+    })
+    .onConflictDoNothing();
+  // principal_state is under row-level security, so the row is written in
+  // the principal's own scope and takes its principal_id from it.
+  await scopedDb(db, { principalId: SEED_PRINCIPAL_ID })
+    .insert(principalState)
+    .values({})
     .onConflictDoNothing();
 };
 

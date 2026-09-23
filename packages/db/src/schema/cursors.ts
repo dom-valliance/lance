@@ -1,5 +1,6 @@
 import { pgTable, primaryKey, text } from 'drizzle-orm/pg-core';
 import { createdAt, updatedAt } from './columns.js';
+import { principalId } from './principals.js';
 
 /**
  * Watcher cursors (spec section 5.1): one row per watcher per partition, for
@@ -9,13 +10,14 @@ import { createdAt, updatedAt } from './columns.js';
 export const cursors = pgTable(
   'cursors',
   {
+    principalId: principalId(),
     watcher: text('watcher').notNull(),
     key: text('key').notNull(),
     value: text('value').notNull(),
     updatedAt: updatedAt(),
     createdAt: createdAt(),
   },
-  (table) => [primaryKey({ columns: [table.watcher, table.key] })],
+  (table) => [primaryKey({ columns: [table.principalId, table.watcher, table.key] })],
 );
 
 export type Cursor = typeof cursors.$inferSelect;

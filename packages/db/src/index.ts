@@ -5,4 +5,4 @@ export * from './schema/index.js';
 export * from './client.js';
 export { newestObservationFirst } from './latest.js';
 export { MIGRATIONS_FOLDER, runMigrations, runMigrationsWithRetry } from './migrate.js';
-export { seed } from './seed.js';
+export { SEED_PRINCIPAL_ID, seed } from './seed.js';

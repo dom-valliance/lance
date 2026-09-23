@@ -1,6 +1,7 @@
-import { index, integer, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
+import { index, integer, jsonb, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import { alertSeverity, alertStatus } from '../enums.js';
 import { createdAt, timestamptz, ulid, ulidCheck, updatedAt } from './columns.js';
+import { principalId } from './principals.js';
 
 /**
  * Alerts raised by watchers, the critic and the executor (spec section 5.1).
@@ -10,9 +11,10 @@ export const alerts = pgTable(
   'alerts',
   {
     id: ulid('id').primaryKey(),
+    principalId: principalId(),
     severity: alertSeverity('severity').notNull(),
     kind: text('kind').notNull(),
-    dedupeKey: text('dedupe_key').notNull().unique(),
+    dedupeKey: text('dedupe_key').notNull(),
     title: text('title').notNull(),
     body: text('body').notNull(),
     provenance: jsonb('provenance').notNull(),
@@ -30,6 +32,7 @@ export const alerts = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
+    uniqueIndex('alerts_principal_dedupe_key_idx').on(table.principalId, table.dedupeKey),
     index('alerts_status_idx').on(table.status),
     index('alerts_severity_idx').on(table.severity),
     index('alerts_last_seen_idx').on(table.lastSeen),

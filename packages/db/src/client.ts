@@ -25,7 +25,102 @@ export interface CreateDbOptions {
   readonly max?: number;
 }
 
-export type Db = NodePgDatabase<typeof schema> & { readonly $client: pg.Pool };
+/**
+ * Which principal, and whether as an admin, a session acts for (ADR 0015).
+ * The empty principal is the unscoped session: row-level security shows it
+ * no principal-bearing row and refuses its inserts.
+ */
+export interface SessionScope {
+  readonly principalId: string;
+  readonly admin: boolean;
+}
+
+const UNSCOPED: SessionScope = { principalId: '', admin: false };
+
+const SET_SCOPE =
+  "SELECT set_config('app.principal', $1, false), set_config('app.role', $2, false)";
+
+/**
+ * A pool that stamps its scope on every connection it hands out, before
+ * the first statement runs. Every scope over one database shares the same
+ * underlying `pg.Pool`, and every checkout sets both settings, so a
+ * connection never carries one scope's value into another's query.
+ *
+ * Drizzle treats a client whose class name contains "Pool" as a pool and
+ * checks out one connection per transaction, which is where the scope is
+ * applied; the name is load-bearing.
+ */
+export class PrincipalScopedPool {
+  constructor(
+    readonly base: pg.Pool,
+    readonly scope: SessionScope,
+  ) {}
+
+  async connect(): Promise<pg.PoolClient> {
+    const client = await this.base.connect();
+    try {
+      await client.query(SET_SCOPE, [this.scope.principalId, this.scope.admin ? 'admin' : '']);
+    } catch (error) {
+      client.release(error instanceof Error ? error : true);
+      throw error;
+    }
+    return client;
+  }
+
+  async query(
+    config: string | pg.QueryConfig,
+    values?: readonly unknown[],
+  ): Promise<pg.QueryResult> {
+    const client = await this.connect();
+    try {
+      return await client.query(config, values as unknown[] | undefined);
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Closes the shared pool, and with it every scope over it. */
+  end(): Promise<void> {
+    return this.base.end();
+  }
+}
+
+export type Db = NodePgDatabase<typeof schema> & { readonly $client: PrincipalScopedPool };
+
+const drizzleOver = (pool: PrincipalScopedPool): Db =>
+  // Drizzle's types name pg's own clients; the scoped pool satisfies the
+  // two methods Drizzle calls on a pool, query and connect.
+  drizzle(pool as unknown as pg.Pool, { schema }) as unknown as Db;
+
+/**
+ * A handle over the same connections as `db`, scoped to one principal
+ * (ADR 0015). Inserts take `principal_id` from this scope; reads see only
+ * this principal's rows, plus organisation rows where a table has them.
+ * `admin` lets the session write organisation rows (ADR 0019).
+ */
+export const scopedDb = (
+  db: Db,
+  scope: { readonly principalId: string; readonly admin?: boolean },
+): Db => {
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(scope.principalId)) {
+    throw new Error(
+      `scopedDb needs a principal id (a ULID from principals.id); got "${scope.principalId}".`,
+    );
+  }
+  return drizzleOver(
+    new PrincipalScopedPool(db.$client.base, {
+      principalId: scope.principalId,
+      admin: scope.admin ?? false,
+    }),
+  );
+};
+
+/** Runs `fn` with a handle scoped to one principal (ADR 0015). */
+export const withPrincipal = <T>(
+  db: Db,
+  principalId: string,
+  fn: (scoped: Db) => Promise<T>,
+): Promise<T> => fn(scopedDb(db, { principalId }));
 
 const hasPasswordInUrl = (connectionString: string): boolean => {
   try {
@@ -78,9 +173,6 @@ const resolvePassword = (
 };
 
 /**
- * Build a Drizzle instance over a `pg.Pool`. Close it with `db.$client.end()`.
- */
-/**
  * Connection settings from the environment. `DATABASE_URL` wins; otherwise
  * the `PG_*` variables the Container Apps carry (ADR 0008) are assembled,
  * with TLS verification on whenever `PG_SSL` is `require`.
@@ -127,7 +219,9 @@ const applyRole = (config: pg.PoolConfig): void => {
 };
 
 /**
- * Build a Drizzle instance over a `pg.Pool`. Close it with `db.$client.end()`.
+ * Build an unscoped Drizzle instance over a new `pg.Pool`. Unscoped, it
+ * reads no principal-bearing row; pass it to `scopedDb` for one that does.
+ * Close it with `db.$client.end()`.
  */
 export const createDb = (options: CreateDbOptions = {}): Db => {
   const config = connectionFromEnv(options);
@@ -153,5 +247,5 @@ export const createDb = (options: CreateDbOptions = {}): Db => {
   pool.on('error', (error: Error) => {
     console.error(`Postgres pool error: ${error.message}`);
   });
-  return drizzle(pool, { schema });
+  return drizzleOver(new PrincipalScopedPool(pool, UNSCOPED));
 };
