@@ -35,9 +35,6 @@ const EMPTY: ShellData = {
   paused: null,
 };
 
-/** The most pending proposals the count will read; the badge says "200" beyond that. */
-const COUNT_LIMIT = 200;
-
 export async function loadShellData(): Promise<ShellData> {
   const session = await auth();
   if (session === null) return EMPTY;
@@ -53,13 +50,13 @@ export async function loadShellData(): Promise<ShellData> {
   }
 
   const [pending, status] = await Promise.all([
-    client.proposals.list.query({ status: 'pending', limit: COUNT_LIMIT }).catch(() => null),
+    client.proposals.summary.query().catch(() => null),
     client.systemState.status.query().catch(() => null),
   ]);
 
   return {
     signedIn: true,
-    counts: { pendingProposals: pending === null ? null : pending.items.length, openAlerts: null },
+    counts: { pendingProposals: pending === null ? null : pending.pending, openAlerts: null },
     statusLine: status === null ? null : shellStatusLine(status),
     paused:
       status === null || !status.paused

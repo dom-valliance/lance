@@ -19,7 +19,7 @@ import {
 } from '@/lib/filters';
 import { humanise, LEDGER_KIND_LABELS, SYSTEM_LABELS } from '@/lib/humanise';
 import { sourceSystemLabel } from '@/lib/ledger-view';
-import { pageLinks, PAGE_SIZES, shownLabel } from '@/lib/pagination';
+import { cursorFrom, pageLinks, pageSummary, PAGE_SIZES, positionFrom } from '@/lib/pagination';
 import { apiClient } from '@/lib/trpc';
 import { LedgerTable } from './ledger-table';
 
@@ -27,12 +27,6 @@ export const dynamic = 'force-dynamic';
 
 /** The filter parameters the page and the export share, in form order. */
 const FILTER_NAMES = ['kind', 'actor', 'sourceSystem', 'from', 'to'] as const;
-
-/**
- * The ledger has no row cursor: it pages by the timestamp of the oldest
- * event shown, in the same `to` parameter the filter form writes.
- */
-const CURSOR_PARAM = 'to';
 
 const queryFrom = (params: SearchParams): URLSearchParams => {
   const query = new URLSearchParams();
@@ -139,27 +133,29 @@ export default async function LedgerPage({
   const params = await searchParams;
   const filter = ledgerFilterFrom(params);
   const client = await apiClient();
-  const events = await client.ledger.query.query({ ...filter, limit: PAGE_SIZES.ledger });
+  const cursor = cursorFrom(params);
+  const page = await client.ledger.list.query({
+    ...filter,
+    limit: PAGE_SIZES.ledger,
+    ...(cursor === undefined ? {} : { cursor }),
+  });
+  const events = page.items;
 
   const exportHref = href('/ledger/export', queryFrom(params));
 
-  // A full page means there is probably more behind it, and the oldest
-  // event shown is where the next page starts.
-  const oldest = events.at(-1);
-  const nextCursor =
-    events.length === PAGE_SIZES.ledger && oldest !== undefined
-      ? new Date(oldest.ts).toISOString()
-      : null;
   const links = pageLinks({
     path: '/ledger',
     params,
     keep: FILTER_NAMES,
-    nextCursor,
-    cursorParam: CURSOR_PARAM,
+    nextCursor: page.nextCursor,
+    shown: events.length,
   });
-  const footer = (
-    <Pagination summary={shownLabel(events.length)} {...links} nextLabel="Show older" />
-  );
+  const position = pageSummary({
+    from: positionFrom(params),
+    shown: events.length,
+    total: page.total,
+  });
+  const footer = <Pagination summary={position} {...links} nextLabel="Show older" />;
 
   return (
     <div className="flex flex-col gap-6">

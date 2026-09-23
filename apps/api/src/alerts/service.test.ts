@@ -31,6 +31,24 @@ describe('listAlerts', () => {
   it('reports no next cursor when the page is the last one', async () => {
     expect((await listAlerts(harness.deps, {})).nextCursor).toBeNull();
   });
+
+  it('counts every alert the filters match, ignoring the cursor and the page size', async () => {
+    harness.alerts.rows = [
+      fakeAlert(),
+      fakeAlert({ id: SECOND_ID, dedupeKey: 'thread:AAMk4' }),
+      fakeAlert({ id: '01K5S9V6QW3SWCCPVB0N0E304C', severity: 'P0', dedupeKey: 'thread:AAMk5' }),
+    ];
+
+    const page = await listAlerts(harness.deps, {
+      severity: 'P1',
+      limit: 1,
+      cursor: '01K5S9V6QW3SWCCPVB0N0E304Z',
+    });
+
+    expect(page.items).toHaveLength(1);
+    expect(page.total).toBe(2);
+    expect(harness.alerts.counts).toEqual([{ severity: 'P1' }]);
+  });
 });
 
 describe('getAlert', () => {

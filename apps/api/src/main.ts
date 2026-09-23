@@ -2,9 +2,11 @@ import { createSlackSurface, type SlackSurface } from '@lance/connectors';
 import { KeyVaultTokenStore } from '@lance/connectors/graph';
 import { createDb, type Db } from '@lance/db';
 import {
+  countProposals,
   decideProposal,
   getProposal,
   listProposals,
+  pendingProposalSummary,
   LedgerReader,
   LedgerWriter,
   SystemControl,
@@ -80,6 +82,8 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
     writer: new LedgerWriter(options.db),
     proposals: {
       list: (filter) => listProposals(options.db, filter),
+      count: (filter) => countProposals(options.db, filter),
+      summary: () => pendingProposalSummary(options.db),
       get: (id) => getProposal(options.db, id),
     },
     decide: (request) => applyDecision(decideDeps, request),

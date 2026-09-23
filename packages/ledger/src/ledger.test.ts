@@ -421,9 +421,77 @@ describe('LedgerReader.query', () => {
     expect(rows.map((row) => row.id)).toEqual([ids[3], ids[2]]);
   });
 
+  it('counts every row the filters match, to included, with no limit', async () => {
+    expect(await reader.count({ correlationId })).toBe(4);
+    expect(await reader.count({ correlationId, actor: ACTOR_B })).toBe(2);
+    expect(await reader.count({ correlationId, to: '2026-03-02T09:00:00.000Z' })).toBe(2);
+    expect(
+      await reader.count({
+        correlationId,
+        kind: 'decided',
+        sourceSystem: 'notion',
+        from: '2026-03-04T00:00:00.000Z',
+      }),
+    ).toBe(1);
+  });
+
   it('returns the oldest row first for byCorrelation', async () => {
     const rows = await reader.byCorrelation(correlationId);
     expect(rows.map((row) => row.id)).toEqual([ids[0], ids[1], ids[2], ids[3]]);
+  });
+});
+
+describe('LedgerReader.query keyset paging', () => {
+  const correlationId = newUlid();
+  const ids: string[] = [];
+
+  beforeAll(async () => {
+    // Two events stamped with the same instant, either side of one older one.
+    const specs = [
+      { ts: '2026-04-01T09:00:00.000Z', kind: 'resolved', actor: 'agent:pager@1.0.0' },
+      { ts: '2026-04-02T09:00:00.000Z', kind: 'resolved', actor: 'agent:pager@1.0.0' },
+      { ts: '2026-04-02T09:00:00.000Z', kind: 'resolved', actor: 'agent:pager@1.0.0' },
+    ] as const;
+    for (const spec of specs) {
+      const result = await writer.append(event({ ...spec, sourceSystem: 'lance', correlationId }));
+      ids.push(result.id);
+    }
+  });
+
+  it('orders events that share an instant by id, newest first', async () => {
+    const tied = [ids[1]!, ids[2]!].sort().reverse();
+
+    const rows = await reader.query({ correlationId });
+
+    expect(rows.map((row) => row.id)).toEqual([...tied, ids[0]]);
+  });
+
+  it('neither repeats nor skips an event that shares an instant across a page boundary', async () => {
+    const all = (await reader.query({ correlationId })).map((row) => row.id);
+
+    const seen: string[] = [];
+    let after: string | undefined;
+    for (let page = 0; page < 4; page += 1) {
+      const rows = await reader.query({
+        correlationId,
+        limit: 1,
+        ...(after === undefined ? {} : { after }),
+      });
+      if (rows.length === 0) break;
+      seen.push(...rows.map((row) => row.id));
+      after = rows.at(-1)?.id;
+    }
+
+    expect(seen).toEqual(all);
+  });
+
+  it('counts every event the filters match, whatever page is being read', async () => {
+    expect(await reader.count({ correlationId })).toBe(3);
+  });
+
+  it('reads one event by id, and nothing for an id no event carries', async () => {
+    expect((await reader.get(ids[0]!))?.correlationId).toBe(correlationId);
+    expect(await reader.get(newUlid())).toBeNull();
   });
 });
 
@@ -453,6 +521,10 @@ describe('LedgerReader.query row limits', () => {
   it('caps a larger limit at 2000 rows', async () => {
     const rows = await reader.query({ correlationId, limit: 5000 });
     expect(rows).toHaveLength(2000);
+  });
+
+  it('counts past the row cap', async () => {
+    expect(await reader.count({ correlationId })).toBe(2001);
   });
 });
 

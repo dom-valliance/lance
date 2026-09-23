@@ -17,7 +17,7 @@ import {
   type AlertStatusFilter,
 } from '@/lib/alert-view';
 import { type SearchParams } from '@/lib/filters';
-import { cursorFrom, pageLinks, PAGE_SIZES, shownLabel } from '@/lib/pagination';
+import { cursorFrom, pageLinks, pageSummary, PAGE_SIZES, positionFrom } from '@/lib/pagination';
 import { apiClient } from '@/lib/trpc';
 import { AlertsTable } from './alerts-table';
 
@@ -82,10 +82,14 @@ export default async function AlertsPage({
     params,
     keep: FILTER_PARAMS,
     nextCursor: page.nextCursor,
+    shown: alerts.length,
   });
-  const footer = (
-    <Pagination summary={shownLabel(alerts.length)} {...links} nextLabel="Show older" />
-  );
+  const position = pageSummary({
+    from: positionFrom(params),
+    shown: alerts.length,
+    total: page.total,
+  });
+  const footer = <Pagination summary={position} {...links} nextLabel="Show older" />;
 
   return (
     <div className="flex flex-col gap-6">

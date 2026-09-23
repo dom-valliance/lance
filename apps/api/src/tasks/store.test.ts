@@ -174,4 +174,12 @@ describe('createTaskStore', () => {
     expect(second.map((row) => row.id)).not.toContain(first[0]?.id);
     expect(second.every((row) => row.id < (first[1]?.id ?? ''))).toBe(true);
   });
+
+  it('counts the same newest observations the list returns, under every filter', async () => {
+    expect(await store.count({})).toBe(4);
+    expect(await store.count({ status: 'open' })).toBe(2);
+    expect(await store.count({ status: 'done' })).toBe(2);
+    expect(await store.count({ source: 'jamie' })).toBe(2);
+    expect(await store.count({ source: 'notion', status: 'done' })).toBe(1);
+  });
 });

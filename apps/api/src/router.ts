@@ -36,12 +36,14 @@ import {
 import { resumeAndRequeue } from './deps.js';
 import {
   chaseCommitment,
+  commitmentSummary,
   getCommitment,
   listCommitments,
   resolveCommitment,
   MAX_PAGE_SIZE,
 } from './commitments/service.js';
-import { listProposals } from './proposals/service.js';
+import { listLedger, MAX_PAGE_SIZE as MAX_LEDGER_PAGE_SIZE } from './ledger/service.js';
+import { listProposals, proposalSummary } from './proposals/service.js';
 import { listTasks } from './tasks/service.js';
 import { procedure, router } from './trpc.js';
 
@@ -66,6 +68,21 @@ export const LedgerQueryInputSchema = z
   })
   .default({});
 export type LedgerQueryInput = z.infer<typeof LedgerQueryInputSchema>;
+
+/** The Ledger page's filters: the query's, with a page-sized limit and a row cursor. */
+export const LedgerListInputSchema = z
+  .object({
+    kind: LedgerKindSchema.optional(),
+    actor: z.string().min(1).optional(),
+    sourceSystem: SourceSystemSchema.optional(),
+    correlationId: UlidSchema.optional(),
+    from: TimestampSchema.optional(),
+    to: TimestampSchema.optional(),
+    limit: z.int().positive().max(MAX_LEDGER_PAGE_SIZE).optional(),
+    /** The id of the oldest event on the previous page. */
+    cursor: UlidSchema.optional(),
+  })
+  .default({});
 
 /**
  * Copies only the keys that were supplied. `exactOptionalPropertyTypes`
@@ -262,6 +279,8 @@ export const appRouter = router({
     list: procedure
       .input(ProposalFilterInputSchema)
       .query(({ ctx, input }) => listProposals(ctx.deps, toProposalFilter(input))),
+    /** The header: how many are pending and the earliest expiry among them. */
+    summary: procedure.query(({ ctx }) => proposalSummary(ctx.deps)),
     get: procedure
       .input(z.object({ proposalId: UlidSchema }))
       .query(({ ctx, input }) => ctx.deps.proposals.get(input.proposalId)),
@@ -281,6 +300,8 @@ export const appRouter = router({
     list: procedure
       .input(CommitmentListInputSchema)
       .query(({ ctx, input }) => listCommitments(ctx.deps, input)),
+    /** Open and overdue counts for both tabs, counted in SQL. */
+    summary: procedure.query(({ ctx }) => commitmentSummary(ctx.deps)),
     get: procedure
       .input(z.object({ id: UlidSchema }))
       .query(({ ctx, input }) => getCommitment(ctx.deps, input.id)),
@@ -340,6 +361,13 @@ export const appRouter = router({
     query: procedure
       .input(LedgerQueryInputSchema)
       .query(({ ctx, input }) => ctx.deps.ledger.query(toLedgerQuery(input))),
+    /** The Ledger page: one page of events, the cursor for the next, and the matching total. */
+    list: procedure.input(LedgerListInputSchema).query(({ ctx, input }) =>
+      listLedger(ctx.deps, {
+        ...toLedgerQuery(input),
+        ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+      }),
+    ),
     byCorrelation: procedure
       .input(z.object({ correlationId: UlidSchema }))
       .query(({ ctx, input }) => ctx.deps.ledger.byCorrelation(input.correlationId)),

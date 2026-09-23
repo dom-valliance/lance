@@ -2,14 +2,17 @@
  * Page sizes, cursors and paging links. Pure functions, so the list pages
  * stay composition: fetch a page, render the table, render the footer.
  *
- * Every list is keyset paged. The api answers `{ items, nextCursor }` where
- * the cursor is the id of the last row shown, and the ledger pages by the
- * timestamp of its oldest event instead, in its own `to` parameter. Both
- * travel as one search param, so a page link is an ordinary link and the
- * filters in force travel with it.
+ * Every list is keyset paged. The api answers `{ items, nextCursor, total }`
+ * where the cursor is the id of the last row shown and the total counts
+ * every row the filters match. The cursor travels as one search param, so a
+ * page link is an ordinary link and the filters in force travel with it. A
+ * keyset cursor says where a page starts, not how far in it is, so the
+ * next-page link also carries `start`, the 1-based position of its first
+ * row, for the footer to say "Showing 51 to 100 of 109". It is not `from`,
+ * which the ledger's date filter already uses.
  */
 
-import { isIsoInstant, isUlid, selected, type SearchParams } from '@/lib/filters';
+import { isUlid, selected, type SearchParams } from '@/lib/filters';
 
 /**
  * How many rows each list page asks for. Proposals carry two lines of
@@ -23,23 +26,34 @@ export const PAGE_SIZES = {
   alerts: 50,
 } as const;
 
-/** The param a cursor travels in everywhere but the ledger, which uses `to`. */
+/** The param a cursor travels in. */
 export const CURSOR_PARAM = 'cursor';
+
+/** The param carrying the 1-based position of a page's first row. */
+export const POSITION_PARAM = 'start';
 
 /**
  * The cursor this request carries, or `undefined` for the first page. A
- * cursor is a ULID (a row id) or a full ISO instant (the ledger's `to`);
- * anything else is a typed or tampered URL, or, in the ledger's case, the
- * plain `YYYY-MM-DD` the filter form supplies, and the first page is served
- * rather than sending the api a value it would reject.
+ * cursor is a row id; anything else is a typed or tampered URL, and the
+ * first page is served rather than sending the api a value it would reject.
  */
-export const cursorFrom = (
-  params: SearchParams,
-  name: string = CURSOR_PARAM,
-): string | undefined => {
-  const value = selected(params, name);
-  if (value === '') return undefined;
-  return isUlid(value) || isIsoInstant(value) ? value : undefined;
+export const cursorFrom = (params: SearchParams): string | undefined => {
+  const value = selected(params, CURSOR_PARAM);
+  return isUlid(value) ? value : undefined;
+};
+
+/**
+ * The position of this page's first row. The first page is always 1; a
+ * later page reads `start`, and a missing, fractional or non-positive value
+ * is a typed or tampered URL, so it reads as 1 rather than a position the
+ * footer would have to explain.
+ */
+export const positionFrom = (params: SearchParams): number => {
+  if (cursorFrom(params) === undefined) return 1;
+  const raw = selected(params, POSITION_PARAM);
+  if (!/^\d+$/.test(raw)) return 1;
+  const position = Number(raw);
+  return Number.isSafeInteger(position) && position >= 1 ? position : 1;
 };
 
 export interface PageLinksInput {
@@ -50,8 +64,8 @@ export interface PageLinksInput {
   keep: readonly string[];
   /** The cursor the api returned, or null when this page is the last one. */
   nextCursor: string | null;
-  /** The param the cursor travels in. */
-  cursorParam?: string;
+  /** Rows on this page; the next link starts at this page's position plus these. */
+  shown: number;
 }
 
 export interface PageLinks {
@@ -68,38 +82,58 @@ const withQuery = (path: string, query: URLSearchParams): string => {
 
 /**
  * The two links under a table. The filters in force are carried on to both;
- * the cursor param never is, so changing a filter restarts the paging and
- * "Back to first page" drops the cursor alone.
+ * the cursor and the position never are, so changing a filter restarts the
+ * paging and "Back to first page" drops them alone.
  */
-export function pageLinks({
-  path,
-  params,
-  keep,
-  nextCursor,
-  cursorParam = CURSOR_PARAM,
-}: PageLinksInput): PageLinks {
+export function pageLinks({ path, params, keep, nextCursor, shown }: PageLinksInput): PageLinks {
   const filters = new URLSearchParams();
   for (const name of keep) {
-    if (name === cursorParam) continue;
+    if (name === CURSOR_PARAM || name === POSITION_PARAM) continue;
     const value = selected(params, name);
     if (value !== '') filters.set(name, value);
   }
 
-  const onFirstPage = cursorFrom(params, cursorParam) === undefined;
+  const onFirstPage = cursorFrom(params) === undefined;
   if (nextCursor === null) {
     return { next: null, first: onFirstPage ? null : withQuery(path, filters) };
   }
 
   const next = new URLSearchParams(filters);
-  next.set(cursorParam, nextCursor);
+  next.set(CURSOR_PARAM, nextCursor);
+  next.set(POSITION_PARAM, String(positionFrom(params) + shown));
   return {
     next: withQuery(path, next),
     first: onFirstPage ? null : withQuery(path, filters),
   };
 }
 
-/** "25 shown", with the filters named where a page knows them. */
-export function shownLabel(count: number, filterNames: readonly string[] = []): string {
-  const shown = `${String(count)} shown`;
-  return filterNames.length === 0 ? shown : `${shown}, filtered by ${filterNames.join(', ')}`;
+const count = new Intl.NumberFormat('en-GB');
+
+const filteredBy = (sentence: string, filterNames: readonly string[]): string =>
+  filterNames.length === 0 ? sentence : `${sentence}, filtered by ${filterNames.join(', ')}`;
+
+export interface PageSummaryInput {
+  /** The 1-based position of the first row, from `positionFrom`. */
+  from: number;
+  /** Rows on this page. */
+  shown: number;
+  /** Every row the filters match, from the api. */
+  total: number;
+  /** The filters in force, in plain words, where a page names them. */
+  filterNames?: readonly string[];
+}
+
+/**
+ * The footer sentence for a list with a stable total: "Showing 51 to 100 of
+ * 109", or "Nothing to show" for an empty page. A row that arrived between
+ * the page read and the count cannot make the last row outrun the total.
+ */
+export function pageSummary({ from, shown, total, filterNames = [] }: PageSummaryInput): string {
+  if (shown === 0) return filteredBy('Nothing to show', filterNames);
+  const to = from + shown - 1;
+  const of = Math.max(total, to);
+  return filteredBy(
+    `Showing ${count.format(from)} to ${count.format(to)} of ${count.format(of)}`,
+    filterNames,
+  );
 }

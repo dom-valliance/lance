@@ -1,5 +1,5 @@
 import { alerts, type Alert, type Db } from '@lance/db';
-import { and, desc, eq, inArray, lt, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, lt, type SQL } from 'drizzle-orm';
 
 /**
  * The Alerts page's reads and the three writes behind its buttons (spec
@@ -18,6 +18,9 @@ export interface AlertQuery {
   cursor?: string;
 }
 
+/** The filters a count honours: the list's, without the page it would cut. */
+export type AlertCountQuery = Omit<AlertQuery, 'limit' | 'cursor'>;
+
 export interface SetAlertStatusInput {
   id: string;
   /** The statuses the transition is allowed from; part of the WHERE clause. */
@@ -32,18 +35,26 @@ export interface SetAlertStatusInput {
 
 export interface AlertStoreLike {
   list(query: AlertQuery): Promise<Alert[]>;
+  /** Every row `list` would return across all its pages. */
+  count(query: AlertCountQuery): Promise<number>;
   get(id: string): Promise<Alert | null>;
   /** Sets the status of an alert that is still in `from`, and returns the row as it now stands. */
   setStatus(input: SetAlertStatusInput): Promise<Alert | null>;
 }
 
+/** The WHERE clauses `list` and `count` share, so the two cannot drift apart. */
+function filtersFor(query: AlertCountQuery): SQL[] {
+  const filters: SQL[] = [];
+  if (query.status !== undefined) filters.push(eq(alerts.status, query.status));
+  if (query.severity !== undefined) filters.push(eq(alerts.severity, query.severity));
+  if (query.kind !== undefined) filters.push(eq(alerts.kind, query.kind));
+  return filters;
+}
+
 export function createAlertStore(db: Db): AlertStoreLike {
   return {
     async list(query: AlertQuery): Promise<Alert[]> {
-      const filters: SQL[] = [];
-      if (query.status !== undefined) filters.push(eq(alerts.status, query.status));
-      if (query.severity !== undefined) filters.push(eq(alerts.severity, query.severity));
-      if (query.kind !== undefined) filters.push(eq(alerts.kind, query.kind));
+      const filters = filtersFor(query);
       if (query.cursor !== undefined) filters.push(lt(alerts.id, query.cursor));
 
       return db
@@ -52,6 +63,15 @@ export function createAlertStore(db: Db): AlertStoreLike {
         .where(filters.length === 0 ? undefined : and(...filters))
         .orderBy(desc(alerts.id))
         .limit(query.limit);
+    },
+
+    async count(query: AlertCountQuery): Promise<number> {
+      const filters = filtersFor(query);
+      const rows = await db
+        .select({ total: count() })
+        .from(alerts)
+        .where(filters.length === 0 ? undefined : and(...filters));
+      return rows[0]?.total ?? 0;
     },
 
     async get(id: string): Promise<Alert | null> {
