@@ -14,17 +14,21 @@ import {
   formatDayMonth,
   formatGbp,
   formatHours,
+  freeBlockLabel,
   generatedLabel,
   interactionLabel,
   invertVisibility,
+  isGenerating,
   isBeforeBriefTime,
   isBoardTime,
   isPrepExpanded,
   isTodaysBrief,
   listSentence,
   meetingLoadLabel,
+  meetingMarkerLabel,
   meetingVisibility,
   nextMeetingId,
+  noBriefSummary,
   overnightWindowLabel,
   tasksFooter,
 } from './brief-view';
@@ -316,5 +320,62 @@ describe('invertVisibility', () => {
     expect(invertVisibility('none')).toBe('both');
     expect(invertVisibility('desktop')).toBe('phone');
     expect(invertVisibility('phone')).toBe('desktop');
+  });
+});
+
+describe('meetingMarkerLabel', () => {
+  it('joins the London time and the title, and says None for an empty day', () => {
+    expect(meetingMarkerLabel({ start: '2026-09-21T08:30:00Z', title: 'Halden Group' })).toBe(
+      '09:30, Halden Group',
+    );
+    expect(meetingMarkerLabel(null)).toBe('None');
+  });
+});
+
+describe('freeBlockLabel', () => {
+  const block = { start: '2026-09-21T09:30:00Z', end: '2026-09-21T12:00:00Z', hours: 2.5 };
+
+  it('gives the times with the length on desktop and the times alone on the phone', () => {
+    expect(freeBlockLabel(block, 'with-length')).toBe('10:30 to 13:00, 2 h 30');
+    expect(freeBlockLabel(block, 'times-only')).toBe('10:30 to 13:00');
+  });
+
+  it('says None when the day has no free block', () => {
+    expect(freeBlockLabel(null, 'with-length')).toBe('None');
+  });
+});
+
+describe('noBriefSummary', () => {
+  it('names yesterday when the last brief was the day before', () => {
+    expect(noBriefSummary('2026-09-20T05:30:00Z', AFTERNOON)).toBe(
+      'No brief. Last successful brief yesterday, 06:30.',
+    );
+  });
+
+  it('gives the date for an older brief and a plain line when there has never been one', () => {
+    expect(noBriefSummary('2026-09-17T05:30:00Z', AFTERNOON)).toBe(
+      'No brief. Last successful brief 17 Sept, 06:30.',
+    );
+    expect(noBriefSummary(null, AFTERNOON)).toBe('No brief yet.');
+  });
+});
+
+describe('isGenerating', () => {
+  const queued = { at: '2026-09-21T15:41:00Z', previousGeneratedAt: '2026-09-21T05:30:00Z' };
+
+  it('holds while the page still shows the brief that was there when the job was queued', () => {
+    expect(isGenerating(queued, '2026-09-21T05:30:00Z', null)).toBe(true);
+  });
+
+  it('ends when a brief with a new generatedAt lands or the header gave up on this job', () => {
+    expect(isGenerating(queued, '2026-09-21T15:41:52Z', null)).toBe(false);
+    expect(isGenerating(queued, '2026-09-21T05:30:00Z', queued.at)).toBe(false);
+    expect(isGenerating(queued, '2026-09-21T05:30:00Z', '2026-09-21T15:00:00Z')).toBe(true);
+  });
+
+  it('treats a first brief on an empty page the same way', () => {
+    const first = { at: queued.at, previousGeneratedAt: null };
+    expect(isGenerating(first, null, null)).toBe(true);
+    expect(isGenerating(first, '2026-09-21T15:41:52Z', null)).toBe(false);
   });
 });
