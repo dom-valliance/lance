@@ -151,3 +151,37 @@ Still open from the same look: the Notion connector gets HTTP 404 from `data_sou
 Dom shared the All Tasks database with the `Dom's Lance` integration and decided not to share the Meetings database, which no longer captures meetings. The default for spec 16 Q7 changes accordingly: the notion watcher reads All Tasks only, and `NOTION_MEETINGS_DATA_SOURCE_ID` is unset unless the Meetings database comes back into use. The Meetings connector code stays for that case. Meeting content continues to arrive from Jamie.
 
 Sharing the database also started a backfill: 3,390 task observations in one poll, each queued for triage at a Sonnet call apiece and nothing to propose. The queued jobs were deleted from `pgboss.job` by hand (3,133 rows, GBP 1 already spent) and the notion watcher now opts out of triage, as the agent-logs watcher does.
+
+## Phases 4 to 8
+
+From Phase 4 onwards the order is set by [docs/plans/roadmap.md](../plans/roadmap.md) (ADR 0031), not spec section 15. Acceptance criteria for each phase are listed there, drawn from the briefings in `docs/plans/`.
+
+## Phase 4. Principal seam
+
+| Criterion | Evidence | Date |
+|---|---|---|
+
+## Phase 5. Multi-user
+
+| Criterion | Evidence | Date |
+|---|---|---|
+
+## Pilot
+
+| Criterion | Evidence | Date |
+|---|---|---|
+
+## Phase 6. Jobs
+
+| Criterion | Evidence | Date |
+|---|---|---|
+
+## Phase 7. Ontology and autonomy
+
+| Criterion | Evidence | Date |
+|---|---|---|
+
+## Phase 8. Hardening
+
+| Criterion | Evidence | Date |
+|---|---|---|

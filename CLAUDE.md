@@ -2,7 +2,7 @@
 
 Personal operating agent for Dom Selvon. Watches mail, calendar, meetings and tasks; keeps a ledger of everything it sees and does; proposes actions through Slack; executes only what policy allows; prepares the day. TypeScript end to end on Azure Container Apps, Postgres with Apache AGE and pgvector, Next.js front end.
 
-The full specification is [Ian-Assistant_Spec_v1.md](Ian-Assistant_Spec_v1.md). Read it before writing code. This file summarises how to work in the repo; it does not replace the spec. Valliance global standards in `~/.claude/CLAUDE.md` apply and are not repeated here.
+The full specification is [Lance-Assistant_Spec_v1.md](Lance-Assistant_Spec_v1.md). Read it before writing code. This file summarises how to work in the repo; it does not replace the spec. Valliance global standards in `~/.claude/CLAUDE.md` apply and are not repeated here.
 
 ## Naming
 
@@ -23,7 +23,7 @@ Do not introduce `ian_*` identifiers. Where the spec says `ian`, write `lance`.
 
 ## How to use the spec
 
-1. Build in the phase order of spec section 15. Do not start a phase until the previous phase's acceptance criteria pass in CI.
+1. Build in the phase order of [docs/plans/roadmap.md](docs/plans/roadmap.md), which replaces spec section 15 from Phase 4 onwards (ADR 0031). The briefings it draws on are in `docs/plans/`. Do not start a phase until the previous phase's acceptance criteria pass in CI.
 2. Record every architectural deviation from the spec as an ADR in `docs/adr/NNNN-title.md` before implementing it. Deviations without an ADR are bugs. Existing ADRs are listed in `docs/adr/README.md`.
 3. Where the spec says "default", implement the default and expose the value in configuration. Where it says "hard floor", the value is code, not configuration, and has a test proving it cannot be overridden.
 4. Open questions in spec section 16 have stated defaults. Build the default; do not block.
