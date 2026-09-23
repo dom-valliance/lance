@@ -11,7 +11,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Least privilege by default. Only the bicep job widens this, and only for OIDC.
+# Least privilege. Nothing in this workflow talks to Azure; deploy.yml does.
 permissions:
   contents: read
 
@@ -141,19 +141,13 @@ jobs:
       - name: Check migrations for destructive statements
         run: ./scripts/check-migrations.sh
 
+  # No Azure login here. A what-if runs the same authorisation pre-flight as a
+  # deployment, so a pull request could only run one with deploy rights; the
+  # what-if therefore runs in deploy.yml, under the deploy identity, right before
+  # the deployment it describes.
   bicep:
-    name: Bicep build, lint and what-if
+    name: Bicep build, lint and guards
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      # Required by azure/login for the OIDC token exchange.
-      id-token: write
-    # The secrets context is not available in a job-level if, nor in a step-level
-    # if. The documented way to gate on a secret is to map it into env at job
-    # level and test that env value in the step condition, which is what the
-    # what-if steps below do.
-    env:
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
@@ -191,30 +185,3 @@ jobs:
       # The deploy identity may assign only the roles infra/deployer.bicep lists.
       - name: Check main.bicep assigns no role the deploy identity cannot
         run: scripts/check-deployer-roles.sh
-
-      - name: Log in to Azure with OIDC
-        if: env.AZURE_CLIENT_ID != ''
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      # The what-if runs with the tag dev is running now, read from the api app, so
-      # the report shows the template changes and not an image flip.
-      - name: what-if
-        if: env.AZURE_CLIENT_ID != ''
-        run: |
-          az extension add --name containerapp --upgrade --yes
-          image=$(az containerapp show -g rg-lance-dev -n ca-lance-api-dev \
-            --query "properties.template.containers[0].image" -o tsv)
-          export LANCE_IMAGE_TAG="${image##*:}"
-          echo "what-if against the running tag ${LANCE_IMAGE_TAG}"
-          az deployment sub what-if \
-            --location uksouth \
-            --template-file infra/main.bicep \
-            --parameters infra/params/dev.bicepparam
-
-      - name: Report that what-if was skipped
-        if: env.AZURE_CLIENT_ID == ''
-        run: echo "What-if skipped because no Azure credentials are configured for this repository."

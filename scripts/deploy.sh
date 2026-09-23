@@ -46,12 +46,23 @@ for repository in lance-web lance-api lance-worker; do
   fi
 done
 
-echo "Deploying ${deployment_name}: images tagged ${tag} from ${registry}"
-
 export LANCE_IMAGE_TAG="${tag}"
+location="${LANCE_LOCATION:-uksouth}"
+
+# The plan first, in the same log as the deployment it describes. A what-if runs
+# the same authorisation pre-flight as a deployment, so it cannot run under a
+# read-only identity on a pull request; here it runs under the deploying one.
+echo "What-if for ${deployment_name}: images tagged ${tag} from ${registry}"
+az deployment sub what-if \
+  --name "${deployment_name}" \
+  --location "${location}" \
+  --template-file "${repo_root}/infra/main.bicep" \
+  --parameters "${parameters}"
+
+echo "Deploying ${deployment_name}"
 az deployment sub create \
   --name "${deployment_name}" \
-  --location "${LANCE_LOCATION:-uksouth}" \
+  --location "${location}" \
   --template-file "${repo_root}/infra/main.bicep" \
   --parameters "${parameters}" \
   --query "properties.provisioningState" -o tsv

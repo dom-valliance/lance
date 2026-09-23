@@ -15,13 +15,17 @@ A `Deploy` workflow (`.github/workflows/deploy.yml`) deploys `main` to dev. It r
 
 The image tag leaves the parameter files. `containerImageTag` is `readEnvironmentVariable('LANCE_IMAGE_TAG')` with no default in both `dev.bicepparam` and `prod.bicepparam`, so a deployment without the variable refuses to compile and no deploy ever edits a committed file.
 
-The workflow runs as two user-assigned managed identities per environment, declared in `infra/deployer.bicep` and deployed by Dom, never by CI, because a deployment cannot grant its own identity the rights it is about to use. `id-lance-github-deploy-<env>` trusts the OIDC subject of the GitHub environment of the same name and holds Contributor on the resource group, Role Based Access Control Administrator on the group with an ABAC condition that limits it to the four roles `main.bicep` assigns, and a custom `Lance deployment writer` role at subscription scope that permits subscription-scope deployments and nothing else. `id-lance-github-plan-<env>` trusts the `pull_request` and `refs/heads/main` subjects and holds Reader on the group and a `Lance deployment reader` custom role for the what-if. Neither identity has a secret.
+The workflow runs as one user-assigned managed identity per environment, declared in `infra/deployer.bicep` and deployed by Dom, never by CI, because a deployment cannot grant its own identity the rights it is about to use. `id-lance-github-deploy-<env>` trusts the OIDC subject of the GitHub environment of the same name (the subject names the owner and repository with their numeric ids, as GitHub presents them) and holds Contributor on the resource group, Role Based Access Control Administrator on the group with an ABAC condition that limits it to the four roles `main.bicep` assigns, and a custom `Lance deployment writer` role at subscription scope that permits subscription-scope deployments, their what-if and nothing else. The identity has no secret.
+
+The what-if runs in the deploy workflow, under that identity, immediately before the deployment, and the CI job on a pull request does not log in to Azure. The first design had a second, read-only identity for a what-if on every pull request; the first run showed that a what-if performs the same authorisation pre-flight as a deployment and reports `Authorization failed` for every resource a Reader cannot write. A pull request what-if would therefore need deploy rights on a `pull_request` token, which is the wrong trade.
 
 The migration job runs as part of every automated deploy. This changes the rule in `infra/modules/migrate-job.bicep` and `deploy.md` that the job never runs as part of a deploy. Migrations are forward-only (CI rejects `DROP TABLE` and `DROP COLUMN`), Drizzle skips applied ones, the seed is idempotent, and the failure the notes record is the job not being run, not the job being run.
 
 ## Consequences
 
 A merge to `main` reaches dev in about ten minutes with a verified result, and `dev.bicepparam` stops changing per deploy. The GitHub environment `dev` is the control point: its `AZURE_CLIENT_ID` secret names the deploy identity, and a branch restriction there is what stops a manual dispatch from another branch.
+
+A pull request that changes `infra/` is reviewed on its diff, its Bicep build and lint, and the role guard; the what-if for it appears in the deploy log after the merge, not before. Spec 3.2's "Bicep what-if" in CI is met there.
 
 The apps move to the new image before the migration job runs, a window of about a minute in which an app that needs a new table fails at its first use of it. Additive migrations make that benign; a migration that must precede its code needs a two-step deploy and this ADR revisited.
 

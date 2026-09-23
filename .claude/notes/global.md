@@ -249,3 +249,10 @@
 **Correction**: Dom pasted the failed azure/login step.
 **Rule**: Before writing a federated credential, read the subject a real token carries (the `subject claim` line azure/login prints on a failed run, or the repository's ids from the GitHub API) and put every part of it in the parameter file. Expect the first login of a new identity to fail and treat that run as the source of the value.
 **Applies to**: infra/deployer.bicep, infra/params/deployer-*.bicepparam, docs/runbooks/github-deploy-setup.md
+
+### [2026-09-23] A what-if needs deploy rights, so a read-only what-if on pull requests does not exist
+
+**Context**: A second managed identity with Reader on the resource group was meant to run `az deployment sub what-if` on every pull request. Its first run failed with `Authorization failed` for every resource in the template: what-if runs the same authorisation pre-flight as a deployment and checks write permission on each resource.
+**Correction**: Dom pasted the failed CI step.
+**Rule**: Treat what-if as a write-privileged operation when designing identities. The plan runs where the deploy identity runs, immediately before the deploy, and a pull request is reviewed on its diff, build, lint and guards. Never give a `pull_request` token deploy rights to get a plan.
+**Applies to**: infra/deployer.bicep, .github/workflows/ci.yml, .github/workflows/deploy.yml
