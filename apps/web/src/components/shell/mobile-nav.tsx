@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { NAV_ITEMS, pageTitleFor, type NavCounts } from '@/components/shell/nav';
+import { NAV_ITEMS, SIGN_OUT_PATH, pageTitleFor, type NavCounts } from '@/components/shell/nav';
 import { NavLink } from '@/components/shell/nav-link';
 import { StarMark } from '@/components/shell/star-mark';
 import { StatusLine } from '@/components/shell/status-line';
@@ -19,11 +19,9 @@ import type { ShellStatusLine } from '@/lib/shell-status';
 export function MobileNav({
   counts,
   status,
-  signOut,
 }: {
   counts: NavCounts;
   status: ShellStatusLine | null;
-  signOut: () => Promise<void>;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -88,7 +86,7 @@ export function MobileNav({
           ))}
           <div className="mt-auto flex flex-col gap-3 border-t border-border px-1 pt-4 pb-2">
             <StatusLine line={status} />
-            <form action={signOut}>
+            <form action={SIGN_OUT_PATH} method="post">
               <Button type="submit" variant="outline" size="lg" className="w-full">
                 Sign out
               </Button>

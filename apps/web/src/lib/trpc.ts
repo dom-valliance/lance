@@ -36,6 +36,9 @@ export async function apiClient(): Promise<ApiClient> {
   if (session === null) {
     throw new Error('No session. Sign in before calling the api.');
   }
+  if (session.error !== undefined) {
+    throw new Error('The Microsoft sign-in has lapsed and could not be renewed. Sign in again.');
+  }
   if (session.idToken === undefined) {
     throw new Error(
       'The session carries no Entra id token. Sign out and in again so Auth.js can store one.',

@@ -8,6 +8,9 @@ export interface NavItem {
   singular?: string;
 }
 
+/** The Sign out form posts here: a fixed URL, so a page from the previous build still signs out after a deploy. */
+export const SIGN_OUT_PATH = '/api/sign-out';
+
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/today', label: 'Today' },
   { href: '/proposals', label: 'Proposals', singular: 'Proposal' },

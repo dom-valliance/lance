@@ -14,12 +14,10 @@ import type { ShellData } from '@/lib/shell-data';
 export function AppShell({
   agentName,
   data,
-  signOut,
   children,
 }: {
   agentName: string;
   data: ShellData;
-  signOut: () => Promise<void>;
   children: ReactNode;
 }) {
   if (!data.signedIn) {
@@ -28,14 +26,9 @@ export function AppShell({
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar
-        agentName={agentName}
-        counts={data.counts}
-        status={data.statusLine}
-        signOut={signOut}
-      />
+      <Sidebar agentName={agentName} counts={data.counts} status={data.statusLine} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <MobileNav counts={data.counts} status={data.statusLine} signOut={signOut} />
+        <MobileNav counts={data.counts} status={data.statusLine} />
         <main className="flex flex-1 flex-col gap-6 p-4 lg:p-8">
           {data.paused === null ? null : <PausedBanner {...data.paused} />}
           {children}
