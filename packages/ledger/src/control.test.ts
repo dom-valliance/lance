@@ -429,7 +429,8 @@ describe('the kill switch across principals', () => {
       ]);
       expect([other.paused, other.pausedGlobally]).toEqual([true, true]);
 
-      await otherControl.resume({ actor: DOM });
+      const underGlobal = await otherControl.resume({ actor: DOM });
+      expect(underGlobal.releasedProposalIds).toEqual([]);
       expect(await otherControl.isPaused()).toBe(true);
     } finally {
       await control.resumeAll({ actor: DOM });
@@ -454,6 +455,9 @@ describe('the kill switch across principals', () => {
   it("holds the caller's approved proposals on a global pause and releases them on their resume", async () => {
     const approvedId = await insertProposal('approved');
     await control.pauseAll({ reason: 'global hold', actor: DOM });
+    expect(await statusOf(approvedId)).toBe('held');
+    const early = await control.resume({ actor: DOM });
+    expect(early.releasedProposalIds).toEqual([]);
     expect(await statusOf(approvedId)).toBe('held');
     await control.resumeAll({ actor: DOM });
     const resumed = await control.resume({ actor: DOM });

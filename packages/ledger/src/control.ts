@@ -351,6 +351,9 @@ export class SystemControl {
     return this.db.transaction(async (tx) => {
       const current = await this.readOwn(tx);
       const ts = nowIso();
+      if ((await this.readGlobal(tx)).paused) {
+        return this.resumeUnderGlobalPause(tx, current, ts, options);
+      }
       const outstanding = await this.heldSinceLastResume(tx);
       const releasedProposalIds: string[] = [];
       for (const from of HOLDABLE_STATUSES) {
@@ -397,6 +400,50 @@ export class SystemControl {
 
       return { changed: current.paused, releasedProposalIds, eventId: event.id };
     });
+  }
+
+  /**
+   * A principal's resume while the global row is paused clears their own
+   * pause and releases nothing, because the executor would hold every
+   * released proposal again. It is recorded as `resume_own`, not `resume`,
+   * so the next resume after the global pause lifts still finds the holds.
+   */
+  private async resumeUnderGlobalPause(
+    tx: DbExecutor,
+    current: PrincipalState,
+    ts: string,
+    options: ActorOptions,
+  ): Promise<ResumeResult> {
+    if (current.paused) {
+      await tx
+        .update(principalState)
+        .set({
+          paused: false,
+          pausedReason: null,
+          pausedBy: null,
+          pausedAt: null,
+          updatedAt: new Date(ts),
+        })
+        .where(eq(principalState.principalId, current.principalId));
+    }
+    const event = await this.writer.append(
+      {
+        ts,
+        actor: options.actor,
+        kind: 'state_changed',
+        sourceSystem: 'lance',
+        correlationId: newUlid(),
+        payload: {
+          change: 'resume_own',
+          paused: true,
+          wasPaused: current.paused,
+          globalPauseStands: true,
+          releasedProposalIds: [],
+        },
+      },
+      tx,
+    );
+    return { changed: current.paused, releasedProposalIds: [], eventId: event.id };
   }
 
   async setMode(
