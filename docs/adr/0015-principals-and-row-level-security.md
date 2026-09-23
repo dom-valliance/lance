@@ -24,6 +24,8 @@ The briefing proposes `withPrincipal(db, principalId, fn)` opening a transaction
 
 **Where the scope comes from in Phase 4.** There is one principal. The api and the worker resolve it at start-up from `principals` by the configured UPN and build their dependencies over its scoped handle. The Slack routes resolve the signed user id through `principals.slack_user_id`. The worker seeds organisation rules through an admin-scoped handle. Resolving the principal per request from the Entra `oid`, and a `principalId` on every job payload with one schedule per principal, arrive with Phase 5 (packages 5.1 and 5.3), where there is more than one principal to resolve.
 
+**What this protects against.** Row-level security here guards against application bugs: a query that forgets its scope, a join that reaches too far. It does not guard against a compromised application role, which can set `app.principal` and `app.role` itself; that is the job of the Entra, Key Vault and network controls around the apps. `lance_app` may read `principals` and not write it, so no application path can add a principal or change the Slack id the allowlist trusts.
+
 **Enforcement.** ESLint restricts `createDb` to the composition roots (`apps/*/src/main.ts`, `packages/db`, the ontology rebuild script). Tests that prove isolation connect as a member of `lance_app`, because a superuser bypasses RLS even when it is forced.
 
 ## Consequences

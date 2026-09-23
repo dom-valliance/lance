@@ -277,6 +277,25 @@ describe('organisation rows in policy_rules', () => {
     expect(code).toBe(PERMISSION_DENIED);
   });
 
+  it('lets no scope but an admin one change or remove an organisation default', async () => {
+    const seeded = scopedDb(appDb, { principalId: SEED_PRINCIPAL_ID });
+    const taken = await seeded.$client.query(
+      "UPDATE policy_rules SET principal_id = $1, decision = 'auto' WHERE principal_id IS NULL",
+      [SEED_PRINCIPAL_ID],
+    );
+    expect(taken.rowCount).toBe(0);
+    const removed = await seeded.$client.query(
+      'DELETE FROM policy_rules WHERE principal_id IS NULL',
+    );
+    expect(removed.rowCount).toBe(0);
+
+    const admin = scopedDb(appDb, { principalId: SEED_PRINCIPAL_ID, admin: true });
+    const changed = await admin.$client.query(
+      "UPDATE policy_rules SET rationale = 'admin edit' WHERE principal_id IS NULL",
+    );
+    expect(changed.rowCount).toBe(1);
+  });
+
   it("hides one principal's own rules from the other", async () => {
     const other = scopedDb(appDb, { principalId: OTHER_PRINCIPAL_ID });
     const result = await other.$client.query(
@@ -284,6 +303,25 @@ describe('organisation rows in policy_rules', () => {
       [SEED_PRINCIPAL_ID],
     );
     expect(result.rows[0]).toEqual({ n: 0 });
+  });
+});
+
+describe('the principal lookup', () => {
+  it('lets the apps read principals and write none', async () => {
+    const seeded = scopedDb(appDb, { principalId: SEED_PRINCIPAL_ID });
+    const read = await seeded.$client.query('SELECT count(*)::int AS n FROM principals');
+    expect(read.rows[0]).toEqual({ n: 2 });
+    const inserted = await codeOf(() =>
+      seeded.$client.query(
+        "INSERT INTO principals (id, upn) VALUES ($1, 'intruder@example.test')",
+        ['01K5S9V6QW3SWCCPVB0N0E3Z9Z'],
+      ),
+    );
+    expect(inserted).toBe(PERMISSION_DENIED);
+    const updated = await codeOf(() =>
+      seeded.$client.query("UPDATE principals SET slack_user_id = 'U0INTRUDER'"),
+    );
+    expect(updated).toBe(PERMISSION_DENIED);
   });
 });
 

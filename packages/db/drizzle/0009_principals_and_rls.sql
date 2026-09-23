@@ -186,10 +186,21 @@ ALTER TABLE policy_rules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE policy_rules FORCE ROW LEVEL SECURITY;
 --> statement-breakpoint
 -- Every principal reads the organisation defaults beside their own rules;
--- only an admin scope writes a row with no principal (ADR 0019).
-CREATE POLICY principal_isolation ON policy_rules
-  USING (principal_id IS NULL OR principal_id = app_principal())
+-- only an admin scope inserts, changes or removes a row with no principal
+-- (ADR 0019). One policy per command, because a single USING clause would
+-- also let any principal update or delete an organisation row.
+CREATE POLICY principal_read ON policy_rules FOR SELECT
+  USING (principal_id IS NULL OR principal_id = app_principal());
+--> statement-breakpoint
+CREATE POLICY principal_insert ON policy_rules FOR INSERT
   WITH CHECK (principal_id = app_principal() OR (principal_id IS NULL AND app_is_admin()));
+--> statement-breakpoint
+CREATE POLICY principal_update ON policy_rules FOR UPDATE
+  USING (principal_id = app_principal() OR (principal_id IS NULL AND app_is_admin()))
+  WITH CHECK (principal_id = app_principal() OR (principal_id IS NULL AND app_is_admin()));
+--> statement-breakpoint
+CREATE POLICY principal_delete ON policy_rules FOR DELETE
+  USING (principal_id = app_principal() OR (principal_id IS NULL AND app_is_admin()));
 --> statement-breakpoint
 -- The objects above belong to the role running the migration; hand them to
 -- lance_migrator like every other relational object (migration 0002), and
@@ -204,7 +215,11 @@ ALTER FUNCTION app_principal() OWNER TO lance_migrator;
 --> statement-breakpoint
 ALTER FUNCTION app_is_admin() OWNER TO lance_migrator;
 --> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE ON principals TO lance_app;
+-- The apps only look principals up; the migration job and the seed write
+-- them. users is no longer written by anyone (ADR 0015).
+GRANT SELECT ON principals TO lance_app;
+--> statement-breakpoint
+REVOKE INSERT, UPDATE, DELETE ON users FROM lance_app;
 --> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE ON principal_state TO lance_app;
 --> statement-breakpoint
