@@ -1,7 +1,8 @@
 // Azure Container Registry for the three Lance images: lance-web, lance-api, lance-worker.
 // Basic sku is enough for one developer and one environment. Admin user is disabled:
-// every pull goes through a managed identity with AcrPull, and pushes go through
-// az acr build under Dom's own credentials.
+// every pull goes through a managed identity with AcrPull, and pushes come from
+// deploy.yml under the deploy identity (modules/deployer.bicep) or from az acr build
+// under Dom's own credentials on a manual deploy.
 
 @description('Environment name, dev or prod.')
 param environmentName string

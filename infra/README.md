@@ -8,6 +8,10 @@ Bicep for Lance on Azure. One subscription-scope template creates the resource g
 main.bicep                 Subscription scope. Resource group plus every module.
 params/dev.bicepparam      Dev values. Bootstrap image on, geo-redundant backup off.
 params/prod.bicepparam     Prod values. Real images, geo-redundant backup on.
+deployer.bicep             Subscription scope. The two GitHub Actions identities for one
+                           environment and their roles. Deployed once by Dom, never by CI.
+params/deployer-dev.bicepparam  Dev values for deployer.bicep: repository and environment name.
+modules/deployer.bicep     The identities, their federated credentials and group roles.
 modules/monitoring.bicep   Log Analytics and Application Insights.
 modules/identity.bicep     Four user-assigned managed identities.
 modules/keyvault.bicep     Key Vault and the secret read grants.
@@ -26,7 +30,9 @@ docker/                    Local Postgres image for docker-compose. Not deployed
 
 **keyvault** RBAC authorisation, soft delete, purge protection, public network access on so Dom can set values from the CLI. The four identities get `Key Vault Secrets User`. The module documents the eleven secret names Lance expects and creates none of the values.
 
-**registry** Basic sku, admin user disabled. The four identities get `AcrPull`. Pushes go through `az acr build` under Dom's own credentials.
+**registry** Basic sku, admin user disabled. The four identities get `AcrPull`. Pushes come from `.github/workflows/deploy.yml` under the deploy identity's Contributor role, or from `az acr build` under Dom's own credentials on a manual deploy.
+
+**deployer** (`deployer.bicep`, not part of `main.bicep`) `id-lance-github-deploy-<env>` and `id-lance-github-plan-<env>`, user-assigned identities with federated credentials for GitHub's OIDC issuer, so the workflows hold no secret. Deploy: Contributor on the group, Role Based Access Control Administrator on the group with a condition limiting it to the four roles `main.bicep` assigns, and the custom `Lance deployment writer` role at subscription scope. Plan: Reader on the group and the custom `Lance deployment reader` role. Dom deploys it once per environment (`docs/runbooks/github-deploy-setup.md`); `scripts/check-deployer-roles.sh` keeps its allowed-role list in step with the modules. ADR 0014.
 
 **postgres** Version 16 per ADR 0004. Burstable B1ms for dev, General Purpose D2ds_v5 for prod, 32 GB, 35 day backups, geo-redundant only in prod. Entra authentication with Dom as administrator, password authentication left enabled as the ADR 0008 fallback. `azure.extensions` is set to `AGE,VECTOR` so the migrations can create both. One firewall rule allows Azure services and nothing else. Prod moves to a private endpoint in Phase 5.
 
@@ -41,6 +47,10 @@ None of these change anything in Azure.
 ```
 az bicep build --file infra/main.bicep --stdout > /dev/null
 az bicep lint  --file infra/main.bicep
+az bicep build --file infra/deployer.bicep --stdout > /dev/null
+az bicep lint  --file infra/deployer.bicep
+
+export LANCE_IMAGE_TAG=$(git rev-parse --short HEAD)
 
 az deployment sub validate --location uksouth \
   --template-file infra/main.bicep --parameters infra/params/dev.bicepparam
@@ -49,6 +59,8 @@ az deployment sub what-if --location uksouth \
   --template-file infra/main.bicep --parameters infra/params/dev.bicepparam
 ```
 
+The parameter files read the image tag from `LANCE_IMAGE_TAG` and refuse to compile without it; for a what-if, the tag dev is running keeps image changes out of the report (`az containerapp show -g rg-lance-dev -n ca-lance-api-dev --query "properties.template.containers[0].image" -o tsv`).
+
 What-if reports the eight role assignments as `Unsupported`. Their resource names are a `guid()` of principal ids that do not exist until the deploy runs, so what-if cannot resolve them. Every other resource shows as `Create` on a clean subscription.
 
-CI runs the build, the lint and the what-if on every pull request that touches `infra/` (spec 3.2).
+CI runs the build, the lint, the parameter compile, the deployer role check and the what-if on every pull request (spec 3.2). `.github/workflows/deploy.yml` deploys `main` to dev after a green CI run.
