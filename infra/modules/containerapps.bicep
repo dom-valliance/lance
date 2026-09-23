@@ -134,10 +134,10 @@ var workerSecretBindings = [
     secretName: 'jamie-api-key'
     envName: 'JAMIE_API_KEY'
   }
-  {
-    secretName: 'graph-refresh-token'
-    envName: 'GRAPH_REFRESH_TOKEN'
-  }
+  // graph-refresh-token is deliberately not bound. The worker reads and
+  // rotates it through the Key Vault SDK over KEY_VAULT_URL, and a bound
+  // copy made Container Apps restart the worker at every half-hourly
+  // secret sync that followed a rotation.
   {
     secretName: 'entra-client-secret'
     envName: 'ENTRA_CLIENT_SECRET'
