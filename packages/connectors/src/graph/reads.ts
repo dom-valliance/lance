@@ -11,6 +11,7 @@ import {
   MessageSchema,
   OutlookCategorySchema,
   RemovedEntrySchema,
+  type CalendarEvent,
   type CalendarEventDelta,
   type MailboxSettings,
   type MailFolder,
@@ -106,6 +107,12 @@ export interface GraphReads {
   deltaCalendarView(options: DeltaCalendarViewOptions): Promise<CalendarEventDelta>;
   /** The whole message, for the executor's record hash before a write. */
   getMessage(id: string): Promise<Message>;
+  /**
+   * One event with the same fields the delta selects. The calendar delta
+   * abbreviates an occurrence of a recurring series to its id, start and
+   * end; the watcher reads the occurrence in full through this.
+   */
+  getEvent(id: string): Promise<CalendarEvent>;
 }
 
 function parseOrThrow<T>(operation: string, schema: z.ZodType<T>, value: unknown): T {
@@ -230,6 +237,13 @@ export function createGraphReads(graph: GraphConnector): GraphReads {
         `${GRAPH_BASE_URL}/me/messages/${encodeURIComponent(id)}`,
         MessageSchema,
         { headers: TEXT_BODY_HEADERS },
+      ),
+
+    getEvent: (id: string): Promise<CalendarEvent> =>
+      graph.read(
+        'getEvent',
+        `${GRAPH_BASE_URL}/me/events/${encodeURIComponent(id)}?$select=${EVENT_SELECT.join(',')}`,
+        CalendarEventSchema,
       ),
   };
 }

@@ -11,6 +11,7 @@ import {
   externalAttendees,
   findConflicts,
   graphInstant,
+  isAbbreviatedOccurrence,
   type GraphCalendarRecord,
 } from './calendar.js';
 
@@ -55,19 +56,42 @@ function window(id: string, start: string, end: string, overrides: Partial<Calen
 
 interface FakeReads {
   calls: DeltaCalendarViewOptions[];
+  /** Ids handed to `getEvent`, in order. */
+  fetched: string[];
   deltaCalendarView(options: DeltaCalendarViewOptions): Promise<CalendarEventDelta>;
+  getEvent(id: string): Promise<CalendarEvent>;
 }
 
-function fakeReads(result: Partial<CalendarEventDelta> = {}): FakeReads {
+function fakeReads(
+  result: Partial<CalendarEventDelta> = {},
+  fullEvents: Record<string, CalendarEvent> = {},
+): FakeReads {
   const calls: DeltaCalendarViewOptions[] = [];
+  const fetched: string[] = [];
   return {
     calls,
+    fetched,
     deltaCalendarView: (options) => {
       calls.push(options);
       return Promise.resolve({ events: [], removed: [], deltaLink: 'delta-2', ...result });
     },
+    getEvent: (id) => {
+      fetched.push(id);
+      const full = fullEvents[id];
+      return full === undefined
+        ? Promise.reject(new Error(`graph getEvent: no event ${id}`))
+        : Promise.resolve(full);
+    },
   };
 }
+
+/** What the calendar delta sends for one occurrence of a recurring series. */
+const abbreviatedOccurrence = (id: string, seriesMasterId: string): CalendarEvent => ({
+  id,
+  seriesMasterId,
+  start: { dateTime: '2026-09-23T10:45:00.0000000', timeZone: 'UTC' },
+  end: { dateTime: '2026-09-23T11:00:00.0000000', timeZone: 'UTC' },
+});
 
 describe('createGraphCalendarWatcher', () => {
   it('polls one calendar partition every fifteen minutes', async () => {
@@ -103,6 +127,47 @@ describe('createGraphCalendarWatcher', () => {
       raw: { id: 'evt-9' },
       removed: true,
     });
+  });
+});
+
+describe('graph-calendar occurrence hydration', () => {
+  it('recognises the cut-down occurrence and not a full event with blank fields', () => {
+    expect(isAbbreviatedOccurrence(abbreviatedOccurrence('occ-1', 'series-1'))).toBe(true);
+    expect(isAbbreviatedOccurrence(event())).toBe(false);
+    expect(isAbbreviatedOccurrence(event({ subject: null, organizer: null, attendees: [] }))).toBe(
+      false,
+    );
+  });
+
+  it('reads an abbreviated occurrence in full before it becomes a record', async () => {
+    const full = event({
+      id: 'occ-1',
+      subject: 'Chambers synch-ups',
+      seriesMasterId: 'series-1',
+      lastModifiedDateTime: '2026-09-19T08:12:40Z',
+    });
+    const reads = fakeReads(
+      { events: [event(), abbreviatedOccurrence('occ-1', 'series-1')] },
+      { 'occ-1': full },
+    );
+    const watcher = createGraphCalendarWatcher({ reads, now: () => NOW });
+
+    const result = await watcher.poll(CALENDAR_PARTITION, null);
+
+    expect(reads.fetched).toEqual(['occ-1']);
+    const record = result.records[1];
+    expect(record).toEqual({ id: 'occ-1', observedAt: '2026-09-19T08:12:40Z', raw: full });
+    if (record === undefined) throw new Error('unreachable: the record was asserted above');
+    const observation = await watcher.normalise(record, CALENDAR_PARTITION);
+    expect(observation.summary).toBe('Chambers synch-ups 22 Sept 2026, 11:00');
+    expect(observation.correlationKey).toBe('series-1');
+  });
+
+  it('fails the poll when the full occurrence cannot be read, so the cursor does not move', async () => {
+    const reads = fakeReads({ events: [abbreviatedOccurrence('occ-2', 'series-1')] });
+    const watcher = createGraphCalendarWatcher({ reads, now: () => NOW });
+
+    await expect(watcher.poll(CALENDAR_PARTITION, null)).rejects.toThrow(/no event occ-2/);
   });
 });
 
