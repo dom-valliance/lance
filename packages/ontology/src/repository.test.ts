@@ -1,4 +1,4 @@
-import { runMigrations, type Db } from '@lance/db';
+import { SEED_PRINCIPAL_ID, runMigrations, type Db } from '@lance/db';
 import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -22,10 +22,14 @@ beforeAll(async () => {
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
   db = await openSeededTestDb(connectionString);
-  repo = new OntologyRepository(db, {
-    now: () => '2026-09-21T09:00:00.000Z',
-    idFactory: () => `01ONTOLOGY${String(++counter).padStart(16, '0')}`,
-  });
+  repo = new OntologyRepository(
+    db,
+    { principalId: SEED_PRINCIPAL_ID },
+    {
+      now: () => '2026-09-21T09:00:00.000Z',
+      idFactory: () => `01ONTOLOGY${String(++counter).padStart(16, '0')}`,
+    },
+  );
 }, 120000);
 
 afterAll(async () => {

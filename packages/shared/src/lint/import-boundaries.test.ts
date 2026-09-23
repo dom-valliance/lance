@@ -37,6 +37,16 @@ const apiFixture: Fixture = {
   content: "import '@lance/connectors/writes';\n",
 };
 
+const cypherImports = [
+  "import { runCypher } from '@lance/ontology';\n",
+  "import { sqlRunnerOf } from '@lance/ontology/src/cypher';\n",
+  "import { drizzleRunner } from '@lance/ontology/src/cypher.js';\n",
+  "import { runCypher } from '../../../packages/ontology/src/cypher.js';\n",
+];
+
+const workerFixturePath = 'apps/worker/src/__boundary_fixture__.ts';
+const ontologyFixturePath = 'packages/ontology/src/__boundary_fixture__.ts';
+
 function restrictedImportErrors(messages: Linter.LintMessage[]): Linter.LintMessage[] {
   return messages.filter((message) => message.ruleId === 'no-restricted-imports');
 }
@@ -68,5 +78,33 @@ describe('import boundary rules', () => {
 
   it('allows @lance/connectors/writes import inside apps/worker/src/executor', async () => {
     expect(await lintFixture(executorFixture)).toHaveLength(0);
+  }, 30000);
+
+  it('rejects every import of the raw Cypher runners outside packages/ontology', async () => {
+    for (const content of cypherImports) {
+      for (const relPath of [workerFixturePath, apiFixture.relPath, executorFixture.relPath]) {
+        const errors = await lintFixture({ relPath, content });
+        expect(errors, `${relPath}: ${content}`).toHaveLength(1);
+        expect(errors[0]?.message).toContain('OntologyRepository');
+      }
+    }
+  }, 60000);
+
+  it('allows the Cypher runners inside packages/ontology', async () => {
+    expect(
+      await lintFixture({
+        relPath: ontologyFixturePath,
+        content: "import { runCypher } from './cypher.js';\n",
+      }),
+    ).toHaveLength(0);
+  }, 30000);
+
+  it('allows the repository and resolution helpers from @lance/ontology anywhere', async () => {
+    expect(
+      await lintFixture({
+        relPath: workerFixturePath,
+        content: "import { OntologyRepository, normaliseEmail } from '@lance/ontology';\n",
+      }),
+    ).toHaveLength(0);
   }, 30000);
 });

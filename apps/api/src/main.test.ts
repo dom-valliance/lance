@@ -1,5 +1,12 @@
 import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
-import { agentRuns, cursors, proposals, runMigrations, type Db } from '@lance/db';
+import {
+  SEED_PRINCIPAL_ID,
+  agentRuns,
+  cursors,
+  proposals,
+  runMigrations,
+  type Db,
+} from '@lance/db';
 import { LedgerReader } from '@lance/ledger';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -90,6 +97,7 @@ beforeAll(async () => {
     createApiDeps({
       config: testConfig(),
       db,
+      principalId: SEED_PRINCIPAL_ID,
       executeQueue,
       auth: createEntraVerifier({
         tenantId: TENANT_ID,

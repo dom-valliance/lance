@@ -1,4 +1,4 @@
-import { agentRuns, runMigrations, type Db } from '@lance/db';
+import { agentRuns, SEED_PRINCIPAL_ID, runMigrations, type Db } from '@lance/db';
 import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { OntologyRepository } from '@lance/ontology';
 import { hashRecord, newUlid } from '@lance/shared';
@@ -41,7 +41,7 @@ beforeAll(async () => {
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
   db = await openSeededTestDb(connectionString);
-  ontology = new OntologyRepository(db);
+  ontology = new OntologyRepository(db, { principalId: SEED_PRINCIPAL_ID });
 }, 120000);
 
 afterAll(async () => {

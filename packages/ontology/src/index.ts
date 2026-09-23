@@ -1,7 +1,20 @@
 export const PACKAGE_NAME = '@lance/ontology';
 
-export { GRAPH_NAME, parseAgtype, runCypher, sqlRunnerOf } from './cypher.js';
-export type { CypherParams, Edge, SqlRunner, Vertex } from './cypher.js';
+// runCypher, sqlRunnerOf and drizzleRunner stay inside this package: every
+// graph read and write goes through OntologyRepository, which is where the
+// principal scope is enforced (ADR 0017). The root ESLint config forbids
+// importing them from anywhere else.
+export { GRAPH_NAME, parseAgtype } from './cypher.js';
+export type { CypherParams, Edge, Vertex } from './cypher.js';
+export {
+  EDGE_LABEL_VALUES,
+  LAYER_VALUES,
+  NODE_LABEL_VALUES,
+  ONTOLOGY_LAYERS,
+  edgeLayer,
+  nodeLayer,
+} from './layers.js';
+export type { Layer } from './layers.js';
 export {
   AUTO_MERGE_THRESHOLD,
   CANDIDATE_THRESHOLD,
@@ -22,18 +35,24 @@ export {
   OntologyRepository,
 } from './repository.js';
 export type {
+  BackfillOptions,
+  BackfillResult,
   EdgeLabel,
   EdgeProperties,
+  MeetingContext,
   MeetingInput,
   MutationContext,
   Node,
   NodeLabel,
   OrganisationInput,
   PersonInput,
+  PrincipalScope,
   ProjectInput,
   RebuildResult,
+  RepositoryOptions,
   ResolvePersonResult,
   SourceRef,
   TaskInput,
+  ThreadInput,
   UpsertResult,
 } from './repository.js';

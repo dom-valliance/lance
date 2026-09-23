@@ -40,7 +40,14 @@ import {
   SystemControl,
   toProposal,
 } from '@lance/ledger';
-import { getConfig, nowIso, readSecret, type Config, type ProvenanceRef } from '@lance/shared';
+import {
+  getConfig,
+  newUlid,
+  nowIso,
+  readSecret,
+  type Config,
+  type ProvenanceRef,
+} from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { and, eq } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
@@ -55,6 +62,7 @@ import { reflectProposal } from './executor/reflect.js';
 import { postDryRunDigest } from './digest/dryRunDigest.js';
 import { ensureSeedRules, loadActiveRules } from './policy/rules.js';
 import { runChase } from './chase/run.js';
+import { icalUidOfGraphEvent } from './watchers/graph/icalUid.js';
 import { createBoss, startBoss, work } from './scheduler/boss.js';
 import { PauseGate } from './scheduler/gate.js';
 import { QUEUES, type ChaseJob } from './scheduler/queues.js';
@@ -301,7 +309,19 @@ async function main(): Promise<void> {
   const slack = buildSlack(config);
   const agent = buildAgentDeps(config, db, control);
   const jamie = buildJamie(db);
-  const ontology = new OntologyRepository(db);
+  const ontology = new OntologyRepository(
+    db,
+    { principalId: principal.id },
+    { principalName: config.dom.name },
+  );
+  // Graphs written before ADR 0017 carry no layers and keep each meeting's
+  // mailbox context on the shared node. The backfill is recorded and
+  // idempotent, so a start-up after the first records nothing.
+  const backfill = await ontology.backfillLayers(
+    { correlationId: newUlid() },
+    { icalUidOf: (graphEventId) => icalUidOfGraphEvent(db, graphEventId) },
+  );
+  console.info({ ...backfill }, 'ontology layers backfilled');
   const extractCommitments =
     agent === null
       ? null

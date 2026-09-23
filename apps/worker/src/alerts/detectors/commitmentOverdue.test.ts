@@ -1,4 +1,4 @@
-import { commitments, runMigrations, type Db } from '@lance/db';
+import { commitments, SEED_PRINCIPAL_ID, runMigrations, type Db } from '@lance/db';
 import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { OntologyRepository } from '@lance/ontology';
 import { newUlid } from '@lance/shared';
@@ -57,7 +57,7 @@ beforeAll(async () => {
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
   db = await openSeededTestDb(connectionString);
-  ontology = new OntologyRepository(db);
+  ontology = new OntologyRepository(db, { principalId: SEED_PRINCIPAL_ID });
   const ref = { system: 'jamie' as const, id: 'mt-1', observedAt: '2026-09-15T10:00:00.000Z' };
   annId = (
     await ontology.upsertPerson(

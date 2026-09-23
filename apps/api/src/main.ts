@@ -40,6 +40,8 @@ const HOST = '0.0.0.0';
 export interface RuntimeOptions {
   config: Config;
   db: Db;
+  /** The principal `db` is scoped to; the ontology reads through the same scope. */
+  principalId: string;
   auth: TokenVerifier;
   slack: SlackDeps;
   ingestSecret: string;
@@ -93,7 +95,11 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
     briefs: createBriefStore(options.db),
     alerts: createAlertStore(options.db),
     agents: createAgentsStore(options.db),
-    ontology: new OntologyRepository(options.db),
+    ontology: new OntologyRepository(
+      options.db,
+      { principalId: options.principalId },
+      { principalName: options.config.dom.name },
+    ),
     enqueueChase: (commitmentId) => executeQueue.enqueueChase(commitmentId),
     enqueueBrief: () => executeQueue.enqueueBrief(),
     status: createDbStatusSource(options.db, control, {
@@ -175,6 +181,7 @@ export const main = async (): Promise<void> => {
   const deps = createApiDeps({
     config,
     db,
+    principalId: principal.id,
     executeQueue,
     slackSurface: slackSurfaceFromEnv(config.slack.channelId),
     auth: createEntraVerifier({

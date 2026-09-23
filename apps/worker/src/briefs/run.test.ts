@@ -1,5 +1,5 @@
 import { MemoryRunRecorder, ScriptedRunner, textMessage } from '@lance/agents/testing';
-import { briefs, commitments, runMigrations, type Db } from '@lance/db';
+import { briefs, commitments, SEED_PRINCIPAL_ID, runMigrations, type Db } from '@lance/db';
 import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
 import { OntologyRepository } from '@lance/ontology';
@@ -87,7 +87,7 @@ beforeAll(async () => {
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
   db = await openSeededTestDb(connectionString);
-  ontology = new OntologyRepository(db);
+  ontology = new OntologyRepository(db, { principalId: SEED_PRINCIPAL_ID });
 
   await observe('graph-calendar', 'graph', 'evt-1', {
     id: 'evt-1',

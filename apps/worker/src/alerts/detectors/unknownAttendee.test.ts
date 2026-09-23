@@ -1,4 +1,4 @@
-import { observations, runMigrations, type Db } from '@lance/db';
+import { observations, SEED_PRINCIPAL_ID, runMigrations, type Db } from '@lance/db';
 import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerWriter } from '@lance/ledger';
 import { OntologyRepository } from '@lance/ontology';
@@ -73,7 +73,7 @@ beforeAll(async () => {
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
   db = await openSeededTestDb(connectionString);
-  ontology = new OntologyRepository(db);
+  ontology = new OntologyRepository(db, { principalId: SEED_PRINCIPAL_ID });
   const sourceRef = { system: 'graph' as const, id: 'seed', observedAt: OBSERVED_AT };
   await ontology.upsertPerson(
     { displayName: 'Ann Example', emails: ['ann@client.test'], sourceRef },

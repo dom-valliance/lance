@@ -16,6 +16,7 @@ import { raiseAlert } from '../alerts/raise.js';
 import { recordCommitments, type RecordedCommitment } from '../commitments/record.js';
 import { runDebrief, type DebriefDeps, type DebriefResult } from '../debrief/run.js';
 import type { ProposalContext, createProposalHandler } from '../executor/createProposal.js';
+import { icalUidOfGraphEvent } from '../watchers/graph/icalUid.js';
 import type { TriageJob } from '../watchers/runner.js';
 import { watcherStartedAt } from '../watchers/runner.js';
 import { triageSystemPrompt, triageUserPrompt } from './prompt.js';
@@ -365,11 +366,18 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
       observedAt: now(),
       ...(newest.url === null ? {} : { url: newest.url }),
     };
+    // Jamie names the calendar event by its Graph id, which is specific to
+    // one mailbox; the principal's own calendar observation of that event
+    // gives the iCalUId every attendee shares (ADR 0017). With no match the
+    // meeting keys on its Jamie id alone.
+    const icalUid =
+      newest.graphEventId === null ? null : await icalUidOfGraphEvent(deps.db, newest.graphEventId);
     const node = await deps.ontology.upsertMeeting(
       {
         title: newest.title,
         start: newest.startTime,
         end: newest.endTime,
+        icalUid,
         jamieId: newest.id,
         graphEventId: newest.graphEventId,
         tags: newest.tags,
