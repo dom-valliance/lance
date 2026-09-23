@@ -1,4 +1,6 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { createDb, scopedDb, type Db } from './client.js';
+import { SEED_PRINCIPAL_ID, seed } from './seed.js';
 
 /** The local image built by `docker compose build`, PostgreSQL 16 with AGE and pgvector (ADR 0004). */
 export const POSTGRES_TEST_IMAGE = 'lance-postgres:16';
@@ -30,4 +32,16 @@ export async function startPostgresContainer(attempts = 3): Promise<StartedPostg
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+/**
+ * A migrated test database's handle, seeded and scoped to the seed
+ * principal (ADR 0015), which is how the apps see the database. The
+ * container's superuser still bypasses row-level security; the isolation
+ * suites in this package connect as a lance_app member instead.
+ */
+export async function openSeededTestDb(connectionString: string): Promise<Db> {
+  const root = createDb({ connectionString, password: 'postgres' });
+  await seed(root);
+  return scopedDb(root, { principalId: SEED_PRINCIPAL_ID });
 }

@@ -18,7 +18,9 @@ const SEED_PRINCIPAL_UPN = 'dom@valliance.ai';
 const SEED_PRINCIPAL_NOTION_USER_ID = '1fdd872b-594c-8146-b22f-00028f1f5a41';
 
 export const seed = async (db: Db): Promise<void> => {
-  await db.insert(systemState).values({ id: SYSTEM_STATE_ID }).onConflictDoNothing();
+  // The global mode is a ceiling over every principal's own mode (ADR 0015).
+  // It starts open; each principal's own mode starts in dry run.
+  await db.insert(systemState).values({ id: SYSTEM_STATE_ID, mode: 'live' }).onConflictDoNothing();
   await db
     .insert(principals)
     .values({

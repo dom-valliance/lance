@@ -111,7 +111,7 @@ describe('migration 0009 over existing data', () => {
     expect(rules.rows).toEqual([{ principal_id: null }]);
   });
 
-  it('moves the run state to the principal and clears the global pause', async () => {
+  it('moves the run state to the principal, clears the global pause and opens the mode ceiling', async () => {
     const state = await client.query(
       'SELECT principal_id, paused, paused_reason, mode, cost_ceiling_gbp, push_budget_per_hour FROM principal_state',
     );
@@ -126,7 +126,7 @@ describe('migration 0009 over existing data', () => {
       },
     ]);
     const global = await client.query('SELECT paused, mode, cost_ceiling_gbp FROM system_state');
-    expect(global.rows).toEqual([{ paused: false, mode: 'dry_run', cost_ceiling_gbp: '30.01' }]);
+    expect(global.rows).toEqual([{ paused: false, mode: 'live', cost_ceiling_gbp: '30.01' }]);
   });
 
   it("serves the existing rows to the principal's own scope and to no other", async () => {

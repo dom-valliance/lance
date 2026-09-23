@@ -96,7 +96,9 @@ export class LedgerWriter {
           payload,
           payloadHash,
         })
-        .onConflictDoNothing({ target: ledgerEvents.idempotencyKey })
+        // The key is unique per principal (ADR 0015); principal_id comes from
+        // the session scope, so the conflict is always within this principal.
+        .onConflictDoNothing({ target: [ledgerEvents.principalId, ledgerEvents.idempotencyKey] })
         .returning({ id: ledgerEvents.id });
 
       const row = inserted[0];
@@ -109,7 +111,7 @@ export class LedgerWriter {
         const found = existing[0];
         if (found === undefined) {
           throw new Error(
-            'Ledger append conflicted on idempotency_key but no existing event was found; check the unique index on ledger_events.idempotency_key.',
+            'Ledger append conflicted on idempotency_key but no existing event was found; check the unique index on ledger_events (principal_id, idempotency_key) and that the session is scoped to a principal.',
           );
         }
         return { id: found.id, inserted: false };

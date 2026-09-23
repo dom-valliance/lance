@@ -53,8 +53,8 @@ CREATE TABLE "principal_state" (
 );
 --> statement-breakpoint
 -- Dom's principal from the one users row, reusing its id. The per-principal
--- run state moves to principal_state; the global row keeps its mode, which
--- is now a ceiling, and its cost ceiling, which is now the organisation's.
+-- run state moves to principal_state; the global row keeps its cost ceiling,
+-- which is now the organisation's, and its mode becomes an open ceiling.
 DO $$
 DECLARE
   user_count integer;
@@ -81,8 +81,11 @@ BEGIN
     quiet_hours_start, quiet_hours_end, push_budget_per_hour, cost_ceiling_gbp
   FROM system_state WHERE id = 1;
 
+  -- The global mode becomes a ceiling and opens, so the principal's own
+  -- mode, copied above, is what decides whether Lance writes.
   UPDATE system_state
-  SET paused = false, paused_reason = NULL, paused_by = NULL, paused_at = NULL, updated_at = now()
+  SET paused = false, paused_reason = NULL, paused_by = NULL, paused_at = NULL,
+      mode = 'live', updated_at = now()
   WHERE id = 1;
 END
 $$;
