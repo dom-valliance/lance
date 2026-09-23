@@ -61,7 +61,9 @@ export function Tr({
     <tr
       data-live-id={liveId}
       className={cn(
-        'border-t border-border',
+        // A light wash under the pointer, so the eye keeps its row while
+        // reading across; the accent bar and muted text stay as they are.
+        'border-t border-border transition-colors hover:bg-muted/50',
         accent !== undefined && ACCENT_CLASS[accent],
         muted && 'text-muted-foreground',
         className,
