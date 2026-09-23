@@ -22,3 +22,4 @@ One file per decision, numbered, never edited after acceptance except to add a `
 | 0017 | The ontology has reference, shared and private layers | Accepted |
 | 0019 | Policy evaluates in tiers | Accepted |
 | 0031 | Phase order after Phase 3 | Accepted |
+| 0032 | Migrations run before the apps move | Accepted |

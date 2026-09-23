@@ -1,6 +1,6 @@
 import { createSlackSurface, type SlackSurface } from '@lance/connectors';
 import { KeyVaultTokenStore } from '@lance/connectors/graph';
-import { createDb, resolveSinglePrincipal, scopedDb, type Db } from '@lance/db';
+import { createDb, waitForSinglePrincipal, scopedDb, type Db } from '@lance/db';
 import {
   countProposals,
   decideProposal,
@@ -174,7 +174,12 @@ export const main = async (): Promise<void> => {
   // One principal in Phase 4 (ADR 0015): every store below reads and writes
   // through a handle scoped to it, so row-level security holds the line.
   const root = createDb();
-  const principal = await resolveSinglePrincipal(root, allowedUpn);
+  const principal = await waitForSinglePrincipal(root, allowedUpn, {
+    waitSeconds: config.database.startupWaitSeconds,
+    log: (message) => {
+      console.warn(message);
+    },
+  });
   const db = scopedDb(root, { principalId: principal.id });
   const executeQueue = createExecuteQueue(db);
 

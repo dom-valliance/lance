@@ -28,7 +28,7 @@ import {
   createDb,
   observations,
   proposals,
-  resolveSinglePrincipal,
+  waitForSinglePrincipal,
   scopedDb,
   type Db,
 } from '@lance/db';
@@ -293,7 +293,12 @@ async function main(): Promise<void> {
   // One principal in Phase 4 (ADR 0015). Every job runs through a handle
   // scoped to it; organisation rules are seeded through an admin scope.
   const root = createDb();
-  const principal = await resolveSinglePrincipal(root, config.dom.email);
+  const principal = await waitForSinglePrincipal(root, config.dom.email, {
+    waitSeconds: config.database.startupWaitSeconds,
+    log: (message) => {
+      console.warn(message);
+    },
+  });
   const db = scopedDb(root, { principalId: principal.id });
   const adminDb = scopedDb(root, { principalId: principal.id, admin: true });
   const control = new SystemControl(db);
