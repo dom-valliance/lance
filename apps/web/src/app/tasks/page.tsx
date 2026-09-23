@@ -5,7 +5,7 @@ import { FilterLinks } from '@/components/filter-links';
 import { Pagination } from '@/components/pagination';
 import { TextLink } from '@/components/text-link';
 import { type SearchParams } from '@/lib/filters';
-import { cursorFrom, pageLinks, PAGE_SIZES, shownLabel } from '@/lib/pagination';
+import { cursorFrom, pageLinks, pageSummary, PAGE_SIZES, positionFrom } from '@/lib/pagination';
 import {
   pendingCompletionFor,
   taskSourceFilterFrom,
@@ -89,18 +89,25 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const tasks = page.items;
   const pending = pendingCompletionFor(tasks, proposals.items);
 
-  const count = status === 'open' ? tasks.filter((task) => !task.done).length : tasks.length;
-  const summary = `${String(count)} ${status === 'open' ? 'open' : 'shown'}. Jamie tasks are completed in Jamie; Lance can only read them.`;
+  // The total counts every task the current filters match, not the page.
+  const total = new Intl.NumberFormat('en-GB').format(page.total);
+  const counted =
+    status === 'open' ? `${total} open` : `${total} ${page.total === 1 ? 'task' : 'tasks'}`;
+  const summary = `${counted}. Jamie tasks are completed in Jamie; Lance can only read them.`;
 
   const links = pageLinks({
     path: '/tasks',
     params,
     keep: FILTER_PARAMS,
     nextCursor: page.nextCursor,
+    shown: tasks.length,
   });
-  const footer = (
-    <Pagination summary={shownLabel(tasks.length)} {...links} nextLabel="Show older" />
-  );
+  const position = pageSummary({
+    from: positionFrom(params),
+    shown: tasks.length,
+    total: page.total,
+  });
+  const footer = <Pagination summary={position} {...links} nextLabel="Show older" />;
 
   return (
     <div className="flex flex-col gap-6">

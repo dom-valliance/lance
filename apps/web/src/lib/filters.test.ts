@@ -60,20 +60,8 @@ describe('ledgerFilterFrom', () => {
     });
   });
 
-  it('passes a full ISO instant through without widening it, so paging moves back', () => {
-    expect(ledgerFilterFrom({ to: '2026-09-21T13:05:41.000Z' })).toEqual({
-      to: '2026-09-21T13:05:41.000Z',
-    });
-  });
-
-  it('normalises an instant with an offset to UTC', () => {
-    expect(ledgerFilterFrom({ from: '2026-09-21T14:05:41+01:00' })).toEqual({
-      from: '2026-09-21T13:05:41.000Z',
-    });
-  });
-
-  it('drops an instant that is not a time', () => {
-    expect(ledgerFilterFrom({ to: '2026-13-45T99:99:99Z' })).toEqual({});
+  it('drops a full instant, which the date form never supplies', () => {
+    expect(ledgerFilterFrom({ to: '2026-09-21T13:05:41.000Z' })).toEqual({});
   });
 });
 

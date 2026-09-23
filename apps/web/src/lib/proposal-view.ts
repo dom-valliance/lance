@@ -435,7 +435,7 @@ export function expiryCell(
   };
 }
 
-/** The active proposal filters in plain words, for the "n shown" line and the phone summary. */
+/** The active proposal filters in plain words, for the footer sentence and the phone summary. */
 export function proposalFilterLabels(filter: ProposalFilter): string[] {
   const labels: string[] = [];
   if (filter.status !== undefined) labels.push(PROPOSAL_STATUS_LABELS[filter.status]);
@@ -446,15 +446,15 @@ export function proposalFilterLabels(filter: ProposalFilter): string[] {
 
 /**
  * The Proposals header sentence: how much is waiting and how long the
- * oldest of it has left. `expiryLabel` carries its own verb, so a queue
- * that has run past an expiry reads "The oldest expired yesterday."
+ * oldest of it has left, both from `proposals.summary`. `expiryLabel`
+ * carries its own verb, so a queue that has run past an expiry reads "The
+ * oldest expired yesterday."
  */
-export function queueSummary(pending: { expiresAt: Date | string }[], now: Date): string {
-  if (pending.length === 0) return 'Nothing pending.';
-  const oldest = pending.reduce((earliest, proposal) =>
-    toDate(proposal.expiresAt).getTime() < toDate(earliest.expiresAt).getTime()
-      ? proposal
-      : earliest,
-  );
-  return `${String(pending.length)} pending. The oldest ${expiryLabel(oldest.expiresAt, now)}.`;
+export function queueSummary(
+  pending: number,
+  oldestExpiresAt: Date | string | null,
+  now: Date,
+): string {
+  if (pending === 0 || oldestExpiresAt === null) return 'Nothing pending.';
+  return `${new Intl.NumberFormat('en-GB').format(pending)} pending. The oldest ${expiryLabel(oldestExpiresAt, now)}.`;
 }

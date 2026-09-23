@@ -91,31 +91,18 @@ const text = (value: string | string[] | undefined): string | undefined => {
 };
 
 const CALENDAR_DAY = /^\d{4}-\d{2}-\d{2}$/;
-const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
-
-/** A full ISO instant, the shape the ledger's "Show older" link carries. */
-export const isIsoInstant = (value: string): boolean => ISO_INSTANT.test(value);
 
 /**
  * A date the filter form supplies as `YYYY-MM-DD`, widened to the instant
  * the api wants. `from` starts the day, `to` ends it, both in UTC, so a
  * one-day range covers that whole day.
- *
- * A full ISO instant passes through unwidened, normalised to UTC: the
- * ledger's "Show older" link carries the oldest shown event's timestamp,
- * and widening that to the end of its day would page backwards by nothing.
  */
 const instant = (
   value: string | string[] | undefined,
   edge: 'start' | 'end',
 ): string | undefined => {
   const day = text(value);
-  if (day === undefined) return undefined;
-  if (isIsoInstant(day)) {
-    const parsed = new Date(day);
-    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
-  }
-  if (!CALENDAR_DAY.test(day)) return undefined;
+  if (day === undefined || !CALENDAR_DAY.test(day)) return undefined;
   return edge === 'start' ? `${day}T00:00:00.000Z` : `${day}T23:59:59.999Z`;
 };
 

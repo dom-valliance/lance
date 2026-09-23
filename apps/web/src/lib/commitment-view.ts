@@ -149,16 +149,6 @@ export function isCommitmentOverdue(view: Pick<CommitmentView, 'overdueDays'>): 
   return view.overdueDays !== null && view.overdueDays > 0;
 }
 
-/** How many rows of a list still accept an action. */
-export function openCount(views: readonly Pick<CommitmentView, 'status'>[]): number {
-  return views.filter((view) => isCommitmentOpenForAction(view)).length;
-}
-
-/** How many rows of a list are past their due date. */
-export function overdueCount(views: readonly Pick<CommitmentView, 'overdueDays'>[]): number {
-  return views.filter((view) => isCommitmentOverdue(view)).length;
-}
-
 /**
  * The badge that sits beside a row's description, as a key into
  * `COMMITMENT_STATUS_TONES` and the label table. Overdue beats the stored
