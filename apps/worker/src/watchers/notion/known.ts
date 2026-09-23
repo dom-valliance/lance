@@ -1,6 +1,6 @@
 import { TASK_CLOSED_STATUSES } from '@lance/connectors';
-import { observations, type Db } from '@lance/db';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { newestObservationFirst, observations, type Db } from '@lance/db';
+import { and, eq, sql } from 'drizzle-orm';
 
 /**
  * The Notion tasks the ledger currently believes are open: the latest
@@ -22,7 +22,7 @@ export async function openNotionTaskIds(db: Db): Promise<string[]> {
         sql`${observations.payload} ->> 'kind' = 'task'`,
       ),
     )
-    .orderBy(observations.sourceRecordId, desc(observations.ts), desc(observations.id))
+    .orderBy(...newestObservationFirst())
     .as('latest');
   const closed = sql.join(
     TASK_CLOSED_STATUSES.map((status) => sql`${status}`),

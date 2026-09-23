@@ -73,6 +73,20 @@ beforeAll(async () => {
     ts: '2026-09-20T12:00:00.000Z',
     payload: { kind: 'task', text: 'Share the transcript', completed: true },
   });
+  // Recorded second with an earlier source stamp: a full re-read after a
+  // cut-down one. The later record must win, whatever its `ts` says.
+  await observe({
+    system: 'notion',
+    recordId: 'page-4',
+    ts: '2026-09-21T18:30:00.000Z',
+    payload: { kind: 'task', title: 'Stale open row', status: 'In Progress' },
+  });
+  await observe({
+    system: 'notion',
+    recordId: 'page-4',
+    ts: '2026-09-20T10:37:00.000Z',
+    payload: { kind: 'task', id: 'page-4', removed: true },
+  });
   await observe({
     system: 'jamie',
     recordId: 'mt-1',
@@ -118,6 +132,14 @@ describe('createTaskStore', () => {
     expect(all.map((row) => row.sourceRecordId)).not.toContain('page-3');
     expect(open.map((row) => row.sourceRecordId)).not.toContain('page-3');
     expect(done.map((row) => row.sourceRecordId)).not.toContain('page-3');
+  });
+
+  it('takes the most recently recorded observation, not the one with the latest source stamp', async () => {
+    const all = await store.list({ limit: 50 });
+    const open = await store.list({ limit: 50, status: 'open' });
+
+    expect(all.map((row) => row.sourceRecordId)).not.toContain('page-4');
+    expect(open.map((row) => row.sourceRecordId)).not.toContain('page-4');
   });
 
   it('keeps the latest observation of a record that changed', async () => {

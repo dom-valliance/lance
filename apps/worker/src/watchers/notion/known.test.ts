@@ -71,6 +71,17 @@ beforeAll(async () => {
     id: 'gone-1',
     removed: true,
   });
+  // Recorded second with an earlier source stamp: the later record decides.
+  await observe('notion', 'stale-1', '2026-09-22T09:00:00.000Z', {
+    kind: 'task',
+    title: 'Open by its stamp, closed by its latest read',
+    status: 'In Progress',
+  });
+  await observe('notion', 'stale-1', '2026-09-20T09:00:00.000Z', {
+    kind: 'task',
+    title: 'Open by its stamp, closed by its latest read',
+    status: 'Done',
+  });
   await observe('notion', 'mt-1', '2026-09-20T09:00:00.000Z', {
     kind: 'meeting',
     name: 'Not a task',
@@ -91,5 +102,10 @@ describe('openNotionTaskIds', () => {
   it('returns the Notion tasks whose latest observation is open, leaving out closed, removed and non-task rows', async () => {
     const ids = await openNotionTaskIds(db);
     expect(ids.sort()).toEqual(['no-status', 'open-1']);
+  });
+
+  it('judges by the most recently recorded observation, not the latest source stamp', async () => {
+    const ids = await openNotionTaskIds(db);
+    expect(ids).not.toContain('stale-1');
   });
 });

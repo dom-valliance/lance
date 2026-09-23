@@ -1,4 +1,4 @@
-import { observations, type Db } from '@lance/db';
+import { newestObservationFirst, observations, type Db } from '@lance/db';
 import { and, desc, eq, lt, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
 import { NOTION_CLOSED_STATUSES, type ObservationRecord, type TaskSource } from './view.js';
 
@@ -56,7 +56,7 @@ export function createTaskStore(db: Db): TaskStoreLike {
         })
         .from(observations)
         .where(and(...inner))
-        .orderBy(observations.sourceRecordId, desc(observations.ts), desc(observations.id))
+        .orderBy(...newestObservationFirst())
         .as('latest');
 
       // A page the watcher recorded as removed has left Notion: it is not

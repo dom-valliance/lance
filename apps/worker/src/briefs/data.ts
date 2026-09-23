@@ -4,6 +4,7 @@ import {
   briefs,
   commitments,
   cursors,
+  newestObservationFirst,
   observations,
   proposals,
   type Db,
@@ -97,7 +98,7 @@ async function latestByWatcher(db: Db, watcher: string): Promise<LatestObservati
     .selectDistinctOn([observations.sourceRecordId], OBSERVATION_COLUMNS)
     .from(observations)
     .where(sql`${observations.payload} ->> 'watcher' = ${watcher}`)
-    .orderBy(observations.sourceRecordId, desc(observations.ts), desc(observations.id));
+    .orderBy(...newestObservationFirst());
   return rows.map((row) => ({ ...row, payload: (row.payload ?? {}) as Record<string, unknown> }));
 }
 
@@ -490,7 +491,7 @@ export async function tasksDue(
         sql`${observations.payload} ->> 'kind' = 'task'`,
       ),
     )
-    .orderBy(observations.sourceRecordId, desc(observations.ts), desc(observations.id));
+    .orderBy(...newestObservationFirst());
   const items: MorningBriefContent['tasks']['items'] = [];
   const todayMs = new Date(`${today}T00:00:00.000Z`).getTime();
   for (const row of rows) {
