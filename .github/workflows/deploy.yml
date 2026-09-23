@@ -1,0 +1,161 @@
+name: Deploy
+
+# Deploys main to dev. Runs after the CI workflow finishes green on main, and by
+# hand from the Actions tab (Run workflow) to redeploy whichever ref is chosen there.
+# docs/runbooks/deploy.md describes the same sequence for a shell; the steps here
+# call the scripts that runbook names, so the two cannot drift apart.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time, and a newer one waits rather than cancelling a deploy that
+# is half way through flipping revisions.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # Required by azure/login for the OIDC token exchange.
+  id-token: write
+
+env:
+  ENVIRONMENT: dev
+  RESOURCE_GROUP: rg-lance-dev
+  # A GitHub Actions runner has no terminal, so corepack must not prompt.
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+
+jobs:
+  resolve:
+    name: Resolve the commit to deploy
+    # A workflow_run fires whatever CI concluded; only a green run deploys.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+      tag: ${{ steps.commit.outputs.tag }}
+    steps:
+      - name: Check out the commit CI tested
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      # The image tag is the short SHA, as the runbook's manual path uses, so a tag
+      # in the registry always names a commit.
+      - name: Name the image tag
+        id: commit
+        run: |
+          sha=$(git rev-parse HEAD)
+          tag=$(git rev-parse --short HEAD)
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Deploying ${sha} as image tag ${tag}"
+
+  images:
+    name: Build and push the ${{ matrix.app }} image
+    needs: resolve
+    runs-on: ubuntu-latest
+    # The deploy identity's federated credential trusts this environment's OIDC
+    # subject and nothing else, so every job that logs in runs through it.
+    environment: dev
+    strategy:
+      fail-fast: true
+      matrix:
+        app: [api, web, worker]
+    steps:
+      - name: Check out the commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Built into the local daemon first so the same smoke test CI runs on pull
+      # requests runs on the image that is about to be pushed: a Dockerfile that
+      # omits a workspace package builds fine and fails only at start-up.
+      - name: Build the ${{ matrix.app }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: false
+          load: true
+          tags: lance-${{ matrix.app }}:${{ needs.resolve.outputs.tag }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+      - name: Start the ${{ matrix.app }} image and resolve its modules
+        run: scripts/smoke-image.sh ${{ matrix.app }} lance-${{ matrix.app }}:${{ needs.resolve.outputs.tag }}
+
+      - name: Log in to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The registry name carries the environment's unique suffix, so it is read
+      # from the resource group rather than written here. The exchanged token is
+      # the registry's own short-lived credential for the identity.
+      - name: Log Docker in to the registry
+        id: registry
+        run: |
+          registry=$(az acr list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv)
+          if [ -z "$registry" ]; then
+            echo "No container registry in $RESOURCE_GROUP. Deploy the environment by hand first (docs/runbooks/deploy.md, step 3)." >&2
+            exit 1
+          fi
+          login_server=$(az acr show -n "$registry" --query loginServer -o tsv)
+          token=$(az acr login -n "$registry" --expose-token --query accessToken -o tsv)
+          echo "$token" | docker login "$login_server" --username 00000000-0000-0000-0000-000000000000 --password-stdin
+          echo "login_server=${login_server}" >> "$GITHUB_OUTPUT"
+
+      # Same context, Dockerfile and cache as the build above, so this is a cache
+      # hit that only pushes the layers.
+      - name: Push the ${{ matrix.app }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: true
+          tags: ${{ steps.registry.outputs.login_server }}/lance-${{ matrix.app }}:${{ needs.resolve.outputs.tag }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+
+  deploy:
+    name: Deploy, migrate and verify
+    needs: [resolve, images]
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+      url: https://${{ steps.deploy.outputs.web_fqdn }}
+    steps:
+      - name: Check out the commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Log in to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The job and revision commands live in the containerapp extension, which the
+      # runner's Azure CLI does not carry by default.
+      - name: Install the Container Apps CLI extension
+        run: az extension add --name containerapp --upgrade --yes
+
+      - name: Deploy the environment
+        id: deploy
+        run: scripts/deploy.sh "$ENVIRONMENT" "${{ needs.resolve.outputs.tag }}"
+
+      - name: Run the migration job
+        run: scripts/run-migration-job.sh "$ENVIRONMENT"
+
+      - name: Verify the deployment
+        run: scripts/verify-deploy.sh "$ENVIRONMENT" "${{ needs.resolve.outputs.tag }}"

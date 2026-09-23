@@ -4,7 +4,11 @@
 //   - Entra app registration (docs/runbooks/entra-setup.md)
 //   - Slack app creation (docs/runbooks/slack-app-setup.md)
 //   - Key Vault secret values (docs/runbooks/deploy.md, step 4)
-//   - Postgres principals for the managed identities (docs/runbooks/deploy.md, step 8)
+//   - Postgres principals for the managed identities (docs/runbooks/deploy.md, step 7)
+//   - The GitHub Actions identities that deploy this template (deployer.bicep,
+//     docs/runbooks/github-deploy-setup.md), which CI cannot grant to itself
+// The image tag arrives in LANCE_IMAGE_TAG through the parameter files; deploy.yml
+// sets it to the short SHA it built, scripts/deploy.sh exports it for a manual run.
 
 targetScope = 'subscription'
 

@@ -1,5 +1,6 @@
-// Container Apps Job that runs the Drizzle migrations. Manual trigger only: Dom
-// starts it from the CLI after a deploy, never on a schedule and never automatically.
+// Container Apps Job that runs the Drizzle migrations. Manual trigger only, never on
+// a schedule. The deployment that updates its image never runs it; scripts/run-migration-job.sh
+// starts it and waits, and deploy.yml runs that script after every deploy (ADR 0014).
 //
 // It runs the worker image, which carries the whole workspace, and its own managed
 // identity. That identity is granted lance_migrator in Postgres (ADR 0008); the three

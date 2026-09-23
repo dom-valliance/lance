@@ -13,10 +13,13 @@ param postgresPasswordAuthEnabled = false
 param postgresAdministratorPassword = readEnvironmentVariable('LANCE_PG_ADMIN_PASSWORD', '')
 
 // Bootstrap: the environment stands up on the public quickstart image. Flip to false
-// once az acr build has pushed lance-web, lance-api and lance-worker, and set
-// containerImageTag to the tag that was pushed.
+// once lance-web, lance-api and lance-worker are in the registry.
 param useBootstrapImage = false
-param containerImageTag = '6acbbc5'
+
+// The image tag comes from the deploying shell, never from this file. deploy.yml sets
+// it to the short SHA it built; by hand, export LANCE_IMAGE_TAG=$(git rev-parse --short HEAD)
+// after pushing the images (docs/runbooks/deploy.md). Unset, the deployment refuses to start.
+param containerImageTag = readEnvironmentVariable('LANCE_IMAGE_TAG')
 
 param allowedUpn = 'dom@valliance.ai'
 // Dom's Slack user id in the Valliance workspace. Not a secret.

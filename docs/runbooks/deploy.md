@@ -6,6 +6,8 @@ The templates are in `infra/`. See `infra/README.md` for what each module does.
 
 The order matters. The environment stands up on a public bootstrap image first, then the secrets go in, then the real images, then the database principals. Steps 1 to 3 create nothing that depends on a secret, so they work on a clean subscription.
 
+After the first deploy, merges to `main` deploy themselves: `.github/workflows/deploy.yml` builds and pushes the images, deploys, runs the migration job and verifies, using the same scripts steps 5 to 10 name. `github-deploy-setup.md` connects the repository to Azure once. The manual path below stays for the first deploy of an environment and for a redeploy from a laptop.
+
 ## 1. Check the subscription and the providers
 
 1. Confirm the target subscription:
@@ -178,14 +180,15 @@ az acr repository show-tags --name $ACR --repository lance-web -o tsv
 
 ## 6. Flip to the real images
 
-1. In `infra/params/dev.bicepparam` set:
+1. In `infra/params/dev.bicepparam` set `useBootstrapImage` to `false`. The image tag is not in the file: the parameter file reads it from `LANCE_IMAGE_TAG`, and refuses to compile when the variable is unset, so no deploy ever edits a committed file to name a tag.
+
+2. Deploy with the tag from step 5. `scripts/deploy.sh` checks the three images exist in the registry, exports `LANCE_IMAGE_TAG`, runs the subscription deployment under the name `lance-dev-<tag>` and prints the outputs:
 
    ```
-   param useBootstrapImage = false
-   param containerImageTag = '<the value of $TAG from step 5>'
+   scripts/deploy.sh dev "$TAG"
    ```
 
-2. Re-run the what-if, then deploy with the same command as step 3. The three apps get new revisions that pull from the registry with their own identities and resolve the Key Vault references. The ingress target ports move from 80 to 3000 for web and 3001 for api.
+   To read the plan first, run the what-if of step 3 with the variable exported: `LANCE_IMAGE_TAG=$TAG az deployment sub what-if ...`. The three apps get new revisions that pull from the registry with their own identities and resolve the Key Vault references. The ingress target ports move from 80 to 3000 for web and 3001 for api.
 
 3. Watch the revisions come up:
 
@@ -194,7 +197,9 @@ az acr repository show-tags --name $ACR --repository lance-web -o tsv
      --query "[].{name:name, active:properties.active, state:properties.runningState}" -o table
    ```
 
-   A revision stuck in `Failed` is normally a Key Vault reference that cannot resolve. Check that the secret exists and that the role assignment has propagated; propagation takes up to five minutes after the first deploy.
+   A revision stuck in `Failed` is normally a Key Vault reference that cannot resolve. Check that the secret exists and that the role assignment has propagated; propagation takes up to five minutes after the first deploy. Step 10 runs the full set of checks.
+
+   Later deploys look up their outputs by the name the script gave them: `az deployment sub show -n lance-dev-<tag> --query properties.outputs -o json`.
 
 ## 7. Create the Postgres principals
 
@@ -223,18 +228,18 @@ Run this once per environment, as the Entra administrator from step 2, before th
 
 ## 8. Run the migration job
 
-The job is manual trigger only. It never runs on a schedule and never as part of a deploy. It runs the migrations and then the idempotent seed (system_state row, Dom's user row) as the migrate identity, and migration 0000 grants that identity `lance_migrator` so later migrations can reassign ownership.
+The job is manual trigger only and never runs on a schedule. It runs the migrations and then the idempotent seed (system_state row, Dom's user row) as the migrate identity, and migration 0000 grants that identity `lance_migrator` so later migrations can reassign ownership. The deployment itself never runs it; `scripts/run-migration-job.sh` does, and `deploy.yml` runs that script after every automated deploy (ADR 0014). By hand:
 
 ```
-az containerapp job start -g rg-lance-dev -n caj-lance-migrate-dev
+scripts/run-migration-job.sh dev
+```
+
+The script starts an execution, waits for it to finish, prints its log and exits non-zero on anything other than `Succeeded`. To look at past executions:
+
+```
 az containerapp job execution list -g rg-lance-dev -n caj-lance-migrate-dev \
   --query "[].{name:name, status:properties.status}" -o table
-```
-
-Wait for `Succeeded`. On failure read the logs:
-
-```
-az containerapp job logs show -g rg-lance-dev -n caj-lance-migrate-dev --container migrate
+az containerapp job logs show -g rg-lance-dev -n caj-lance-migrate-dev --container migrate --execution <name>
 ```
 
 ## 9. Grant the application roles
@@ -259,6 +264,14 @@ Quit psql; the script closes the firewall rule.
 
 ## 10. Verify
 
+Run the same checks the workflow runs. The script waits for each app's latest revision to be Running and Healthy on the expected tag, requests the web app and both api probes, and reads the api and worker console logs for their start-up lines:
+
+```
+scripts/verify-deploy.sh dev "$TAG"
+```
+
+It cannot see failed pg-boss jobs or failed agent runs; after any deploy that changes the worker, read those as `observing.md` describes. Then, from the user's side:
+
 1. Open `https://<web hostname>` and sign in as Dom. Any other UPN is refused.
 2. Run `/lance status` in `dom-claude-agent`. The api answers with an ephemeral message and the ledger records a `state_changed` event.
 3. In the web app, open Settings and press Connect Microsoft 365, then consent as Dom. The api writes the real `graph-refresh-token` over the placeholder from step 4.
@@ -275,8 +288,8 @@ Lance starts in dry run: proposals are created and held, nothing is written exte
 
 ## Notes
 
-- A deploy updates the migration job's image but never runs it. After any deploy that carries a new migration, start the job and read its execution status and log (step 8) before trusting the apps; a worker or api that needs a table or a graph label the job has not created fails at its first use, not at start-up.
+- A deployment updates the migration job's image but never runs it. The workflow runs the job right after the deployment (step 8); a manual deploy must do the same before trusting the apps, because a worker or api that needs a table or a graph label the job has not created fails at its first use, not at start-up. The apps move to the new image before the job runs, so a migration that must precede its code needs two deploys.
 
-- Prod uses `infra/params/prod.bicepparam`, which never deploys on the bootstrap image. Push the images to the prod registry and set `containerImageTag` before the first prod deploy.
+- Prod uses `infra/params/prod.bicepparam`, which never deploys on the bootstrap image. Push the images to the prod registry and export `LANCE_IMAGE_TAG` to a tag dev has already run before the first prod deploy. The workflow deploys dev only; prod is a later addition (ADR 0014).
 - Deleting the resource group leaves the Key Vault soft deleted for 90 days, and purge protection means it cannot be purged early. The vault name is derived from the subscription id and the resource group name, so a redeploy into the same group asks for the same name and collides with the soft deleted vault. Recover it rather than renaming: `az keyvault recover --name <vault name>`.
 - The api is externally reachable on every route because Container Apps has no path-scoped ingress. The api enforces Entra bearer authentication on every route except `/slack/*` and `/ingest/*`, and Slack signature verification on those two. Phase 5 revisits this.

@@ -12,10 +12,10 @@ param postgresEntraAdminPrincipalName = 'dom@valliance.ai'
 param postgresPasswordAuthEnabled = false
 param postgresAdministratorPassword = readEnvironmentVariable('LANCE_PG_ADMIN_PASSWORD', '')
 
-// Prod never deploys on the bootstrap image. Set containerImageTag to the immutable
-// tag that CI pushed and that dev has already run.
+// Prod never deploys on the bootstrap image. The image tag comes from the deploying
+// shell: export LANCE_IMAGE_TAG to a tag that deploy.yml pushed and dev has already run.
 param useBootstrapImage = false
-param containerImageTag = 'latest'
+param containerImageTag = readEnvironmentVariable('LANCE_IMAGE_TAG')
 
 param allowedUpn = 'dom@valliance.ai'
 // Dom's Slack user id in the Valliance workspace. Not a secret.
