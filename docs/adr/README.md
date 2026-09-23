@@ -18,4 +18,7 @@ One file per decision, numbered, never edited after acceptance except to add a `
 | 0012 | Lance's own Slack channel is a surface, not a connector write | Accepted |
 | 0013 | Budget guard alerts share the cost_spike kind | Accepted |
 | 0014 | Continuous deployment to dev from GitHub Actions | Accepted |
+| 0015 | Principals and row-level security | Accepted |
+| 0017 | The ontology has reference, shared and private layers | Accepted |
+| 0019 | Policy evaluates in tiers | Accepted |
 | 0031 | Phase order after Phase 3 | Accepted |
