@@ -1,7 +1,7 @@
 import type { ProposalDraft } from '@lance/agents';
 import { MemoryRunRecorder, ScriptedRunner, textMessage } from '@lance/agents/testing';
-import { commitments, createDb, runMigrations, seed, type Db, type NewCommitment } from '@lance/db';
-import { startPostgresContainer } from '@lance/db/testing';
+import { commitments, runMigrations, type Db, type NewCommitment } from '@lance/db';
+import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
 import type { Node } from '@lance/ontology';
 import { newUlid } from '@lance/shared';
@@ -108,8 +108,7 @@ beforeAll(async () => {
   container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
-  db = createDb({ connectionString, password: 'postgres' });
-  await seed(db);
+  db = await openSeededTestDb(connectionString);
 }, 300000);
 
 afterAll(async () => {

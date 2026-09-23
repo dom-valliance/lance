@@ -1,4 +1,5 @@
-import { agentRuns, cursors, type Db, type SystemState } from '@lance/db';
+import { agentRuns, cursors, type Db } from '@lance/db';
+import type { RunState } from '@lance/ledger';
 import type { SystemMode } from '@lance/shared';
 import { gte, sql } from 'drizzle-orm';
 
@@ -38,7 +39,7 @@ export interface StatusSource {
 
 /** The slice of `SystemControl` the status source needs. */
 export interface SystemStateReader {
-  read(): Promise<SystemState>;
+  read(): Promise<RunState>;
 }
 
 export interface DbStatusSourceOptions {

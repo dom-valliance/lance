@@ -24,7 +24,14 @@ import {
   type NotionConnector,
   type SlackSurface,
 } from '@lance/connectors';
-import { createDb, observations, proposals, type Db } from '@lance/db';
+import {
+  createDb,
+  observations,
+  proposals,
+  resolveSinglePrincipal,
+  scopedDb,
+  type Db,
+} from '@lance/db';
 import { OntologyRepository } from '@lance/ontology';
 import {
   expireProposals,
@@ -275,7 +282,12 @@ async function main(): Promise<void> {
     serviceVersion: WORKER_VERSION,
     environment: config.nodeEnv,
   });
-  const db = createDb();
+  // One principal in Phase 4 (ADR 0015). Every job runs through a handle
+  // scoped to it; organisation rules are seeded through an admin scope.
+  const root = createDb();
+  const principal = await resolveSinglePrincipal(root, config.dom.email);
+  const db = scopedDb(root, { principalId: principal.id });
+  const adminDb = scopedDb(root, { principalId: principal.id, admin: true });
   const control = new SystemControl(db);
   const gate = new PauseGate(control);
   const boss = createBoss(db);
@@ -283,7 +295,7 @@ async function main(): Promise<void> {
     console.error({ err: error }, 'pg-boss error');
   });
 
-  const seeded = await ensureSeedRules(db, config.slack.channelId);
+  const seeded = await ensureSeedRules(adminDb, config.slack.channelId);
   const graph = buildGraph(db);
   const notion = buildNotion(config, db);
   const slack = buildSlack(config);

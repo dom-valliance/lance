@@ -1,5 +1,5 @@
-import { createDb, observations, runMigrations, seed, type Db } from '@lance/db';
-import { startPostgresContainer } from '@lance/db/testing';
+import { observations, runMigrations, type Db } from '@lance/db';
+import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerWriter } from '@lance/ledger';
 import { OntologyRepository } from '@lance/ontology';
 import { hashRecord, idempotencyKey, stableUlid } from '@lance/shared';
@@ -72,8 +72,7 @@ beforeAll(async () => {
   container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
-  db = createDb({ connectionString, password: 'postgres' });
-  await seed(db);
+  db = await openSeededTestDb(connectionString);
   ontology = new OntologyRepository(db);
   const sourceRef = { system: 'graph' as const, id: 'seed', observedAt: OBSERVED_AT };
   await ontology.upsertPerson(

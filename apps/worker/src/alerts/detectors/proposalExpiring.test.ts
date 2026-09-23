@@ -1,5 +1,5 @@
-import { createDb, proposals, runMigrations, seed, type Db } from '@lance/db';
-import { startPostgresContainer } from '@lance/db/testing';
+import { proposals, runMigrations, type Db } from '@lance/db';
+import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { OntologyRepository } from '@lance/ontology';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -56,8 +56,7 @@ beforeAll(async () => {
   container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
-  db = createDb({ connectionString, password: 'postgres' });
-  await seed(db);
+  db = await openSeededTestDb(connectionString);
   ontology = new OntologyRepository(db);
 }, 120000);
 

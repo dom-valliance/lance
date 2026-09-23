@@ -2,6 +2,7 @@ import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, scopedDb, type Db } from './client.js';
+import { resolveSinglePrincipal } from './principal.js';
 import { runMigrations } from './migrate.js';
 import { SEED_PRINCIPAL_ID, seed } from './seed.js';
 import { startPostgresContainer } from './testing.js';
@@ -301,5 +302,30 @@ describe('scopedDb', () => {
     expect([a.rows[0], b.rows[0]]).toEqual([{ p: SEED_PRINCIPAL_ID }, { p: OTHER_PRINCIPAL_ID }]);
     const unscoped = await appDb.execute('SELECT app_principal() AS p');
     expect(unscoped.rows[0]).toEqual({ p: null });
+  });
+});
+
+describe('resolveSinglePrincipal', () => {
+  it('refuses to choose between two active principals', async () => {
+    await expect(resolveSinglePrincipal(appDb, 'dom@valliance.ai')).rejects.toThrow(
+      /Found 2 active principals/,
+    );
+  });
+
+  it('returns the one active principal when the configured UPN matches, whatever its case', async () => {
+    await admin.query("UPDATE principals SET status = 'paused' WHERE id = $1", [
+      OTHER_PRINCIPAL_ID,
+    ]);
+    try {
+      const principal = await resolveSinglePrincipal(appDb, 'Dom@Valliance.ai');
+      expect(principal.id).toBe(SEED_PRINCIPAL_ID);
+      await expect(resolveSinglePrincipal(appDb, 'someone.else@valliance.ai')).rejects.toThrow(
+        /configured for someone.else@valliance.ai/,
+      );
+    } finally {
+      await admin.query("UPDATE principals SET status = 'active' WHERE id = $1", [
+        OTHER_PRINCIPAL_ID,
+      ]);
+    }
   });
 });

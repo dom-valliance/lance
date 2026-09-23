@@ -1,6 +1,6 @@
 import type { ProposalDraft } from '@lance/agents';
-import { createDb, proposals, runMigrations, seed, type Db } from '@lance/db';
-import { startPostgresContainer } from '@lance/db/testing';
+import { proposals, runMigrations, type Db } from '@lance/db';
+import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerReader, SystemControl } from '@lance/ledger';
 import { seedRules } from '@lance/policy';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -68,8 +68,7 @@ beforeAll(async () => {
   container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
-  db = createDb({ connectionString, password: 'postgres' });
-  await seed(db);
+  db = await openSeededTestDb(connectionString);
   control = new SystemControl(db);
   await control.setMode('live', { actor: 'user:dom' });
 }, 120000);

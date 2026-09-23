@@ -1,5 +1,4 @@
 import type { SlackSurface } from '@lance/connectors';
-import type { SystemState } from '@lance/db';
 import type {
   AppendResult,
   DecisionResult,
@@ -13,6 +12,7 @@ import type {
   ProposalCountFilter,
   ProposalFilter,
   ResumeResult,
+  RunState,
 } from '@lance/ledger';
 import type { Config, LedgerEventInputCandidate, Proposal, SystemMode } from '@lance/shared';
 import type { AgentsStoreLike } from './agents/store.js';
@@ -32,7 +32,7 @@ import type { TaskStoreLike } from './tasks/store.js';
  */
 
 export interface SystemControlLike {
-  read(): Promise<SystemState>;
+  read(): Promise<RunState>;
   pause(options: { reason: string; actor: string }): Promise<PauseResult>;
   resume(options: { actor: string }): Promise<ResumeResult>;
   /** Switches between dry run and live (spec 6.3); records a state_changed event either way. */
@@ -96,7 +96,7 @@ export interface TokenVerifier {
 export interface SlackDeps {
   signingSecret: string;
   /**
-   * Dom's Slack user id, from `users.slack_user_id`. Only this user may
+   * The principal's Slack user id, from `principals.slack_user_id`. Only this user may
    * pause or resume from Slack. Null refuses every such command, which is
    * the safe default before the id is recorded.
    */

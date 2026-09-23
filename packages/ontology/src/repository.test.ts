@@ -1,5 +1,5 @@
-import { createDb, runMigrations, seed, type Db } from '@lance/db';
-import { startPostgresContainer } from '@lance/db/testing';
+import { runMigrations, type Db } from '@lance/db';
+import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -21,8 +21,7 @@ beforeAll(async () => {
   container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
-  db = createDb({ connectionString, password: 'postgres' });
-  await seed(db);
+  db = await openSeededTestDb(connectionString);
   repo = new OntologyRepository(db, {
     now: () => '2026-09-21T09:00:00.000Z',
     idFactory: () => `01ONTOLOGY${String(++counter).padStart(16, '0')}`,

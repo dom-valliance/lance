@@ -1,5 +1,5 @@
-import { startPostgresContainer } from '@lance/db/testing';
-import { agentRuns, createDb, cursors, proposals, runMigrations, seed, type Db } from '@lance/db';
+import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
+import { agentRuns, cursors, proposals, runMigrations, type Db } from '@lance/db';
 import { LedgerReader } from '@lance/ledger';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -70,8 +70,7 @@ beforeAll(async () => {
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
 
-  db = createDb({ connectionString });
-  await seed(db);
+  db = await openSeededTestDb(connectionString);
 
   await db.insert(cursors).values({ watcher: 'graph-mail', key: 'inbox', value: 'delta-token' });
   await db.insert(agentRuns).values({

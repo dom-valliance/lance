@@ -1,5 +1,5 @@
-import { createDb, runMigrations, seed, type Db } from '@lance/db';
-import { startPostgresContainer } from '@lance/db/testing';
+import { runMigrations, type Db } from '@lance/db';
+import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerWriter } from '@lance/ledger';
 import { hashRecord, newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -36,8 +36,7 @@ beforeAll(async () => {
   container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
-  db = createDb({ connectionString, password: 'postgres' });
-  await seed(db);
+  db = await openSeededTestDb(connectionString);
 
   await observe('occ-1', '2026-09-21T18:30:09.049Z', {
     id: 'occ-1',

@@ -4,6 +4,7 @@ import { triageSystemPrompt, triageUserPrompt } from './prompt.js';
 
 function event(overrides: Partial<LedgerEventRow>): LedgerEventRow {
   return {
+    principalId: '01K5S9V6QW3SWCCPVB0N0E300H',
     id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
     ts: new Date('2026-09-21T08:00:00.000Z'),
     actor: 'agent:watcher-graph-calendar@0.1.0',

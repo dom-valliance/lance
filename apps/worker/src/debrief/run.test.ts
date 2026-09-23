@@ -1,7 +1,7 @@
 import { MemoryRunRecorder, ScriptedRunner, textMessage } from '@lance/agents/testing';
 import type { ProposalDraft } from '@lance/agents';
-import { briefs, createDb, runMigrations, seed, type Db } from '@lance/db';
-import { startPostgresContainer } from '@lance/db/testing';
+import { briefs, runMigrations, type Db } from '@lance/db';
+import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { eq } from 'drizzle-orm';
@@ -68,8 +68,7 @@ beforeAll(async () => {
   container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
-  db = createDb({ connectionString, password: 'postgres' });
-  await seed(db);
+  db = await openSeededTestDb(connectionString);
 }, 120000);
 
 afterAll(async () => {

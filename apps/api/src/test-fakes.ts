@@ -1,5 +1,5 @@
 import type { SlackSurface } from '@lance/connectors';
-import type { Alert, Commitment, SystemState } from '@lance/db';
+import type { Alert, Commitment } from '@lance/db';
 import type {
   DecisionResult,
   CostCeiling,
@@ -12,6 +12,7 @@ import type {
   ProposalCountFilter,
   ProposalFilter,
   ResumeResult,
+  RunState,
 } from '@lance/ledger';
 import {
   loadConfig,
@@ -72,9 +73,10 @@ export const testConfig = (env: NodeJS.ProcessEnv = {}): Config =>
     ...env,
   });
 
-export const fakeSystemState = (overrides: Partial<SystemState> = {}): SystemState => ({
-  id: 1,
+export const fakeSystemState = (overrides: Partial<RunState> = {}): RunState => ({
+  principalId: '01K5S9V6QW3SWCCPVB0N0E300H',
   paused: false,
+  pausedGlobally: false,
   pausedReason: null,
   pausedBy: null,
   pausedAt: null,
@@ -108,12 +110,12 @@ export const fakeSnapshot = (overrides: Partial<StatusSnapshot> = {}): StatusSna
 });
 
 export class FakeSystemControl implements SystemControlLike {
-  state: SystemState = fakeSystemState();
+  state: RunState = fakeSystemState();
   readonly pauseCalls: { reason: string; actor: string }[] = [];
   readonly resumeCalls: { actor: string }[] = [];
   readFails = false;
 
-  read(): Promise<SystemState> {
+  read(): Promise<RunState> {
     if (this.readFails) {
       return Promise.reject(new Error('connection refused'));
     }
@@ -302,6 +304,7 @@ export const TEST_COMMITMENT_ID = '01K5S9V6QW3SWCCPVB0N0E302A';
 export const TEST_PERSON_ID = 'per-ann';
 
 export const fakeCommitment = (overrides: Partial<Commitment> = {}): Commitment => ({
+  principalId: '01K5S9V6QW3SWCCPVB0N0E300H',
   id: TEST_COMMITMENT_ID,
   direction: 'inbound',
   // The recorder puts the other party in both columns for an inbound
@@ -380,6 +383,7 @@ export class FakeCommitmentStore implements CommitmentStoreLike {
 export const TEST_ALERT_ID = '01K5S9V6QW3SWCCPVB0N0E304A';
 
 export const fakeAlert = (overrides: Partial<Alert> = {}): Alert => ({
+  principalId: '01K5S9V6QW3SWCCPVB0N0E300H',
   id: TEST_ALERT_ID,
   severity: 'P1',
   kind: 'client_mail_unanswered',

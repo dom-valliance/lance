@@ -11,6 +11,7 @@ import {
 const NOW = new Date('2026-09-21T09:00:00.000Z');
 
 const row = (overrides: Partial<Commitment> = {}): Commitment => ({
+  principalId: '01K5S9V6QW3SWCCPVB0N0E300H',
   id: '01K5S9V6QW3SWCCPVB0N0E302A',
   direction: 'inbound',
   ownerPersonId: 'per-ann',
