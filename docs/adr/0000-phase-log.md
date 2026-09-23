@@ -158,8 +158,20 @@ From Phase 4 onwards the order is set by [docs/plans/roadmap.md](../plans/roadma
 
 ## Phase 4. Principal seam
 
+Opened 2026-09-23 on branch `feat/phase-4-principal-seam`. ADRs 0015, 0017 and 0019 written first.
+
 | Criterion | Evidence | Date |
 |---|---|---|
+| Every principal-bearing table has a non-null `principal_id` under forced RLS | `packages/db/src/isolation.test.ts`, run as a `lance_app` member: every public table but `principals`, `system_state` and `users` has forced RLS and a policy, found from the catalogue so a new table is covered; a second principal's rows are invisible and an insert naming them is refused; an unscoped session reads nothing and cannot insert; `lance_app` has no `BYPASSRLS`. `migrate.backfill.test.ts` migrates a database filled at 0008, as dev is: the users row becomes the principal with its id, every row carries it, run state moves to `principal_state`, and the ledger trigger now guards `principal_id`. `migrate.nonsuperuser.test.ts` applies 0009 as a `lance_migrator` member. | 2026-09-23 |
+| The kill switch pauses one principal without pausing another, and the global row pauses both | `packages/ledger/src/control.test.ts`, "the kill switch across principals" | 2026-09-23 |
+| The existing suites pass under the principal's scope | Root `pnpm test` green after the api and worker were scoped (`60f6463`) | 2026-09-23 |
+| `promote_to_shared` never resolves to `auto` | `packages/policy/src/tiers.test.ts` property suite, with the other two tier properties from ADR 0019; `packages/policy` at 100% on statements, branches, functions and lines | 2026-09-23 |
+| The graph isolates private evidence by principal | pending (package 4.2) | |
+| One meeting is one node | pending (package 4.2) | |
+| Rebuild reproduces the graph, `layer` and `principal_id` included | pending (package 4.2) | |
+| Migration run against dev before merge | pending | |
+
+Decisions taken while building, recorded in ADR 0015: the scope is set on each connection checkout rather than per transaction, because jobs interleave database work with slow connector and model calls; `principal_id` defaults from the scope rather than losing its default, so no caller names a principal; the global mode is a ceiling that starts open, so each principal's own mode, which starts in dry run, decides. Carried to Phase 5 (package 5.3): a `principalId` on every job payload, one schedule per principal, the organisation cost ceiling across principals (the global `cost_ceiling_gbp` has no reader until then), and releasing other principals' held proposals after a global resume.
 
 ## Phase 5. Multi-user
 
