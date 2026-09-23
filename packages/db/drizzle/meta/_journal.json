@@ -71,6 +71,13 @@
       "when": 1790182053820,
       "tag": "0009_principals_and_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790183393149,
+      "tag": "0010_promote_to_shared_action",
+      "breakpoints": true
     }
   ]
 }

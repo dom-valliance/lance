@@ -37,6 +37,7 @@ export const ACTION_CLASSES = [
   'send_email',
   'delete',
   'rule_change',
+  'promote_to_shared',
 ] as const;
 export type ActionClass = (typeof ACTION_CLASSES)[number];
 

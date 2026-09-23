@@ -126,6 +126,9 @@ function ruleArbOver(
     .record(
       {
         id: ulidArb,
+        // One tier here, so the single-tier properties below hold as the
+        // spec states them; tiers.test.ts mixes personal rules in.
+        principalId: fc.constant(null),
         version: fc.integer({ min: 1, max: 5 }),
         active: fc.boolean(),
         actionClass,
@@ -140,6 +143,7 @@ function ruleArbOver(
       {
         requiredKeys: [
           'id',
+          'principalId',
           'version',
           'active',
           'actionClass',
@@ -214,6 +218,7 @@ function ruleForCell(
   overrides: Partial<PolicyRule> & Pick<PolicyRule, 'id'>,
 ): PolicyRule {
   return {
+    principalId: null,
     version: 1,
     active: true,
     actionClass: parsed.actionClass,
@@ -236,14 +241,15 @@ describe('policy engine properties', () => {
         ({ raw, rules }, actionClass) => {
           const result = evaluate({ ...raw, actionClass }, rules);
           expect(result.unmetConditions).toEqual([]);
-          if (actionClass === 'rule_change' && result.reason === 'rule_matched') {
+          const proposeFloor = actionClass === 'rule_change' || actionClass === 'promote_to_shared';
+          if (proposeFloor && result.reason === 'rule_matched') {
             // The propose floor may be tightened by a matching forbid rule, never loosened.
             expect(result.decision).toBe('forbid');
             expect(rules.find((rule) => rule.id === result.ruleId)?.decision).toBe('forbid');
             return;
           }
           expect(result.reason).toBe('hard_floor');
-          expect(result.decision).toBe(actionClass === 'rule_change' ? 'propose' : 'forbid');
+          expect(result.decision).toBe(proposeFloor ? 'propose' : 'forbid');
           expect(result.ruleId).toBeNull();
           expect(result.specificity).toBeNull();
         },
@@ -477,8 +483,8 @@ describe('seed rules over every cell', () => {
   }
 
   it('covers every action class, counterparty class and system combination', () => {
-    expect(ACTION_CLASSES.length * COUNTERPARTY_CLASSES.length * SYSTEMS.length).toBe(525);
-    expect(cells).toBe(525);
+    expect(ACTION_CLASSES.length * COUNTERPARTY_CLASSES.length * SYSTEMS.length).toBe(560);
+    expect(cells).toBe(560);
   });
 
   it('grants auto exactly where the seed conditions demand it', () => {

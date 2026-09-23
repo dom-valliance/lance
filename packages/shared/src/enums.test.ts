@@ -101,8 +101,13 @@ describe('REVERSIBILITY_BY_ACTION_CLASS', () => {
 });
 
 describe('HARD_FLOOR_ACTION_CLASSES', () => {
-  it('is exactly delete, send_email and rule_change', () => {
-    expect(HARD_FLOOR_ACTION_CLASSES).toEqual(['delete', 'send_email', 'rule_change']);
+  it('is exactly delete, send_email, rule_change and promote_to_shared', () => {
+    expect(HARD_FLOOR_ACTION_CLASSES).toEqual([
+      'delete',
+      'send_email',
+      'rule_change',
+      'promote_to_shared',
+    ]);
   });
 
   it('contains only known action classes', () => {

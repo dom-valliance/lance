@@ -100,6 +100,13 @@ export type LedgerEventInputCandidate = z.input<typeof LedgerEventInputSchema>;
 /** The `PolicyRule` interface, spec 6.2, verbatim. */
 export const PolicyRuleSchema = z.object({
   id: UlidSchema,
+  /**
+   * The principal whose own rule this is, or null for an organisation
+   * default (ADR 0019). A rule read from the database is one of the scoped
+   * principal's or one of the organisation's; row-level security admits no
+   * other.
+   */
+  principalId: UlidSchema.nullable().default(null),
   version: z.int().positive(),
   active: z.boolean(),
   actionClass: z.union([ActionClassSchema, z.literal('*')]),

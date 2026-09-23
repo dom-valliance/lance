@@ -40,6 +40,7 @@ export const ACTION_CLASS_VALUES = [
   'send_email',
   'delete',
   'rule_change',
+  'promote_to_shared',
 ] as const;
 
 export const COUNTERPARTY_CLASS_VALUES = [

@@ -9,6 +9,7 @@ export async function loadActiveRules(db: Db): Promise<PolicyRule[]> {
   return rows.map((row) =>
     validateRule({
       id: row.id,
+      principalId: row.principalId,
       version: row.version,
       active: row.active,
       actionClass: row.actionClass,
