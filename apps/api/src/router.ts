@@ -248,6 +248,15 @@ export const appRouter = router({
     get: procedure
       .input(z.object({ id: UlidSchema }))
       .query(({ ctx, input }) => getBrief(ctx.deps, input.id)),
+    /**
+     * Queues a fresh morning brief on the worker's queue, the same path as
+     * `/lance brief`. Nothing is generated here: the worker writes the
+     * brief and the Today page re-reads it.
+     */
+    regenerate: procedure.mutation(async ({ ctx }) => ({
+      enqueued: true as const,
+      jobId: await ctx.deps.enqueueBrief(),
+    })),
   }),
   proposals: router({
     list: procedure

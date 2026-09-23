@@ -48,6 +48,36 @@ const INLINE_CLASS: Record<Visibility, string> = {
   none: 'hidden',
 };
 
+/**
+ * A meeting with its prep open is a 16px semibold heading; a summarised
+ * one is a 14px medium line (design 7.1), at each width independently.
+ */
+function titleClass(prep: Visibility): string {
+  const openOnPhone = prep === 'both' || prep === 'phone';
+  const openOnDesktop = prep === 'both' || prep === 'desktop';
+  return cn(
+    openOnPhone ? 'text-base font-semibold' : 'text-sm font-medium',
+    openOnDesktop ? 'lg:text-base lg:font-semibold' : 'lg:text-sm lg:font-medium',
+  );
+}
+
+/**
+ * What the summarised row says between the times and the provenance
+ * (design 7.1): who is coming, and how many commitments are open with
+ * them. Nothing is said about an empty list, so the line never carries an
+ * empty slot.
+ */
+function summaryParts(meeting: Meeting): string[] {
+  const parts: string[] = [];
+  if (meeting.attendees.length > 0) {
+    parts.push(meeting.attendees.map((attendee) => attendee.name).join(', '));
+  }
+  if (meeting.commitments.length > 0) {
+    parts.push(countLabel(meeting.commitments.length, 'open commitment'));
+  }
+  return parts;
+}
+
 const attendeeKey = (attendee: Attendee): string =>
   attendee.personId ?? attendee.email ?? attendee.name;
 
@@ -107,7 +137,7 @@ function MeetingArticle({ meeting, now, next }: { meeting: Meeting; now: Date; n
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-semibold">{meeting.title}</h3>
+            <h3 className={titleClass(prep)}>{meeting.title}</h3>
             <Badge tone={meeting.audience === 'external' ? 'blue' : 'neutral-strong'} size="sm">
               {audienceLabel(meeting.audience, meeting.counterpartyClass)}
             </Badge>
@@ -132,10 +162,12 @@ function MeetingArticle({ meeting, now, next }: { meeting: Meeting; now: Date; n
                 <span>{meeting.location}</span>
               </>
             )}
-            <span className={INLINE_CLASS[summary]}>
-              · {meeting.attendees.map((attendee) => attendee.name).join(', ')} ·{' '}
-              {countLabel(meeting.commitments.length, 'open commitment')} ·{' '}
-            </span>
+            {summaryParts(meeting).map((part) => (
+              <span key={part} className={INLINE_CLASS[summary]}>
+                <span aria-hidden>·</span> {part}
+              </span>
+            ))}
+            <span aria-hidden>·</span>
             <ProvenanceLink source={meeting.provenance} seen={false} />
           </p>
         </div>
@@ -150,11 +182,15 @@ function MeetingArticle({ meeting, now, next }: { meeting: Meeting; now: Date; n
       <div className={cn('gap-6 lg:grid-cols-2', BLOCK_CLASS[prep])}>
         <div className="flex flex-col gap-3">
           <GroupHeading>Attendees</GroupHeading>
-          <ul className="flex flex-col gap-3">
-            {meeting.attendees.map((attendee) => (
-              <AttendeeEntry key={attendeeKey(attendee)} attendee={attendee} />
-            ))}
-          </ul>
+          {meeting.attendees.length === 0 ? (
+            <p className="text-xs text-muted-foreground">The invitation lists nobody else.</p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {meeting.attendees.map((attendee) => (
+                <AttendeeEntry key={attendeeKey(attendee)} attendee={attendee} />
+              ))}
+            </ul>
+          )}
         </div>
 
         <div className="flex flex-col gap-4">

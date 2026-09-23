@@ -2,6 +2,7 @@ import { londonDay } from '@/lib/ageing';
 import type { AgeingEmphasis } from '@/components/ageing';
 import type { ActionClass, CounterpartyClass, SourceSystem } from '@/lib/filters';
 import { COUNTERPARTY_LABELS } from '@/lib/humanise';
+import { formatTime } from '@/lib/time';
 
 /**
  * The Today page's view model: the two brief contents mirrored by hand and
@@ -201,6 +202,34 @@ export interface Brief<Content> {
 export type MorningBrief = Brief<MorningBriefContent>;
 export type AfternoonBoard = Brief<AfternoonBoardContent>;
 
+/* Regenerate --------------------------------------------------------------- */
+
+/**
+ * What the Regenerate action answers. `queued` remembers which brief was
+ * on the page when the job went in, so the header knows the new one has
+ * landed when the page's `generatedAt` differs from it.
+ */
+export type RegenerateState =
+  | { status: 'idle' }
+  | { status: 'queued'; at: string; previousGeneratedAt: string | null }
+  | { status: 'failed'; message: string };
+
+/** How long the header waits for a queued brief before it reports a failure. */
+export const GENERATION_WAIT_MS = 3 * 60_000;
+
+/**
+ * True while a queued brief is still to come: the page still shows the
+ * brief that was there when the job was queued and the header has not
+ * given up waiting on this job.
+ */
+export function isGenerating(
+  queued: { at: string; previousGeneratedAt: string | null },
+  generatedAt: string | null,
+  gaveUpAt: string | null,
+): boolean {
+  return queued.previousGeneratedAt === generatedAt && gaveUpAt !== queued.at;
+}
+
 export function asMorningBrief(record: BriefRecord | null): MorningBrief | null {
   if (record === null) return null;
   return { ...record, content: record.content as MorningBriefContent };
@@ -347,6 +376,21 @@ export function formatHours(hours: number): string {
   return rest === 0 ? `${String(whole)} h` : `${String(whole)} h ${String(rest).padStart(2, '0')}`;
 }
 
+/** "09:30, Halden Group", or "None" when the day has no meeting. */
+export function meetingMarkerLabel(marker: MeetingMarker | null): string {
+  return marker === null ? 'None' : `${formatTime(marker.start)}, ${marker.title}`;
+}
+
+/** "10:30 to 13:00, 2 h 30" in full, "10:30 to 13:00" without the length, "None" when the day is full. */
+export function freeBlockLabel(
+  block: DayShape['longestFreeBlock'],
+  detail: 'with-length' | 'times-only',
+): string {
+  if (block === null) return 'None';
+  const times = `${formatTime(block.start)} to ${formatTime(block.end)}`;
+  return detail === 'with-length' ? `${times}, ${formatHours(block.hours)}` : times;
+}
+
 /** "2 h 30 of 8", the meeting load against the working day. */
 export function meetingLoadLabel(meetingHours: number, workingHours: number): string {
   return `${formatHours(meetingHours)} of ${trimNumber(workingHours)}`;
@@ -476,6 +520,24 @@ export function decidedLabel(decided: {
     .map((part) => `${String(part.count)} ${part.word}`);
   const head = `${countLabel(total, 'proposal')} decided`;
   return parts.length === 0 ? `${head}.` : `${head}: ${parts.join(', ')}.`;
+}
+
+/**
+ * The summary when today has no brief and the build time has passed:
+ * "No brief. Last successful brief yesterday, 06:30.", with the date
+ * instead of "yesterday" for an older one, and a plain "No brief yet."
+ * when none has ever been generated.
+ */
+export function noBriefSummary(lastGeneratedAt: string | null, now: Date): string {
+  if (lastGeneratedAt === null) return 'No brief yet.';
+  const date = new Date(lastGeneratedAt);
+  if (Number.isNaN(date.getTime())) return 'No brief yet.';
+  const time = new Intl.DateTimeFormat('en-GB', { timeStyle: 'short', timeZone: LONDON }).format(
+    date,
+  );
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const day = londonDay(date) === londonDay(yesterday) ? 'yesterday' : formatDayMonth(date);
+  return `No brief. Last successful brief ${day}, ${time}.`;
 }
 
 /** "Brief generated 06:30 today", or the date as well when the brief is older. */

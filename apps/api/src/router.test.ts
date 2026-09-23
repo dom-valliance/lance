@@ -454,3 +454,10 @@ describe('agents.status', () => {
     expect(status.breakers).toEqual([]);
   });
 });
+
+describe('briefs.regenerate', () => {
+  it('queues a morning brief on the worker rather than building one itself', async () => {
+    expect(await caller.briefs.regenerate()).toEqual({ enqueued: true, jobId: 'job-brief' });
+    expect(harness.briefRequests).toHaveLength(1);
+  });
+});
