@@ -12,21 +12,16 @@ import {
   commitmentStatusSelected,
   COMMITMENT_DIRECTIONS,
   COMMITMENT_STATUS_FILTERS,
-  openCount,
-  overdueCount,
   sortCommitments,
   type CommitmentDirection,
   type CommitmentStatusFilter,
 } from '@/lib/commitment-view';
 import { type SearchParams } from '@/lib/filters';
-import { cursorFrom, pageLinks, PAGE_SIZES, shownLabel } from '@/lib/pagination';
+import { cursorFrom, pageLinks, pageSummary, PAGE_SIZES, positionFrom } from '@/lib/pagination';
 import { apiClient } from '@/lib/trpc';
 import { CommitmentsTable } from './commitments-table';
 
 export const dynamic = 'force-dynamic';
-
-/** Enough open rows on the other tab to count beside its label. */
-const COUNT_LIMIT = 100;
 
 /** The filters a page link carries, minus the cursor, so paging restarts on a new filter. */
 const FILTER_PARAMS = ['direction', 'status'] as const;
@@ -69,43 +64,43 @@ export default async function CommitmentsPage({
   const status = commitmentStatusSelected(params);
   const current = { direction, status };
   const now = new Date();
-  const other: CommitmentDirection = direction === 'inbound' ? 'outbound' : 'inbound';
 
   const client = await apiClient();
   const statusFilter = commitmentStatusFilterFrom(params);
   const cursor = cursorFrom(params);
   // exactOptionalPropertyTypes: an optional key must be left out entirely
   // rather than set to `undefined` (mirrors `proposalFilterFrom` in
-  // `@/lib/filters`). The other tab's open rows are read only for the
-  // count beside its label; both reads batch into one request.
-  const [page, otherPage] = await Promise.all([
+  // `@/lib/filters`). The header and both tab labels come from the
+  // summary, counted in SQL; both reads batch into one request.
+  const [page, counts] = await Promise.all([
     client.commitments.list.query({
       direction,
       limit: PAGE_SIZES.commitments,
       ...(statusFilter === undefined ? {} : { status: statusFilter }),
       ...(cursor === undefined ? {} : { cursor }),
     }),
-    client.commitments.list.query({ direction: other, status: 'open', limit: COUNT_LIMIT }),
+    client.commitments.summary.query(),
   ]);
   const commitments = sortCommitments(page.items);
 
-  const openHere = openCount(commitments);
-  const openThere = openCount(otherPage.items);
-  const countFor = (value: CommitmentDirection): number =>
-    value === direction ? openHere : openThere;
-
+  const number = new Intl.NumberFormat('en-GB');
+  const here = counts[direction];
   const owing = direction === 'inbound' ? 'owed to you' : 'you owe';
-  const summary = `Promises found in sent mail and transcripts. ${String(openHere)} open ${owing}, ${String(overdueCount(commitments))} overdue.`;
+  const summary = `Promises found in sent mail and transcripts. ${number.format(here.open)} open ${owing}, ${number.format(here.overdue)} overdue.`;
 
   const links = pageLinks({
     path: '/commitments',
     params,
     keep: FILTER_PARAMS,
     nextCursor: page.nextCursor,
+    shown: commitments.length,
   });
-  const footer = (
-    <Pagination summary={shownLabel(commitments.length)} {...links} nextLabel="Show older" />
-  );
+  const position = pageSummary({
+    from: positionFrom(params),
+    shown: commitments.length,
+    total: page.total,
+  });
+  const footer = <Pagination summary={position} {...links} nextLabel="Show older" />;
 
   return (
     <div className="flex flex-col gap-6">
@@ -131,7 +126,7 @@ export default async function CommitmentsPage({
               )}
             >
               {DIRECTION_LABELS[value]}
-              <span className="text-muted-foreground"> · {String(countFor(value))}</span>
+              <span className="text-muted-foreground"> · {number.format(counts[value].open)}</span>
             </Link>
           ))}
         </div>

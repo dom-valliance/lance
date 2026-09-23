@@ -4,9 +4,12 @@ import type {
   DecisionResult,
   CostCeiling,
   InterruptionBudget,
+  LedgerCountQuery,
   LedgerEventRow,
   LedgerQuery,
   PauseResult,
+  PendingProposalSummary,
+  ProposalCountFilter,
   ProposalFilter,
   ResumeResult,
 } from '@lance/ledger';
@@ -30,10 +33,21 @@ import type {
   TokenVerifier,
 } from './deps.js';
 import type { AgentLastRun, AgentRunRow, AgentsStoreLike, CursorRow } from './agents/store.js';
-import type { AlertQuery, AlertStoreLike, SetAlertStatusInput } from './alerts/store.js';
+import type {
+  AlertCountQuery,
+  AlertQuery,
+  AlertStoreLike,
+  SetAlertStatusInput,
+} from './alerts/store.js';
 import type { BriefQuery, BriefRecord, BriefStoreLike, LatestBriefQuery } from './briefs/store.js';
-import type { CommitmentQuery, CommitmentStoreLike } from './commitments/store.js';
-import type { TaskQuery, TaskStoreLike } from './tasks/store.js';
+import type {
+  CommitmentCountQuery,
+  CommitmentQuery,
+  CommitmentStoreLike,
+  CommitmentSummary,
+  CommitmentTally,
+} from './commitments/store.js';
+import type { TaskCountQuery, TaskQuery, TaskStoreLike } from './tasks/store.js';
 import { toTaskView, type ObservationRecord } from './tasks/view.js';
 import { UnauthorisedError } from './errors.js';
 import { createFeed, type Feed, type FeedEvent } from './events.js';
@@ -175,10 +189,27 @@ export class FakeSystemControl implements SystemControlLike {
 export class FakeLedgerReader implements LedgerReaderLike {
   rows: LedgerEventRow[] = [];
   readonly queries: (LedgerQuery | undefined)[] = [];
+  readonly counts: (LedgerCountQuery | undefined)[] = [];
 
+  /**
+   * Returns the rows as set, which a test lists newest first, continuing
+   * after the `after` row and cut to the limit. The filters are recorded
+   * rather than applied.
+   */
   query(filter?: LedgerQuery): Promise<LedgerEventRow[]> {
     this.queries.push(filter);
-    return Promise.resolve(this.rows);
+    const after = filter?.after;
+    const start = after === undefined ? 0 : this.rows.findIndex((row) => row.id === after) + 1;
+    return Promise.resolve(this.rows.slice(start).slice(0, filter?.limit));
+  }
+
+  get(id: string): Promise<LedgerEventRow | null> {
+    return Promise.resolve(this.rows.find((row) => row.id === id) ?? null);
+  }
+
+  count(filter?: LedgerCountQuery): Promise<number> {
+    this.counts.push(filter);
+    return Promise.resolve(this.rows.length);
   }
 
   byCorrelation(correlationId: string): Promise<LedgerEventRow[]> {
@@ -227,11 +258,10 @@ export const fakeProposal = (overrides: Partial<Proposal> = {}): Proposal => ({
 export class FakeProposalStore implements ProposalStoreLike {
   rows: Proposal[] = [fakeProposal()];
   readonly filters: (ProposalFilter | undefined)[] = [];
+  readonly counts: (ProposalCountFilter | undefined)[] = [];
 
-  list(filter?: ProposalFilter): Promise<Proposal[]> {
-    this.filters.push(filter);
-    const query = filter ?? {};
-    const matched = this.rows
+  private matching(query: ProposalCountFilter): Proposal[] {
+    return this.rows
       .filter((row) => query.status === undefined || row.status === query.status)
       .filter((row) => query.actionClass === undefined || row.actionClass === query.actionClass)
       .filter(
@@ -239,10 +269,28 @@ export class FakeProposalStore implements ProposalStoreLike {
           query.counterpartyClass === undefined ||
           row.counterpartyClass === query.counterpartyClass,
       )
-      .filter((row) => query.targetSystem === undefined || row.targetSystem === query.targetSystem)
+      .filter((row) => query.targetSystem === undefined || row.targetSystem === query.targetSystem);
+  }
+
+  list(filter?: ProposalFilter): Promise<Proposal[]> {
+    this.filters.push(filter);
+    const query = filter ?? {};
+    const matched = this.matching(query)
       .filter((row) => query.cursor === undefined || row.id < query.cursor)
       .sort((left, right) => (left.id < right.id ? 1 : -1));
     return Promise.resolve(query.limit === undefined ? matched : matched.slice(0, query.limit));
+  }
+
+  count(filter?: ProposalCountFilter): Promise<number> {
+    this.counts.push(filter);
+    return Promise.resolve(this.matching(filter ?? {}).length);
+  }
+
+  summary(): Promise<PendingProposalSummary> {
+    const expiries = this.matching({ status: 'pending' })
+      .map((row) => row.expiresAt)
+      .sort();
+    return Promise.resolve({ pending: expiries.length, oldestExpiresAt: expiries[0] ?? null });
   }
 
   get(id: string): Promise<Proposal | null> {
@@ -279,15 +327,34 @@ export const fakeCommitment = (overrides: Partial<Commitment> = {}): Commitment 
 export class FakeCommitmentStore implements CommitmentStoreLike {
   rows: Commitment[] = [fakeCommitment()];
   readonly queries: CommitmentQuery[] = [];
+  readonly counts: CommitmentCountQuery[] = [];
+
+  private matching(query: CommitmentCountQuery): Commitment[] {
+    return this.rows
+      .filter((row) => query.direction === undefined || row.direction === query.direction)
+      .filter((row) => query.status === undefined || row.status === query.status);
+  }
 
   list(query: CommitmentQuery): Promise<Commitment[]> {
     this.queries.push(query);
-    const matched = this.rows
-      .filter((row) => query.direction === undefined || row.direction === query.direction)
-      .filter((row) => query.status === undefined || row.status === query.status)
+    const matched = this.matching(query)
       .filter((row) => query.cursor === undefined || row.id < query.cursor)
       .sort((left, right) => (left.id < right.id ? 1 : -1));
     return Promise.resolve(matched.slice(0, query.limit));
+  }
+
+  count(query: CommitmentCountQuery): Promise<number> {
+    this.counts.push(query);
+    return Promise.resolve(this.matching(query).length);
+  }
+
+  summary(now: Date): Promise<CommitmentSummary> {
+    const tally = (direction: Commitment['direction']): CommitmentTally => {
+      const open = this.matching({ direction, status: 'open' });
+      const overdue = open.filter((row) => row.dueAt !== null && row.dueAt < now);
+      return { open: open.length, overdue: overdue.length };
+    };
+    return Promise.resolve({ inbound: tally('inbound'), outbound: tally('outbound') });
   }
 
   get(id: string): Promise<Commitment | null> {
@@ -340,16 +407,26 @@ export const fakeAlert = (overrides: Partial<Alert> = {}): Alert => ({
 export class FakeAlertStore implements AlertStoreLike {
   rows: Alert[] = [fakeAlert()];
   readonly queries: AlertQuery[] = [];
+  readonly counts: AlertCountQuery[] = [];
+
+  private matching(query: AlertCountQuery): Alert[] {
+    return this.rows
+      .filter((row) => query.status === undefined || row.status === query.status)
+      .filter((row) => query.severity === undefined || row.severity === query.severity)
+      .filter((row) => query.kind === undefined || row.kind === query.kind);
+  }
 
   list(query: AlertQuery): Promise<Alert[]> {
     this.queries.push(query);
-    const matched = this.rows
-      .filter((row) => query.status === undefined || row.status === query.status)
-      .filter((row) => query.severity === undefined || row.severity === query.severity)
-      .filter((row) => query.kind === undefined || row.kind === query.kind)
+    const matched = this.matching(query)
       .filter((row) => query.cursor === undefined || row.id < query.cursor)
       .sort((left, right) => (left.id < right.id ? 1 : -1));
     return Promise.resolve(matched.slice(0, query.limit));
+  }
+
+  count(query: AlertCountQuery): Promise<number> {
+    this.counts.push(query);
+    return Promise.resolve(this.matching(query).length);
   }
 
   get(id: string): Promise<Alert | null> {
@@ -396,20 +473,30 @@ export const fakeNotionTaskObservation = (
 export class FakeTaskStore implements TaskStoreLike {
   rows: ObservationRecord[] = [fakeNotionTaskObservation()];
   readonly queries: TaskQuery[] = [];
+  readonly counts: TaskCountQuery[] = [];
 
-  list(query: TaskQuery): Promise<ObservationRecord[]> {
-    this.queries.push(query);
+  private matching(query: TaskCountQuery): ObservationRecord[] {
     const options = { domNotionUserId: '1fdd872b-594c-8146-b22f-00028f1f5a41' };
-    const matched = this.rows
+    return this.rows
       .filter((row) => query.source === undefined || row.sourceSystem === query.source)
       .filter((row) => {
         if (query.status === undefined) return true;
         const view = toTaskView(row, options);
         return view !== null && view.done === (query.status === 'done');
-      })
+      });
+  }
+
+  list(query: TaskQuery): Promise<ObservationRecord[]> {
+    this.queries.push(query);
+    const matched = this.matching(query)
       .filter((row) => query.cursor === undefined || row.id < query.cursor)
       .sort((left, right) => (left.id < right.id ? 1 : -1));
     return Promise.resolve(matched.slice(0, query.limit));
+  }
+
+  count(query: TaskCountQuery): Promise<number> {
+    this.counts.push(query);
+    return Promise.resolve(this.matching(query).length);
   }
 }
 

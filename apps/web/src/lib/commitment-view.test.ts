@@ -12,8 +12,6 @@ import {
   firstName,
   isCommitmentOpenForAction,
   isCommitmentOverdue,
-  openCount,
-  overdueCount,
   sortCommitments,
   type CommitmentView,
 } from './commitment-view';
@@ -189,23 +187,6 @@ describe('isCommitmentOverdue', () => {
 
   it('is not overdue when the api recorded no ageing', () => {
     expect(isCommitmentOverdue(view({ overdueDays: null }))).toBe(false);
-  });
-});
-
-describe('openCount and overdueCount', () => {
-  const list = [
-    view({ id: 'a', status: 'open', overdueDays: 4 }),
-    view({ id: 'b', status: 'chased', overdueDays: null }),
-    view({ id: 'c', status: 'done', overdueDays: null }),
-    view({ id: 'd', status: 'dropped', overdueDays: null }),
-  ];
-
-  it('counts the open and chased rows as open', () => {
-    expect(openCount(list)).toBe(2);
-  });
-
-  it('counts only the rows past their due date as overdue', () => {
-    expect(overdueCount(list)).toBe(1);
   });
 });
 

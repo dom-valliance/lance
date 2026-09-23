@@ -66,6 +66,16 @@ describe('createAlertStore', () => {
     expect(rows.map((row) => row.id)).toEqual([wanted]);
   });
 
+  it('counts every alert the filters match, across all pages', async () => {
+    await insert({ severity: 'P2', kind: 'count_probe' });
+    await insert({ severity: 'P2', kind: 'count_probe' });
+    await insert({ severity: 'P2', kind: 'count_probe', status: 'acked' });
+
+    expect(await store.count({ kind: 'count_probe' })).toBe(3);
+    expect(await store.count({ kind: 'count_probe', status: 'open', severity: 'P2' })).toBe(2);
+    expect(await store.count({ kind: 'count_probe', severity: 'P0' })).toBe(0);
+  });
+
   it('continues from the cursor it was given, newest first', async () => {
     const page = await store.list({ limit: 1 });
     const next = await store.list({ limit: 50, cursor: page[0]?.id ?? '' });

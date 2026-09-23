@@ -16,15 +16,12 @@ import {
   type SearchParams,
 } from '@/lib/filters';
 import { ACTION_CLASS_LABELS, PROPOSAL_STATUS_LABELS, SYSTEM_LABELS } from '@/lib/humanise';
-import { pageLinks, PAGE_SIZES, shownLabel } from '@/lib/pagination';
+import { pageLinks, pageSummary, PAGE_SIZES, positionFrom } from '@/lib/pagination';
 import { proposalFilterLabels, queueSummary } from '@/lib/proposal-view';
 import { apiClient } from '@/lib/trpc';
 import { ProposalsTable } from './proposals-table';
 
 export const dynamic = 'force-dynamic';
-
-/** Enough pending proposals to count and to find the oldest expiry (the api caps at 200). */
-const PENDING_LIMIT = 200;
 
 /** The filters the queue carries, minus the cursor, so paging restarts on a new filter. */
 const FILTER_PARAMS = ['status', 'actionClass', 'system'] as const;
@@ -80,27 +77,33 @@ export default async function ProposalsPage({
   const filter = proposalFilterFrom(params);
   const client = await apiClient();
 
-  // The queue itself and the pending count are one round trip: the header
+  // The queue itself and the pending summary are one round trip: the header
   // sentence counts everything waiting, not just the filtered page.
   const [page, pending] = await Promise.all([
     client.proposals.list.query({ ...filter, limit: PAGE_SIZES.proposals }),
-    client.proposals.list.query({ status: 'pending', limit: PENDING_LIMIT }),
+    client.proposals.summary.query(),
   ]);
 
   const names = proposalFilterLabels(filter);
-  const shown = shownLabel(page.items.length, names);
+  const shown = pageSummary({
+    from: positionFrom(params),
+    shown: page.items.length,
+    total: page.total,
+    filterNames: names,
+  });
   const links = pageLinks({
     path: '/proposals',
     params,
     keep: FILTER_PARAMS,
     nextCursor: page.nextCursor,
+    shown: page.items.length,
   });
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Proposals"
-        summary={queueSummary(pending.items, now)}
+        summary={queueSummary(pending.pending, pending.oldestExpiresAt, now)}
         actions={<LiveRefresh streamUrl="/api/events" watch="proposal" indicator />}
       />
 

@@ -2,6 +2,7 @@ import { newUlid, nowIso } from '@lance/shared';
 import { TRPCError } from '@trpc/server';
 import type { Commitment } from '@lance/db';
 import { DOM_ACTOR, type ApiDeps } from '../deps.js';
+import type { CommitmentCountQuery, CommitmentSummary } from './store.js';
 import { toCommitmentView, toPersonView, type CommitmentView, type PersonView } from './view.js';
 
 /**
@@ -33,6 +34,8 @@ export interface ListCommitmentsInput {
 export interface CommitmentPage {
   items: CommitmentView[];
   nextCursor: string | null;
+  /** Every commitment the filters match, across all pages. */
+  total: number;
 }
 
 /**
@@ -78,16 +81,28 @@ export async function listCommitments(
 ): Promise<CommitmentPage> {
   const now = new Date((deps.now ?? nowIso)());
   const size = Math.min(input.limit ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
-  // One row beyond the page tells us whether a next page exists without a count.
-  const rows = await deps.commitments.list({
-    limit: size + 1,
+  const filter: CommitmentCountQuery = {
     ...(input.direction === undefined ? {} : { direction: input.direction }),
     ...(input.status === undefined ? {} : { status: input.status }),
-    ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
-  });
+  };
+  // One row beyond the page tells us whether a next page exists; the count
+  // runs beside it over the same filters, without the cursor.
+  const [rows, total] = await Promise.all([
+    deps.commitments.list({
+      ...filter,
+      limit: size + 1,
+      ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+    }),
+    deps.commitments.count(filter),
+  ]);
   const page = rows.slice(0, size);
   const nextCursor = rows.length > size ? (page.at(-1)?.id ?? null) : null;
-  return { items: await render(deps, page, now), nextCursor };
+  return { items: await render(deps, page, now), nextCursor, total };
+}
+
+/** Open and overdue counts for both tabs, for the page header and the tab labels. */
+export async function commitmentSummary(deps: CommitmentDeps): Promise<CommitmentSummary> {
+  return deps.commitments.summary(new Date((deps.now ?? nowIso)()));
 }
 
 export async function getCommitment(

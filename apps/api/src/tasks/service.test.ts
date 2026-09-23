@@ -44,4 +44,30 @@ describe('listTasks', () => {
     expect(page.items).toHaveLength(1);
     expect(page.nextCursor).toBe(SECOND_ID);
   });
+
+  it('counts every task the filters match, ignoring the cursor and the page size', async () => {
+    harness.tasks.rows = [
+      fakeNotionTaskObservation(),
+      fakeNotionTaskObservation({
+        id: SECOND_ID,
+        sourceRecordId: 'page-2',
+        payload: { kind: 'task', id: 'page-2', title: 'Book the review', status: 'Not Started' },
+      }),
+      fakeNotionTaskObservation({
+        id: '01K5S9V6QW3SWCCPVB0N0E303C',
+        sourceRecordId: 'page-3',
+        payload: { kind: 'task', id: 'page-3', title: 'Send the invoice', status: 'Done' },
+      }),
+    ];
+
+    const page = await listTasks(harness.deps, {
+      status: 'open',
+      limit: 1,
+      cursor: '01K5S9V6QW3SWCCPVB0N0E303Z',
+    });
+
+    expect(page.items).toHaveLength(1);
+    expect(page.total).toBe(2);
+    expect(harness.tasks.counts).toEqual([{ status: 'open' }]);
+  });
 });

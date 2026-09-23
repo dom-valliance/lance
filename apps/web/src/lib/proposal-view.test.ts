@@ -391,15 +391,18 @@ describe('queueSummary', () => {
   const now = new Date('2026-09-21T13:00:00.000Z');
 
   it('counts the queue and dates the oldest expiry', () => {
-    expect(
-      queueSummary(
-        [{ expiresAt: '2026-09-21T18:00:00.000Z' }, { expiresAt: '2026-09-21T16:00:00.000Z' }],
-        now,
-      ),
-    ).toBe('2 pending. The oldest expires in 3 h.');
+    expect(queueSummary(2, '2026-09-21T16:00:00.000Z', now)).toBe(
+      '2 pending. The oldest expires in 3 h.',
+    );
+  });
+
+  it('separates thousands in a long queue', () => {
+    expect(queueSummary(1204, '2026-09-21T16:00:00.000Z', now)).toBe(
+      '1,204 pending. The oldest expires in 3 h.',
+    );
   });
 
   it('says nothing is pending for an empty queue', () => {
-    expect(queueSummary([], now)).toBe('Nothing pending.');
+    expect(queueSummary(0, null, now)).toBe('Nothing pending.');
   });
 });

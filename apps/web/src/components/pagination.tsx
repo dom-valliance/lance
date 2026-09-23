@@ -10,7 +10,7 @@ import type { PageLinks } from '@/lib/pagination';
  */
 
 export interface PaginationProps extends PageLinks {
-  /** The sentence on the left: "25 shown", with the filters where a page names them. */
+  /** The sentence on the left: "Showing 1 to 50 of 109", with the filters where a page names them. */
   summary: string;
   /** What the link to the next page says. The lists read newest first, so most say "Show older". */
   nextLabel?: string;

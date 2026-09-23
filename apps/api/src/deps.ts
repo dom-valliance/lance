@@ -5,9 +5,12 @@ import type {
   DecisionResult,
   CostCeiling,
   InterruptionBudget,
+  LedgerCountQuery,
   LedgerEventRow,
   LedgerQuery,
   PauseResult,
+  PendingProposalSummary,
+  ProposalCountFilter,
   ProposalFilter,
   ResumeResult,
 } from '@lance/ledger';
@@ -51,12 +54,20 @@ export interface SystemControlLike {
 
 export interface LedgerReaderLike {
   query(filter?: LedgerQuery): Promise<LedgerEventRow[]>;
+  /** Every event `query` would match with no row limit. */
+  count(filter?: LedgerCountQuery): Promise<number>;
+  /** One event by id, or null; resolves a page cursor. */
+  get(id: string): Promise<LedgerEventRow | null>;
   byCorrelation(correlationId: string): Promise<LedgerEventRow[]>;
 }
 
 /** The read side of `proposals`, over the database or over a fake. */
 export interface ProposalStoreLike {
   list(filter?: ProposalFilter): Promise<Proposal[]>;
+  /** Every proposal `list` would return across all its pages. */
+  count(filter?: ProposalCountFilter): Promise<number>;
+  /** The pending count and the earliest expiry among them, for the page header. */
+  summary(): Promise<PendingProposalSummary>;
   get(id: string): Promise<Proposal | null>;
 }
 
