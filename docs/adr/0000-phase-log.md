@@ -31,7 +31,7 @@ Branch `feat/phase-1-connectors`. Built 2026-09-21: connector framework, Graph a
 | Zero duplicate observations across a full re-poll | `apps/worker/src/watchers/runner.test.ts`: a second poll over the same records inserts nothing; the Graph watcher integration test repeats it with delta fixtures. Production re-poll evidence pending the first live week. | 2026-09-21 (test), live pending |
 | Every proposal in Slack resolves to a ledger trail in the UI Ledger page | The Ledger page follows a correlation id end to end; pending a live proposal. | pending |
 | Dom has approved at least 20 proposals live | Pending five dry-run working days then live use. | pending |
-| Inbox agent's Slack posting retired in favour of Lance | Pending, end of Phase 1 (`docs/runbooks/slack-app-setup.md` section 7). | pending |
+| Inbox agent's Slack posting retired in favour of Lance | Dom changed his Cowork inbox task on 2026-09-23 so it keeps tagging mail and no longer posts to `dom-claude-agent`; its last watermark there reads 2026-09-23T14:01:29Z. The stale watermark alert that then fired is off by default from `1f3e2e4` (`INBOX_AGENT_WATERMARK_ALERT`). | 2026-09-23 |
 
 ### Phase 1 review, 2026-09-21
 
