@@ -23,6 +23,12 @@ export interface ShellData {
    * without a session.
    */
   signedIn: boolean;
+  /**
+   * True for a principal whose onboarding has not opened: like the
+   * sign-in page, the placeholder renders alone, and nothing is read from
+   * the api, which would refuse it.
+   */
+  onboarding: boolean;
   counts: NavCounts;
   statusLine: ShellStatusLine | null;
   paused: PausedState | null;
@@ -30,6 +36,7 @@ export interface ShellData {
 
 const EMPTY: ShellData = {
   signedIn: false,
+  onboarding: false,
   counts: { pendingProposals: null, openAlerts: null },
   statusLine: null,
   paused: null,
@@ -38,6 +45,8 @@ const EMPTY: ShellData = {
 export async function loadShellData(): Promise<ShellData> {
   const session = await auth();
   if (session === null) return EMPTY;
+  if (session.principalStatus === 'onboarding')
+    return { ...EMPTY, signedIn: true, onboarding: true };
 
   let client: Awaited<ReturnType<typeof apiClient>>;
   try {
@@ -56,6 +65,7 @@ export async function loadShellData(): Promise<ShellData> {
 
   return {
     signedIn: true,
+    onboarding: false,
     counts: { pendingProposals: pending === null ? null : pending.pending, openAlerts: null },
     statusLine: status === null ? null : shellStatusLine(status),
     paused:

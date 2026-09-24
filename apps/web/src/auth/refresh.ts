@@ -26,19 +26,24 @@ export interface RefreshInput {
   scope: string;
 }
 
-/** The `exp` claim of a JWT, or null when the token cannot be read. Nothing is verified here; the api does that. */
-export function jwtExpiresAt(token: string): number | null {
+/** The claims of a JWT, or null when the token cannot be read. Nothing is verified here; the api does that. */
+export function jwtClaims(token: string): Record<string, unknown> | null {
   const payload = token.split('.')[1];
   if (payload === undefined) return null;
   try {
     const json = Buffer.from(payload, 'base64url').toString('utf8');
     const claims: unknown = JSON.parse(json);
-    if (typeof claims !== 'object' || claims === null) return null;
-    const exp = (claims as { exp?: unknown }).exp;
-    return typeof exp === 'number' && Number.isFinite(exp) ? exp : null;
+    if (typeof claims !== 'object' || claims === null || Array.isArray(claims)) return null;
+    return claims as Record<string, unknown>;
   } catch {
     return null;
   }
+}
+
+/** The `exp` claim of a JWT, or null when the token cannot be read. */
+export function jwtExpiresAt(token: string): number | null {
+  const exp = jwtClaims(token)?.['exp'];
+  return typeof exp === 'number' && Number.isFinite(exp) ? exp : null;
 }
 
 /** True when the token has lapsed or will within the margin. An unknown expiry counts as lapsed. */

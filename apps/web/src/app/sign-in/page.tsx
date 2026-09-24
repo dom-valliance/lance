@@ -48,9 +48,10 @@ export default async function SignInPage({
     return (
       <div className={CARD}>
         <Wordmark name={agentDisplayName()} className="h-6" />
-        <h1 className="text-xl font-semibold">This account is not allowed</h1>
+        <h1 className="text-xl font-semibold">This account has no Lance access</h1>
         <p role="alert" className="text-[13px] text-sem-red-fg">
-          Lance is Dom's personal agent and accepts one account only. Nothing was recorded.
+          Access comes from the Lance Users group in Entra. Ask a Lance admin to add you, then sign
+          in again. Nothing was recorded.
         </p>
         <form action={signOutAndRetry}>
           <SubmitButton variant="outline" size="lg" className="w-full" pendingLabel="Signing out">
@@ -75,7 +76,7 @@ export default async function SignInPage({
         </p>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Lance is a personal tool with one allowed account. You will be sent to Microsoft and back.
+          Lance is open to members of the Lance Users group. You will be sent to Microsoft and back.
         </p>
       )}
       <form action={continueWithMicrosoft}>

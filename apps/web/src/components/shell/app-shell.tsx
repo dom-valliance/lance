@@ -7,9 +7,9 @@ import type { ShellData } from '@/lib/shell-data';
 /**
  * Sidebar at 1024 and up, top bar and drawer beneath; the paused banner
  * above every page while the kill switch is on; 32px of padding around
- * the page at desktop, 16px on a phone. Signed out, none of that has a
- * reading, so the shell steps back to a centred canvas for the sign-in
- * card (design 7.12).
+ * the page at desktop, 16px on a phone. Signed out, or signed in before
+ * onboarding has opened, none of that has a reading, so the shell steps
+ * back to a centred canvas for the sign-in or onboarding card (design 7.12).
  */
 export function AppShell({
   agentName,
@@ -20,7 +20,7 @@ export function AppShell({
   data: ShellData;
   children: ReactNode;
 }) {
-  if (!data.signedIn) {
+  if (!data.signedIn || data.onboarding) {
     return <main className="grid min-h-screen place-items-center p-4">{children}</main>;
   }
 

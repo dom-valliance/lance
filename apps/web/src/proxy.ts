@@ -4,8 +4,10 @@
 // doubles as the proxy function: on its own it redirects any request
 // without a valid session to the sign-in page, which is exactly the "every
 // route except the three below" guard this work package asks for. The
-// allowlist itself is enforced earlier, in the signIn callback in auth.ts:
-// a disallowed UPN never receives a session, so it never gets past here.
+// role check is enforced earlier, in the signIn callback in auth.ts: a
+// token without a Lance app role never receives a session, so it never
+// gets past here. The `authorized` callback also sends an onboarding
+// principal to /onboarding.
 export { auth as proxy } from '@/auth';
 
 export const config = {
