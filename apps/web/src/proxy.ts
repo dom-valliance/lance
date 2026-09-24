@@ -13,7 +13,9 @@ export { auth as proxy } from '@/auth';
 export const config = {
   // Everything runs through the guard except the Auth.js API routes
   // (needed to sign in and out in the first place), the sign-in page the
-  // guard redirects to, the self-hosted font files, and Next's own
+  // guard redirects to, the Slack link page (which signs a visitor in
+  // itself and returns them to the same link, and which an onboarding
+  // principal must reach), the self-hosted font files, and Next's own
   // internal asset paths.
-  matcher: ['/((?!api/auth|sign-in|fonts/|_next/).*)'],
+  matcher: ['/((?!api/auth|sign-in|link/slack|fonts/|_next/).*)'],
 };
