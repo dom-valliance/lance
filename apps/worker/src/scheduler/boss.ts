@@ -43,6 +43,12 @@ export interface WorkQueueOptions {
    * at most one every two seconds per worker.
    */
   pollingIntervalSeconds?: number;
+  /**
+   * How many jobs of one group (a principal, `principalJobOptions`) this
+   * process runs at once. Tracked in memory by pg-boss, so it holds within
+   * one worker process; jobs sent without a group are not limited.
+   */
+  localGroupConcurrency?: number;
 }
 
 export function work<T>(

@@ -50,7 +50,12 @@ import {
   SYSTEM_JOBS,
   type JobDeclaration,
 } from './registry.js';
-import { PrincipalPayloadSchema, workForPrincipal, type PrincipalContexts } from './scoped.js';
+import {
+  PrincipalPayloadSchema,
+  principalJobOptions,
+  workForPrincipal,
+  type PrincipalContexts,
+} from './scoped.js';
 
 /**
  * Every queue the worker consumes, each handler taking its collaborators
@@ -391,7 +396,10 @@ async function registerOnDemand(deps: HandlerDeps): Promise<void> {
       if (!(await context.gate.check()).runnable) {
         // Paused: the job is put back for later rather than dropped, so a
         // pause during a busy tick loses no triage (non-negotiable 6).
-        await boss.send(QUEUES.triage, data, { startAfter: RETRY_WHILE_PAUSED_S });
+        await boss.send(QUEUES.triage, data, {
+          startAfter: RETRY_WHILE_PAUSED_S,
+          ...principalJobOptions(data.principalId),
+        });
         return;
       }
       if (context.triage === null) return;
@@ -399,6 +407,7 @@ async function registerOnDemand(deps: HandlerDeps): Promise<void> {
       void principalId;
       await runTriage(context.triage, job);
     },
+    modelQueueOptions(deps.config),
   );
   await workForPrincipal(
     boss,
@@ -431,10 +440,34 @@ async function registerOnDemand(deps: HandlerDeps): Promise<void> {
  */
 export const PRINCIPAL_QUEUE_POLL_SECONDS = 0.5;
 
-/** The pg-boss worker options for one per-principal scheduled job. */
-export function principalQueueOptions(job: Pick<JobDeclaration, 'concurrency'>): WorkQueueOptions {
+/**
+ * The pg-boss worker options for a queue whose jobs wait on the model
+ * (load-test option A, ADR 0034): `config.modelQueues.concurrency` jobs at
+ * once, so the model limiter's slots are used, and never two of one
+ * principal's, so two polls of one mailbox never label the same messages
+ * and one principal's backlog cannot hold every worker.
+ */
+export function modelQueueOptions(config: Pick<Config, 'modelQueues'>): WorkQueueOptions {
+  return {
+    localConcurrency: config.modelQueues.concurrency,
+    localGroupConcurrency: 1,
+    pollingIntervalSeconds: PRINCIPAL_QUEUE_POLL_SECONDS,
+  };
+}
+
+/**
+ * The pg-boss worker options for one per-principal scheduled job. Every
+ * such queue runs at most one job per principal at a time (its group, see
+ * `principalJobOptions`), whatever its concurrency.
+ */
+export function principalQueueOptions(
+  job: Pick<JobDeclaration, 'concurrency' | 'modelBound'>,
+  config: Pick<Config, 'modelQueues'>,
+): WorkQueueOptions {
+  if (job.modelBound) return modelQueueOptions(config);
   return {
     localConcurrency: job.concurrency,
+    localGroupConcurrency: 1,
     pollingIntervalSeconds: PRINCIPAL_QUEUE_POLL_SECONDS,
   };
 }
@@ -471,7 +504,7 @@ export async function registerJobHandlers(deps: HandlerDeps): Promise<void> {
         PrincipalPayloadSchema,
         deps.contexts,
         (context) => handler(context),
-        principalQueueOptions(job),
+        principalQueueOptions(job, deps.config),
       );
     } else {
       const handler = organisation.get(job.slug);

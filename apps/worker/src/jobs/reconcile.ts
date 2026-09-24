@@ -10,6 +10,7 @@ import {
   SYSTEM_JOBS,
   type JobDeclaration,
 } from './registry.js';
+import { principalJobOptions } from './scoped.js';
 
 /**
  * The reconciler (ADR 0025): turns the registry's declarations and each
@@ -34,6 +35,8 @@ export interface DesiredSchedule {
   cron: string;
   timeZone: string;
   data: Record<string, string>;
+  /** The principal a per-principal job's runs are grouped by (`principalJobOptions`); null for an organisation job. */
+  group: string | null;
 }
 
 export interface ReconcileResult {
@@ -69,6 +72,7 @@ export async function scheduleDeclared(boss: PgBoss, desired: DesiredSchedule): 
   await boss.schedule(desired.queue, desired.cron, desired.data, {
     tz: desired.timeZone,
     key: desired.key,
+    ...(desired.group === null ? {} : principalJobOptions(desired.group)),
   });
 }
 
@@ -105,6 +109,7 @@ function desiredForPrincipal(
         cron,
         timeZone: principal.timeZone,
         data: { principalId: principal.id },
+        group: principal.id,
       });
     });
   }
@@ -124,6 +129,7 @@ function desiredForInactive(principal: { id: string; timeZone: string }): Desire
       cron,
       timeZone: principal.timeZone,
       data: { principalId: principal.id },
+      group: principal.id,
     })),
   );
 }
@@ -136,6 +142,7 @@ function desiredForOrganisation(timeZone: string): DesiredSchedule[] {
       cron,
       timeZone,
       data: {},
+      group: null,
     })),
   );
 }
@@ -202,7 +209,8 @@ export async function reconcileOnce(deps: ReconcileDeps): Promise<ReconcileResul
       present !== undefined &&
       present.cron === schedule.cron &&
       present.timezone === schedule.timeZone &&
-      sameData(present.data, schedule.data)
+      sameData(present.data, schedule.data) &&
+      (present.options?.group?.id ?? null) === schedule.group
     ) {
       unchanged += 1;
       continue;

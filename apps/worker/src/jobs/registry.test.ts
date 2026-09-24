@@ -97,6 +97,12 @@ describe('the job registry', () => {
     );
   });
 
+  it('marks only the mail watcher as waiting on the model; triage is on demand', () => {
+    expect(SYSTEM_JOBS.filter((declared) => declared.modelBound).map((d) => d.slug)).toEqual([
+      'watcher-graph-mail',
+    ]);
+  });
+
   it('runs the role check nightly at 02:30', () => {
     expect(job('role-check').schedules).toEqual(['30 2 * * *']);
   });
@@ -169,6 +175,7 @@ describe('scheduling only what the registry declares (ADR 0025)', () => {
         cron: '* * * * *',
         timeZone: ZONE,
         data: {},
+        group: null,
       }),
     ).rejects.toThrow(/does not declare it/);
     expect(calls).toEqual([]);

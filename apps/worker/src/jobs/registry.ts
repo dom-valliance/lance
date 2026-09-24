@@ -74,6 +74,12 @@ export interface JobDeclaration {
    * test found serialised behind a fan-out (docs/runbooks/load-test.md).
    */
   readonly concurrency: number;
+  /**
+   * A queue whose jobs wait on the model (load-test option A, ADR 0034):
+   * it runs `config.modelQueues.concurrency` jobs at once instead of
+   * `concurrency`, never two for one principal.
+   */
+  readonly modelBound: boolean;
 }
 
 /** Runs the reconciler on a timer, so a principal whose status changes gains or loses schedules within a minute. */
@@ -99,7 +105,7 @@ const LOCKED_DETECTORS = new Set(['budget_guard']);
 
 const DAILY = 24 * 60;
 
-type Defaulted = 'bounds' | 'locked' | 'scope' | 'everyStatus' | 'concurrency';
+type Defaulted = 'bounds' | 'locked' | 'scope' | 'everyStatus' | 'concurrency' | 'modelBound';
 
 const declare = (
   declaration: Omit<JobDeclaration, Defaulted> & Partial<Pick<JobDeclaration, Defaulted>>,
@@ -109,6 +115,7 @@ const declare = (
   scope: 'principal',
   everyStatus: false,
   concurrency: 1,
+  modelBound: false,
   ...declaration,
 });
 
@@ -120,8 +127,12 @@ const declare = (
  */
 export const MORNING_BRIEF_CONCURRENCY = 8;
 
-const watcherJob = (name: string, schedules: readonly string[], title: string): JobDeclaration =>
-  declare({ slug: watcherQueue({ name }), title, schedules });
+const watcherJob = (
+  name: string,
+  schedules: readonly string[],
+  title: string,
+  modelBound = false,
+): JobDeclaration => declare({ slug: watcherQueue({ name }), title, schedules, modelBound });
 
 export const SYSTEM_JOBS: readonly JobDeclaration[] = [
   declare({
@@ -215,7 +226,8 @@ export const SYSTEM_JOBS: readonly JobDeclaration[] = [
       locked: LOCKED_DETECTORS.has(detector.name),
     }),
   ),
-  watcherJob(GRAPH_MAIL_WATCHER_NAME, GRAPH_MAIL_SCHEDULES, 'Watch mail'),
+  // The mail watcher labels each message with a model call, one after another.
+  watcherJob(GRAPH_MAIL_WATCHER_NAME, GRAPH_MAIL_SCHEDULES, 'Watch mail', true),
   watcherJob(GRAPH_CALENDAR_WATCHER_NAME, GRAPH_CALENDAR_SCHEDULES, 'Watch the calendar'),
   watcherJob(JAMIE_WATCHER_NAME, JAMIE_SCHEDULES, 'Watch Jamie meetings and tasks'),
   watcherJob(AGENT_LOGS_WATCHER_NAME, AGENT_LOGS_SCHEDULES, 'Watch agent logs'),

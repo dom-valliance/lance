@@ -1,14 +1,20 @@
+import { loadConfig } from '@lance/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PrincipalContext } from './context.js';
 import { connectorOfWatcher, type NotConnected } from './connectors.js';
 import {
   PRINCIPAL_QUEUE_POLL_SECONDS,
+  modelQueueOptions,
   principalQueueOptions,
   recordSkippedWatcherRun,
 } from './handlers.js';
-import { declarationFor } from './registry.js';
+import { SYSTEM_JOBS, declarationFor } from './registry.js';
 
 const PRINCIPAL_ID = '01K5S9V6QW3SWCCPVB0N0E3C01';
+const config = loadConfig({
+  NODE_ENV: 'test',
+  DATABASE_URL: 'postgres://postgres:postgres@localhost:5432/lance',
+});
 
 const contextWith = (notConnected: NotConnected[]): PrincipalContext =>
   ({
@@ -87,7 +93,7 @@ describe('recordSkippedWatcherRun', () => {
 
 describe('principalQueueOptions', () => {
   it("fetches a per-principal queue every half second, at pg-boss's floor", () => {
-    const options = principalQueueOptions({ concurrency: 1 });
+    const options = principalQueueOptions({ concurrency: 1, modelBound: false }, config);
     expect(options.pollingIntervalSeconds).toBe(PRINCIPAL_QUEUE_POLL_SECONDS);
     expect(PRINCIPAL_QUEUE_POLL_SECONDS).toBe(0.5);
   });
@@ -96,7 +102,26 @@ describe('principalQueueOptions', () => {
     const morning = declarationFor('brief-morning');
     const delivery = declarationFor('alerts-deliver');
     if (morning === undefined || delivery === undefined) throw new Error('not declared');
-    expect(principalQueueOptions(morning).localConcurrency).toBe(morning.concurrency);
-    expect(principalQueueOptions(delivery).localConcurrency).toBe(1);
+    expect(principalQueueOptions(morning, config).localConcurrency).toBe(morning.concurrency);
+    expect(principalQueueOptions(delivery, config).localConcurrency).toBe(1);
+  });
+
+  it('runs one job per principal at a time on every per-principal queue', () => {
+    for (const job of SYSTEM_JOBS.filter((declared) => declared.scope === 'principal')) {
+      expect({
+        slug: job.slug,
+        perPrincipal: principalQueueOptions(job, config).localGroupConcurrency,
+      }).toEqual({ slug: job.slug, perPrincipal: 1 });
+    }
+  });
+
+  it('runs the mail watcher at the configured model queue team size', () => {
+    const mail = declarationFor('watcher-graph-mail');
+    if (mail === undefined) throw new Error('not declared');
+    expect(principalQueueOptions(mail, config)).toEqual(modelQueueOptions(config));
+    expect(modelQueueOptions(config)).toMatchObject({
+      localConcurrency: config.modelQueues.concurrency,
+      localGroupConcurrency: 1,
+    });
   });
 });

@@ -212,6 +212,16 @@ describe('the reconciler at boot', () => {
     }
   });
 
+  it("puts every per-principal schedule's jobs in that principal's group", async () => {
+    for (const schedule of await boss.getSchedules()) {
+      const principalId = (schedule.data as { principalId?: string } | undefined)?.principalId;
+      expect({ key: schedule.key, group: schedule.options?.group?.id ?? null }).toEqual({
+        key: schedule.key,
+        group: principalId ?? null,
+      });
+    }
+  });
+
   it('removes the unkeyed schedules the single-principal worker wrote, so nothing runs twice', async () => {
     const keys = await scheduleKeys();
     expect(keys.has('brief-morning|brief-morning')).toBe(false);

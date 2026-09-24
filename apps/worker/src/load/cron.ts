@@ -49,6 +49,8 @@ export interface ScheduleRow {
   cron: string;
   timezone: string | null;
   data?: object | null;
+  /** The send options pg-boss stored with the schedule; the group is what the harness forwards. */
+  options?: { group?: { id: string; tier?: string } } | null;
 }
 
 export interface DueJob {

@@ -46,6 +46,7 @@ import {
 import { watcherQueue, type TriageJob, type WatcherRunnerDeps } from '../watchers/runner.js';
 import type { Watcher } from '../watchers/types.js';
 import type { ConnectorBundle, ConnectorLookup, GraphBundle } from './connectors.js';
+import { threadJobOptions } from './scoped.js';
 
 /**
  * Everything one principal's jobs run with (ADR 0025): a handle scoped to
@@ -70,7 +71,12 @@ export interface SharedDeps {
   send: (
     queue: string,
     data: object,
-    options?: { startAfter?: number; singletonKey?: string; singletonSeconds?: number },
+    options?: {
+      startAfter?: number;
+      singletonKey?: string;
+      singletonSeconds?: number;
+      group?: { id: string };
+    },
   ) => Promise<void>;
   /** Where the Alerts page lives, for the overflow post. */
   webUrl: string | null;
@@ -453,7 +459,7 @@ export async function buildPrincipalContext(
         shared.send(
           QUEUES.triage,
           { ...job, principalId: principal.id },
-          { singletonKey: `${principal.id}/${job.correlationId}`, singletonSeconds: 60 },
+          threadJobOptions(principal.id, job.correlationId),
         ),
     },
     triage:

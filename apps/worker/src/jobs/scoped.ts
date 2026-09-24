@@ -14,6 +14,32 @@ import { work, type WorkQueueOptions } from '../scheduler/boss.js';
 /** The part of every per-principal payload the wrapper reads. */
 export const PrincipalPayloadSchema = z.object({ principalId: UlidSchema }).passthrough();
 
+/**
+ * The pg-boss options every per-principal job is sent or scheduled with:
+ * the principal is the job's group, so a worker registered with
+ * `localGroupConcurrency: 1` never runs two of one principal's jobs on a
+ * queue at once, however many it runs for different principals.
+ */
+export function principalJobOptions(principalId: string): { group: { id: string } } {
+  return { group: { id: principalId } };
+}
+
+/**
+ * How the watcher runner's triage and bulk-mail sends are made: in the
+ * principal's group, and once per thread within a minute, so a burst of
+ * messages on one thread is handled once.
+ */
+export function threadJobOptions(
+  principalId: string,
+  correlationId: string,
+): { group: { id: string }; singletonKey: string; singletonSeconds: number } {
+  return {
+    singletonKey: `${principalId}/${correlationId}`,
+    singletonSeconds: 60,
+    ...principalJobOptions(principalId),
+  };
+}
+
 /** A job whose payload names no principal, or one that is not in `principals`: a bug upstream, so it fails loudly. */
 export class JobScopeError extends Error {
   override readonly name = 'JobScopeError';

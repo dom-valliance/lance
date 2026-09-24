@@ -25,6 +25,7 @@ import { eq } from 'drizzle-orm';
 import { PgBoss } from 'pg-boss';
 import { graphExecutionWriters, notionExecutionWriters } from '../executor/writers.js';
 import { bootWorker, type BootedWorker } from '../jobs/boot.js';
+import { principalJobOptions } from '../jobs/scoped.js';
 import type { ConnectorBundle, ConnectorLookup } from '../jobs/connectors.js';
 import { ensureSeedRules } from '../policy/rules.js';
 import { BOSS_SCHEMA } from '../scheduler/boss.js';
@@ -467,7 +468,10 @@ async function runWindow(
     }
     const fired = new Set<string>();
     for (const due of dueBetween(schedules, last, now)) {
-      await boss.send(due.schedule.name, due.schedule.data ?? {}, {});
+      // The schedule's group, as pg-boss's own cron would send it, so a
+      // principal's jobs on a queue never overlap here either.
+      const group = due.schedule.options?.group;
+      await boss.send(due.schedule.name, due.schedule.data ?? {}, group ? { group } : {});
       const principalId = (due.schedule.data as { principalId?: string } | null)?.principalId;
       fired.add(`${due.schedule.name}|${principalId ?? ''}`);
       sent += 1;
@@ -482,7 +486,11 @@ async function runWindow(
           for (const name of ALIGNED_WATCHERS) {
             const queue = watcherQueue({ name });
             if (fired.has(`${queue}|${principal.id}`)) continue;
-            await boss.send(queue, { principalId: principal.id }, {});
+            await boss.send(
+              queue,
+              { principalId: principal.id },
+              principalJobOptions(principal.id),
+            );
             sent += 1;
           }
         }
@@ -893,7 +901,11 @@ async function main(): Promise<void> {
   limiter.bypass = true;
   for (const principal of list) {
     for (const name of WARM_WATCHERS) {
-      await boss.send(watcherQueue({ name }), { principalId: principal.id }, {});
+      await boss.send(
+        watcherQueue({ name }),
+        { principalId: principal.id },
+        principalJobOptions(principal.id),
+      );
     }
   }
   await waitForIdle(db, 20 * 60_000, 'warm-up');
