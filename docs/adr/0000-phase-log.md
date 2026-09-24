@@ -201,6 +201,18 @@ Decisions taken while building, recorded in ADR 0015: the scope is set on each c
 
 ## Phase 5. Multi-user
 
+Opened 2026-09-24 on branch `feat/phase-5-multi-user`. ADRs 0020 to 0025 and 0033 written first. Packages built by Opus agents in worktrees under `../lance-worktrees/`, each rebased onto the phase branch and verified again there.
+
+| Package | Commits | Migration |
+|---|---|---|
+| 5.0 Shared layer carries no private provenance (ADR 0033) | `bf3d61c`, `396d440` | 0011 |
+| 5.1 Identity and roles (ADR 0020, 0024) | `b2163db` to `2a0d2e7` | 0012 |
+| 5.3 Scheduler, job registry, fan-out, budgets, fair share (ADR 0025) | to `a38a79e` | 0013 |
+| 5.4 Slack linking, private channels, nonce store (ADR 0021, 0023) | to `cf200c0` | 0014 |
+| 5.2 Credentials per principal, second vault, rotation lock (ADR 0022) | to `106b2ae` | 0015 |
+
+Found while merging: the executor set a proposal to held and recorded the hold as two statements, so a resume between them left the proposal held while running (the kill switch drill had flaked on it). The hold and its event now commit together under a per-principal lock that pause and resume take (`14dd959`); a race test in the ledger suite fails on every run with the lock removed. The readiness probe now names what it reports, `pausedGlobally` and `modeCeiling`. Test budgets were raised for full local runs, where fast suites timed out waiting their turn; three uncached root runs then passed in a row.
+
 | Criterion | Evidence | Date |
 |---|---|---|
 
