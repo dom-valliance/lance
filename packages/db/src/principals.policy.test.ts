@@ -185,3 +185,60 @@ describe('principals writes as lance_app', () => {
     expect(code).toBe(PERMISSION_DENIED);
   });
 });
+
+describe('recording a Notion user id as lance_app (migration 0015, ADR 0022)', () => {
+  const notionOf = async (id: string): Promise<unknown> => {
+    const result = await fixture.$client.query(
+      'SELECT notion_user_id FROM principals WHERE id = $1',
+      [id],
+    );
+    return (result.rows[0] as { notion_user_id: unknown } | undefined)?.notion_user_id;
+  };
+
+  it('lets a principal record their own Notion user id when it is missing', async () => {
+    const own = scopedDb(app, { principalId: BOUND_ID });
+    const result = await own.$client.query(
+      'UPDATE principals SET notion_user_id = $1, updated_at = now() WHERE id = $2 AND notion_user_id IS NULL',
+      ['notion-bound', BOUND_ID],
+    );
+    expect(result.rowCount).toBe(1);
+    expect(await notionOf(BOUND_ID)).toBe('notion-bound');
+  });
+
+  it("leaves another principal's row alone", async () => {
+    const result = await app.$client.query(
+      'UPDATE principals SET notion_user_id = $1 WHERE id = $2',
+      ['notion-stolen', BOUND_ID],
+    );
+    expect(result.rowCount).toBe(0);
+    expect(await notionOf(BOUND_ID)).toBeNull();
+  });
+
+  it('never overwrites a Notion user id that is already recorded', async () => {
+    const before = await notionOf(SEED_PRINCIPAL_ID);
+    expect(before).not.toBeNull();
+    // Dom's row is in the caller's own scope, so principals_self_update admits
+    // the row and the guard trigger is what refuses the change.
+    const code = await codeOf(() =>
+      app.$client.query('UPDATE principals SET notion_user_id = $1 WHERE id = $2', [
+        'notion-other',
+        SEED_PRINCIPAL_ID,
+      ]),
+    );
+    expect(code).toBe(RAISED);
+    expect(await notionOf(SEED_PRINCIPAL_ID)).toBe(before);
+  });
+
+  it('refuses to change the status in the same statement', async () => {
+    const own = scopedDb(app, { principalId: BOUND_ID });
+    const code = await codeOf(() =>
+      own.$client.query(
+        "UPDATE principals SET notion_user_id = 'notion-bound', status = 'paused' WHERE id = $1",
+        [BOUND_ID],
+      ),
+    );
+    expect(code).toBe(RAISED);
+    expect(await row(BOUND_ID)).toMatchObject({ status: 'active' });
+    expect(await notionOf(BOUND_ID)).toBeNull();
+  });
+});

@@ -13,3 +13,4 @@ export {
 export type { WaitOptions } from './principal.js';
 export { MIGRATIONS_FOLDER, runMigrations, runMigrationsWithRetry } from './migrate.js';
 export { SEED_PRINCIPAL_ID, seed } from './seed.js';
+export { credentialRotationLockKey, withAdvisoryLock } from './advisoryLock.js';
