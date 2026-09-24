@@ -47,9 +47,6 @@ param containerImageTag string = 'bootstrap'
 @description('When true the three apps and the migration job run the public quickstart image, so the environment can stand up before any image is pushed. Flip to false once the real images are in the registry.')
 param useBootstrapImage bool = true
 
-@description('The single UPN allowed to sign in to the web app in v1. Spec 4.1.')
-param allowedUpn string
-
 @description('The one Slack user id that may run /lance status, pause and resume. Not a secret.')
 param slackAllowedUserId string
 
@@ -158,7 +155,6 @@ module containerApps 'modules/containerapps.bicep' = {
     identities: identity.outputs.identities
     containerImageTag: containerImageTag
     useBootstrapImage: useBootstrapImage
-    allowedUpn: allowedUpn
     slackAllowedUserId: slackAllowedUserId
     graphWritesEnabled: graphWritesEnabled
     notionWritesEnabled: notionWritesEnabled

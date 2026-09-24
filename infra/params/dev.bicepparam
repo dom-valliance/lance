@@ -21,7 +21,6 @@ param useBootstrapImage = false
 // after pushing the images (docs/runbooks/deploy.md). Unset, the deployment refuses to start.
 param containerImageTag = readEnvironmentVariable('LANCE_IMAGE_TAG')
 
-param allowedUpn = 'dom@valliance.ai'
 // Dom's Slack user id in the Valliance workspace. Not a secret.
 param slackAllowedUserId = 'U0BN7JN7BAN'
 

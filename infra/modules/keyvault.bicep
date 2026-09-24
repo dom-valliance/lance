@@ -8,7 +8,7 @@
 //   entra-tenant-id          Directory (tenant) id            docs/runbooks/entra-setup.md
 //   entra-client-id          Application (client) id          docs/runbooks/entra-setup.md
 //   entra-client-secret      Entra app client secret          docs/runbooks/entra-setup.md
-//   allowed-upn              The single UPN allowed to sign in docs/runbooks/entra-setup.md
+//   allowed-upn              Retired by ADR 0020; kept, bound by no app
 //   auth-secret              openssl rand -base64 32, Auth.js   docs/runbooks/deploy.md
 //   graph-refresh-token      Written by api on first consent   docs/runbooks/entra-setup.md
 //   slack-bot-token          Slack bot OAuth token             docs/runbooks/slack-app-setup.md

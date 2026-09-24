@@ -36,9 +36,6 @@ param containerImageTag string
 @description('When true, run the public quickstart image with no registry credentials and no Key Vault references, so the environment stands up before any image exists.')
 param useBootstrapImage bool
 
-@description('The single UPN allowed to sign in. Not a secret; the same value is also held in Key Vault as allowed-upn for components that read it from there.')
-param allowedUpn string
-
 @description('The Slack user id allowed to work the kill switch from Slack. Not a secret.')
 param slackAllowedUserId string
 
@@ -75,10 +72,8 @@ var webSecretBindings = [
     secretName: 'entra-client-secret'
     envName: 'ENTRA_CLIENT_SECRET'
   }
-  {
-    secretName: 'allowed-upn'
-    envName: 'ALLOWED_UPN'
-  }
+  // allowed-upn is no longer bound: sign-in is decided by Entra app roles
+  // (ADR 0020). The secret stays in the vault; this template never deletes one.
 ]
 
 var apiSecretBindings = [
@@ -139,12 +134,9 @@ var workerSecretBindings = [
   // copy made Container Apps restart the worker at every half-hourly
   // secret sync that followed a rotation.
   {
+    // Also the role check's client credentials for Graph (ADR 0020).
     secretName: 'entra-client-secret'
     envName: 'ENTRA_CLIENT_SECRET'
-  }
-  {
-    secretName: 'allowed-upn'
-    envName: 'ALLOWED_UPN'
   }
 ]
 
@@ -304,10 +296,6 @@ resource containerApps 'Microsoft.App/containerApps@2025-01-01' = [
                 {
                   name: 'AGENT_DISPLAY_NAME'
                   value: 'Lance'
-                }
-                {
-                  name: 'ALLOWED_UPN'
-                  value: allowedUpn
                 }
                 {
                   name: 'SLACK_ALLOWED_USER_ID'

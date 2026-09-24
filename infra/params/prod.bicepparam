@@ -17,7 +17,6 @@ param postgresAdministratorPassword = readEnvironmentVariable('LANCE_PG_ADMIN_PA
 param useBootstrapImage = false
 param containerImageTag = readEnvironmentVariable('LANCE_IMAGE_TAG')
 
-param allowedUpn = 'dom@valliance.ai'
 // Dom's Slack user id in the Valliance workspace. Not a secret.
 param slackAllowedUserId = 'U0BN7JN7BAN'
 
