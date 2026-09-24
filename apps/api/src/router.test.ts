@@ -652,15 +652,17 @@ describe('the onboarding procedures', () => {
 describe('the admin router', () => {
   const adminPaths = procedurePaths.filter((path) => path.startsWith('admin.'));
 
-  it('covers the principals, health, rules, alerts, offboarding, evidence and the kill switch', () => {
+  it('covers the principals, health, rules, alerts, offboarding, evidence, the kill switch and the organisation ceiling', () => {
     expect(adminPaths.sort()).toEqual([
       'admin.evidence',
       'admin.health',
       'admin.offboard',
+      'admin.organisationCeiling',
       'admin.pauseAll',
       'admin.principals',
       'admin.resumeAll',
       'admin.ruleChanges',
+      'admin.setOrganisationCeiling',
       'admin.systemAlerts',
     ]);
   });
@@ -695,6 +697,24 @@ describe('the admin router', () => {
     await admin.admin.resumeAll();
     expect(harness.control.pauseAllCalls).toEqual([{ reason: 'drill', actor: 'user:dom' }]);
     expect(harness.control.resumeAllCalls).toEqual([{ actor: 'user:dom' }]);
+  });
+
+  it('lets a Lance.Admin read and set the organisation ceiling, and nobody else', async () => {
+    await expect(caller.admin.setOrganisationCeiling({ costCeilingGbp: 45 })).rejects.toMatchObject(
+      { code: 'FORBIDDEN' },
+    );
+    expect(harness.control.organisationCeilingCalls).toEqual([]);
+
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    await expect(admin.admin.organisationCeiling()).resolves.toEqual({ costCeilingGbp: 30 });
+    await admin.admin.setOrganisationCeiling({ costCeilingGbp: 45 });
+    expect(harness.control.organisationCeilingCalls).toEqual([
+      { costCeilingGbp: 45, actor: 'user:dom' },
+    ]);
+    await expect(admin.admin.organisationCeiling()).resolves.toEqual({ costCeilingGbp: 45 });
+    await expect(admin.admin.setOrganisationCeiling({ costCeilingGbp: 0 })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
   });
 
   it("reads system alerts in the admin's own scope", async () => {

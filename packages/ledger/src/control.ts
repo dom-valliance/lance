@@ -686,6 +686,46 @@ export class SystemControl {
   }
 
   /**
+   * Sets the organisation's daily model spend ceiling, the global row's
+   * `cost_ceiling_gbp` (multi-user plan M5): above it every principal's
+   * model-backed agents pause. Recorded like a principal's own ceiling. The
+   * api allows it to `Lance.Admin` only; `system_state` carries no principal,
+   * so the database cannot tell an admin apart (ADR 0015).
+   */
+  async setOrganisationCostCeiling(
+    ceiling: CostCeiling,
+    options: ActorOptions,
+  ): Promise<{ changed: boolean; eventId: string }> {
+    return this.db.transaction(async (tx) => {
+      const current = await this.readGlobal(tx);
+      const ts = nowIso();
+      const changed = current.costCeilingGbp !== ceiling.costCeilingGbp;
+      if (changed) {
+        await tx
+          .update(systemState)
+          .set({ costCeilingGbp: ceiling.costCeilingGbp, updatedAt: new Date(ts) })
+          .where(eq(systemState.id, SYSTEM_STATE_ID));
+      }
+      const event = await this.writer.append(
+        {
+          ts,
+          actor: options.actor,
+          kind: 'state_changed',
+          sourceSystem: 'lance',
+          correlationId: newUlid(),
+          payload: {
+            change: 'organisation_cost_ceiling',
+            costCeilingGbp: ceiling.costCeilingGbp,
+            previousCostCeilingGbp: current.costCeilingGbp,
+          },
+        },
+        tx,
+      );
+      return { changed, eventId: event.id };
+    });
+  }
+
+  /**
    * Every proposal held since the most recent resume, by a pause or by the
    * executor finding the system paused, with the status each had before.
    * Walks state_changed events newest first in pages until a resume is seen,

@@ -107,7 +107,7 @@ export async function runOrganisationBudgetGuard(
       ? [
           `Model-backed agents across every principal have spent ${gbp(check.spentGbp)} against the organisation's ${gbp(check.ceilingGbp)} ceiling and are paused for everyone until midnight.`,
           'Watchers continue, so nothing stops being observed.',
-          'Suggested action: raise the organisation ceiling (system_state.cost_ceiling_gbp until the admin page arrives in package 5.1), or leave it and the agents start again tomorrow.',
+          'Suggested action: raise the organisation ceiling on the Admin page, or leave it and the agents start again tomorrow.',
         ].join(' ')
       : [
           `Model-backed agents across every principal have spent ${gbp(check.spentGbp)} of the organisation's ${gbp(check.ceilingGbp)} ceiling today.`,

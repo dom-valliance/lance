@@ -53,6 +53,13 @@ export interface SystemControlLike {
   pauseAll(options: { reason: string; actor: string }): Promise<PauseResult>;
   /** Clears the global row; each principal's own pause, and their held proposals, stay. */
   resumeAll(options: { actor: string }): Promise<{ changed: boolean; eventId: string }>;
+  /** The global row's pause and organisation ceiling. */
+  readOrganisation(): Promise<{ paused: boolean; costCeilingGbp: number }>;
+  /** Sets the organisation's daily ceiling; the api allows it to admins only. */
+  setOrganisationCostCeiling(
+    ceiling: CostCeiling,
+    options: { actor: string },
+  ): Promise<{ changed: boolean; eventId: string }>;
   /** Switches between dry run and live (spec 6.3); records a state_changed event either way. */
   setMode(
     mode: SystemMode,

@@ -1,11 +1,14 @@
 import { EvidenceForm } from '@/app/admin/evidence-form';
 import { OffboardForm } from '@/app/admin/offboard-form';
 import type { EvidenceState } from '@/app/admin/actions';
-import type { FormAction } from '@/components/action-form';
+import { ActionForm, type FormAction } from '@/components/action-form';
 import { Table, TableCard, Td, Th, Tr } from '@/components/data-table';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
+import { SubmitButton } from '@/components/submit-button';
 import { Badge } from '@/components/ui/badge';
+import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import {
   PRINCIPAL_STATUS_LABELS,
   PRINCIPAL_STATUS_TONES,
@@ -80,6 +83,9 @@ export interface AdminViewProps {
   today: Date;
   offboardAction: FormAction;
   evidenceAction: (previous: EvidenceState, form: FormData) => Promise<EvidenceState>;
+  /** The daily spend ceiling across every principal, from the global row. */
+  organisationCeilingGbp: number;
+  organisationCeilingAction: FormAction;
 }
 
 const CARD = 'flex flex-col gap-4 rounded-xl bg-card p-6';
@@ -98,6 +104,8 @@ export function AdminView({
   today,
   offboardAction,
   evidenceAction,
+  organisationCeilingGbp,
+  organisationCeilingAction,
 }: AdminViewProps) {
   const healthOf = new Map(health.map((row) => [row.principalId, row]));
   // Every step is idempotent, so an offboarded principal stays listed: a
@@ -327,6 +335,32 @@ export function AdminView({
       </section>
 
       <div className="grid items-start gap-6 lg:grid-cols-2">
+        <section className={CARD}>
+          <h2 className="text-base font-semibold">Organisation spend ceiling</h2>
+          <ActionForm action={organisationCeilingAction} className="flex flex-col gap-4">
+            <Field label="Pounds per day, across every principal" className="w-56">
+              <Input
+                type="number"
+                name="costCeilingGbp"
+                min={0.01}
+                max={10000}
+                step={0.5}
+                defaultValue={organisationCeilingGbp}
+                required
+                className="tabular-nums"
+              />
+            </Field>
+            <p className="text-xs text-muted-foreground">
+              Each principal also has their own ceiling in Settings. When today&apos;s spend across
+              everyone reaches this figure, every principal&apos;s triage, planner, critic and chase
+              stop until midnight or until it is raised here. Watchers keep observing.
+            </p>
+            <SubmitButton pendingLabel="Saving" className="h-11 self-start lg:h-9">
+              Save
+            </SubmitButton>
+          </ActionForm>
+        </section>
+
         <section className={CARD}>
           <h2 className="text-base font-semibold">Evidence export</h2>
           <p className="text-sm text-muted-foreground">

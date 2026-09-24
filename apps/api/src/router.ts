@@ -422,6 +422,20 @@ export const appRouter = router({
     resumeAll: adminProcedure.mutation(({ ctx }) =>
       ctx.deps.control.resumeAll({ actor: ctx.deps.actor }),
     ),
+    /** The organisation's daily spend ceiling across every principal (M5). */
+    organisationCeiling: adminProcedure.query(({ ctx }) =>
+      ctx.deps.control.readOrganisation().then((state) => ({
+        costCeilingGbp: state.costCeilingGbp,
+      })),
+    ),
+    setOrganisationCeiling: adminProcedure
+      .input(z.object({ costCeilingGbp: z.number().positive().max(10_000) }))
+      .mutation(({ ctx, input }) =>
+        ctx.deps.control.setOrganisationCostCeiling(
+          { costCeilingGbp: input.costCeilingGbp },
+          { actor: ctx.deps.actor },
+        ),
+      ),
   }),
   systemState: router({
     get: procedure.query(({ ctx }) => ctx.deps.control.read()),

@@ -1,5 +1,5 @@
 import { auth } from '@/auth';
-import { evidenceAction, offboardAction } from '@/app/admin/actions';
+import { evidenceAction, offboardAction, organisationCeilingAction } from '@/app/admin/actions';
 import { AdminView } from '@/app/admin/admin-view';
 import { PageHeader } from '@/components/page-header';
 import { TextLink } from '@/components/text-link';
@@ -33,13 +33,15 @@ export default async function AdminPage() {
   if (!(session?.roles ?? []).includes('Lance.Admin')) return <Refusal />;
 
   const client = await apiClient();
-  const [principals, health, ruleChanges, systemAlerts, me] = await Promise.all([
-    client.admin.principals.query(),
-    client.admin.health.query(),
-    client.admin.ruleChanges.query(),
-    client.admin.systemAlerts.query(),
-    client.me.query(),
-  ]);
+  const [principals, health, ruleChanges, systemAlerts, organisationCeiling, me] =
+    await Promise.all([
+      client.admin.principals.query(),
+      client.admin.health.query(),
+      client.admin.ruleChanges.query(),
+      client.admin.systemAlerts.query(),
+      client.admin.organisationCeiling.query(),
+      client.me.query(),
+    ]);
 
   return (
     <AdminView
@@ -51,6 +53,8 @@ export default async function AdminPage() {
       today={new Date()}
       offboardAction={offboardAction}
       evidenceAction={evidenceAction}
+      organisationCeilingGbp={organisationCeiling.costCeilingGbp}
+      organisationCeilingAction={organisationCeilingAction}
     />
   );
 }

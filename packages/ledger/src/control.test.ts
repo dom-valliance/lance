@@ -592,3 +592,32 @@ describe("the executor's hold against a racing resume", () => {
     expect(await statusOf(id)).toBe('approved');
   });
 });
+
+describe('the organisation ceiling', () => {
+  it('sets the global row and records the change with the old value', async () => {
+    const before = await control.readOrganisation();
+    const result = await control.setOrganisationCostCeiling(
+      { costCeilingGbp: before.costCeilingGbp + 10 },
+      { actor: DOM },
+    );
+    expect(result.changed).toBe(true);
+    expect((await otherControl.readOrganisation()).costCeilingGbp).toBe(before.costCeilingGbp + 10);
+    const event = await eventById(result.eventId);
+    expect(event.payload).toMatchObject({
+      change: 'organisation_cost_ceiling',
+      costCeilingGbp: before.costCeilingGbp + 10,
+      previousCostCeilingGbp: before.costCeilingGbp,
+    });
+    await control.setOrganisationCostCeiling(
+      { costCeilingGbp: before.costCeilingGbp },
+      { actor: DOM },
+    );
+  });
+
+  it('defaults to 30 pounds on a fresh database', async () => {
+    const fresh = await superuser.query<{ column_default: string }>(
+      "SELECT column_default FROM information_schema.columns WHERE table_name = 'system_state' AND column_name = 'cost_ceiling_gbp'",
+    );
+    expect(fresh.rows[0]?.column_default).toBe('30');
+  });
+});

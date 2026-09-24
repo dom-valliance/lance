@@ -255,6 +255,30 @@ export class FakeSystemControl implements SystemControlLike {
     return Promise.resolve({ changed, eventId: '01K5S9V6QW3SWCCPVB0N0E30E7' });
   }
 
+  organisationCeilingGbp = 30;
+
+  readOrganisation(): Promise<{ paused: boolean; costCeilingGbp: number }> {
+    return Promise.resolve({
+      paused: this.state.pausedGlobally,
+      costCeilingGbp: this.organisationCeilingGbp,
+    });
+  }
+
+  readonly organisationCeilingCalls: { costCeilingGbp: number; actor: string }[] = [];
+
+  setOrganisationCostCeiling(
+    ceiling: CostCeiling,
+    options: { actor: string },
+  ): Promise<{ changed: boolean; eventId: string }> {
+    this.organisationCeilingCalls.push({
+      costCeilingGbp: ceiling.costCeilingGbp,
+      actor: options.actor,
+    });
+    const changed = this.organisationCeilingGbp !== ceiling.costCeilingGbp;
+    this.organisationCeilingGbp = ceiling.costCeilingGbp;
+    return Promise.resolve({ changed, eventId: '01K5S9V6QW3SWCCPVB0N0E30E8' });
+  }
+
   resume(options: { actor: string }): Promise<ResumeResult> {
     this.resumeCalls.push(options);
     const changed = this.state.paused;
