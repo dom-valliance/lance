@@ -8,9 +8,9 @@ Any one of:
 
 - Slack: `/lance pause <reason>`
 - Web: Settings, Kill switch, enter a reason, confirm.
-- API: `POST https://<api-hostname>/admin/pause` with an Entra bearer token for Dom's UPN and body `{"reason": "..."}`.
+- API: `POST https://<api-hostname>/admin/pause` with Dom's Entra id token (it must carry a Lance app role) as the bearer and body `{"reason": "..."}`.
 
-Each records a `state_changed` ledger event with actor and reason. Queued executions are marked `held`, not cancelled.
+Each pauses the principal who sends it (Dom, while he is the only active one) and records a `state_changed` ledger event with actor and reason. Queued executions are marked `held`, not cancelled.
 
 ## Confirm it took
 

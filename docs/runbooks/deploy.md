@@ -117,7 +117,7 @@ az role assignment delete --ids <assignment id from the list above>
 
 ## 4. Set the Key Vault secrets
 
-The template creates the vault and grants the four identities `Key Vault Secrets User`. It never creates a secret value. Set all twelve by hand. Take the values from `entra-setup.md`, `slack-app-setup.md` and `rotate-secrets.md`.
+The template creates the vault and grants the four identities `Key Vault Secrets User`. It never creates a secret value. Set these ten by hand; the api writes `graph-refresh-token` itself on the first consent. An environment deployed before ADR 0020 also holds `allowed-upn`; no app reads it any more, and it stays until someone deletes it deliberately. Take the values from `entra-setup.md`, `slack-app-setup.md` and `rotate-secrets.md`.
 
 ```
 KV=<key vault name from the outputs>
@@ -125,7 +125,6 @@ KV=<key vault name from the outputs>
 az keyvault secret set --vault-name $KV --name entra-tenant-id         --value '<directory tenant id>'
 az keyvault secret set --vault-name $KV --name entra-client-id         --value '<application client id>'
 az keyvault secret set --vault-name $KV --name entra-client-secret     --value '<client secret>'
-az keyvault secret set --vault-name $KV --name allowed-upn             --value 'dom@valliance.ai'
 az keyvault secret set --vault-name $KV --name auth-secret             --value "$(openssl rand -base64 32)"
 az keyvault secret set --vault-name $KV --name slack-bot-token         --value 'xoxb-...'
 az keyvault secret set --vault-name $KV --name slack-signing-secret    --value '<signing secret>'
