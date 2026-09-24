@@ -103,10 +103,18 @@ const insertEvent = async (fixture: Fixture): Promise<string> => {
 };
 
 const payloadOf = async (id: string): Promise<unknown> =>
-  (await superuser.query('SELECT payload FROM ledger_events WHERE id = $1', [id])).rows[0]?.payload;
+  (
+    await superuser.query<{ payload: unknown }>('SELECT payload FROM ledger_events WHERE id = $1', [
+      id,
+    ])
+  ).rows[0]?.payload;
 
 const observationPayloadOf = async (id: string): Promise<unknown> =>
-  (await superuser.query('SELECT payload FROM observations WHERE id = $1', [id])).rows[0]?.payload;
+  (
+    await superuser.query<{ payload: unknown }>('SELECT payload FROM observations WHERE id = $1', [
+      id,
+    ])
+  ).rows[0]?.payload;
 
 const mail = (ageDays: number, principal?: string): Fixture => ({
   kind: 'observed',
@@ -178,9 +186,10 @@ describe('applyRetention as the worker identity', () => {
     expect(await observationPayloadOf(old)).toBeNull();
     expect(await payloadOf(recent)).not.toBeNull();
     expect(await payloadOf(calendar)).not.toBeNull();
-    const hash = await superuser.query('SELECT payload_hash FROM ledger_events WHERE id = $1', [
-      old,
-    ]);
+    const hash = await superuser.query<{ payload_hash: string }>(
+      'SELECT payload_hash FROM ledger_events WHERE id = $1',
+      [old],
+    );
     expect(hash.rows[0]?.payload_hash).toBe('sha256:fixture');
   });
 
@@ -255,7 +264,10 @@ describe('applyRetention as the worker identity', () => {
     expect(result.counts).toMatchObject({ modelLogs: 1, agentRunErrors: 1 });
     expect(await payloadOf(rejected)).toBeNull();
     expect(await payloadOf(executorFailure)).not.toBeNull();
-    const errors = await superuser.query('SELECT error FROM agent_runs WHERE id = $1', [runId]);
+    const errors = await superuser.query<{ error: string | null }>(
+      'SELECT error FROM agent_runs WHERE id = $1',
+      [runId],
+    );
     expect(errors.rows[0]?.error).toBeNull();
   });
 
@@ -310,7 +322,12 @@ describe('applyRetention as the worker identity', () => {
 
   it('nulls everything in the three classes with zero-day windows, as offboarding runs it', async () => {
     const today = await insertEvent(mail(0.01));
-    const result = await run({ ...WINDOWS, mailBodiesDays: 0, transcriptsDays: 0, modelLogsDays: 0 });
+    const result = await run({
+      ...WINDOWS,
+      mailBodiesDays: 0,
+      transcriptsDays: 0,
+      modelLogsDays: 0,
+    });
     expect(result.counts.mailBodies).toBeGreaterThanOrEqual(1);
     expect(await payloadOf(today)).toBeNull();
   });

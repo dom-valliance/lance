@@ -1,5 +1,10 @@
 import { createAnthropicClient, sdkModelRunner } from '@lance/agents';
-import { principalVaultFromEnv, staticVaultFromEnv } from '@lance/connectors';
+import {
+  createPrincipalSecretPurger,
+  createSlackChannelArchiver,
+  principalVaultFromEnv,
+  staticVaultFromEnv,
+} from '@lance/connectors';
 import { createDb, scopedDb, waitForPrincipalByUpn } from '@lance/db';
 import { getConfig, nowIso, readSecret } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
@@ -54,6 +59,8 @@ async function main(): Promise<void> {
     console.error({ err: error }, 'pg-boss error');
   });
 
+  const principalVault = principalVaultFromEnv();
+  const botToken = env('SLACK_BOT_TOKEN');
   const modelRunner =
     env('ANTHROPIC_API_KEY') === undefined ? null : sdkModelRunner(createAnthropicClient(config));
   const worker = await bootWorker({
@@ -68,11 +75,23 @@ async function main(): Promise<void> {
     connectorsFor: principalConnectors({
       config,
       root,
-      principalVault: principalVaultFromEnv(),
+      principalVault,
       staticVault: staticVaultFromEnv(),
     }),
     webUrl: env('PUBLIC_WEB_URL') ?? null,
     roleCheckCredentials: roleCheckCredentials(),
+    // Lance's own infrastructure at offboarding (package 5.6): the worker
+    // holds Secrets Officer on the principal vault, and the bot token.
+    offboarding: {
+      secrets: principalVault === null ? null : createPrincipalSecretPurger(principalVault),
+      channels:
+        botToken === undefined
+          ? null
+          : createSlackChannelArchiver({
+              token: readSecret('SLACK_BOT_TOKEN'),
+              protectedChannelIds: [config.slack.channelId],
+            }),
+    },
   });
 
   console.info(

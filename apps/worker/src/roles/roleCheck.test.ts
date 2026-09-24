@@ -213,4 +213,66 @@ describe('runRoleCheck', () => {
     );
     expect(await statusOf(ANN_ID)).toBe('active');
   });
+
+  it('offboards a principal it paused who still holds no role once the grace period has passed', async () => {
+    answerWith({ users: [user(DOM_OID)], admins: [user(DOM_OID)] });
+    const requests: { principalId: string; actor: string; reason: string }[] = [];
+    const offboarding = {
+      afterDays: 7,
+      run: (request: { principalId: string; actor: string; reason: string }) => {
+        requests.push(request);
+        return Promise.resolve();
+      },
+    };
+
+    const first = await runRoleCheck({ root, credentials, now: () => NOW, offboarding });
+    const sixDays = await runRoleCheck({
+      root,
+      credentials,
+      now: () => '2026-09-30T02:00:00.000Z',
+      offboarding,
+    });
+    const eightDays = await runRoleCheck({
+      root,
+      credentials,
+      now: () => '2026-10-02T02:00:00.000Z',
+      offboarding,
+    });
+
+    expect(first.paused.map((entry) => entry.principalId)).toEqual([ANN_ID]);
+    expect([first.offboarded, sixDays.offboarded, eightDays.offboarded]).toEqual([
+      [],
+      [],
+      [ANN_ID],
+    ]);
+    expect(requests).toEqual([
+      {
+        principalId: ANN_ID,
+        actor: 'system:role-check',
+        reason: 'held neither Lance app role for 8 days after the role check paused them',
+      },
+    ]);
+  });
+
+  it('never offboards a paused principal who holds a role again', async () => {
+    answerWith({ users: [user(DOM_OID)], admins: [user(DOM_OID)] });
+    await runRoleCheck({ root, credentials, now: () => NOW });
+    answerWith({ users: [user(DOM_OID), user(ANN_OID)], admins: [user(DOM_OID)] });
+    const requests: string[] = [];
+    const later = await runRoleCheck({
+      root,
+      credentials,
+      now: () => '2026-11-24T02:00:00.000Z',
+      offboarding: {
+        afterDays: 7,
+        run: (request) => {
+          requests.push(request.principalId);
+          return Promise.resolve();
+        },
+      },
+    });
+    expect(later.offboarded).toEqual([]);
+    expect(requests).toEqual([]);
+    expect(await statusOf(ANN_ID)).toBe('paused');
+  });
 });

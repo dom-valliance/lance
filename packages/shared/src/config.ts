@@ -122,6 +122,14 @@ export interface Config {
     ledgerDays: number;
     modelLogsDays: number;
   };
+  offboarding: {
+    /**
+     * Days a principal paused by the nightly role check may go on holding
+     * no Lance role before the check offboards them (package 5.6). The
+     * first night only pauses, so a mistaken group change costs nothing.
+     */
+    afterRoleLossDays: number;
+  };
   featureFlags: {
     graphWrites: boolean;
     notionWrites: boolean;
@@ -563,6 +571,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
   };
 
+  const offboarding: Config['offboarding'] = {
+    afterRoleLossDays: readField(
+      errors,
+      env,
+      'OFFBOARD_AFTER_ROLE_LOSS_DAYS',
+      z.number().int().positive(),
+      7,
+      'must be a positive integer',
+      toNumber,
+    ),
+  };
+
   const featureFlags: Config['featureFlags'] = {
     graphWrites: readField(
       errors,
@@ -702,6 +722,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     watchers,
     briefs,
     retention,
+    offboarding,
     featureFlags,
     slack,
     dom,

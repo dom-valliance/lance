@@ -53,7 +53,7 @@ describe('the job registry', () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
-  it('locks alert delivery, proposal expiry, the budget guard and the organisation jobs', () => {
+  it('locks alert delivery, proposal expiry, retention, the budget guard and the organisation jobs', () => {
     expect(
       SYSTEM_JOBS.filter((declared) => declared.locked)
         .map((declared) => declared.slug)
@@ -64,7 +64,20 @@ describe('the job registry', () => {
       'expire-proposals',
       'jobs-reconcile',
       'organisation-budget-guard',
+      'retention',
       'role-check',
+    ]);
+  });
+
+  it('runs retention nightly for every principal whatever their status, and nothing else that way', () => {
+    expect(job('retention')).toMatchObject({
+      schedules: ['15 3 * * *'],
+      scope: 'principal',
+      locked: true,
+      everyStatus: true,
+    });
+    expect(SYSTEM_JOBS.filter((declared) => declared.everyStatus).map((d) => d.slug)).toEqual([
+      'retention',
     ]);
   });
 

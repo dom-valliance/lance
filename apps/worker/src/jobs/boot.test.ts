@@ -6,6 +6,7 @@ import {
   alerts,
   createDb,
   cursors,
+  grantRetentionMember,
   principalState,
   principals,
   runMigrations,
@@ -133,6 +134,9 @@ beforeAll(async () => {
     [OTHER_ID],
   );
   await scopedDb(fixture, { principalId: OTHER_ID }).insert(principalState).values({});
+
+  // The worker identity's grant from the migration job (packages/db/src/grants.ts).
+  await grantRetentionMember(fixture, APP_ROLE);
 
   const appUrl = new URL(url);
   appUrl.username = APP_ROLE;
@@ -352,7 +356,10 @@ describe('job settings', () => {
     try {
       await worker.reconcile();
       const keys = [...(await scheduleKeys())];
-      expect(keys.filter((key) => key.includes(OTHER_ID))).toEqual([]);
+      // Retention runs for every principal whatever their status (spec 4.4).
+      expect(keys.filter((key) => key.includes(OTHER_ID))).toEqual([
+        `retention|retention/${OTHER_ID}`,
+      ]);
       expect(keys.some((key) => key.includes(SEED_PRINCIPAL_ID))).toBe(true);
 
       const before = pollsBy(OTHER_ID);
@@ -368,6 +375,74 @@ describe('job settings', () => {
       await worker.reconcile();
     }
     expect((await scheduleKeys()).has(morning(OTHER_ID))).toBe(true);
+  }, 30_000);
+
+  it('keeps only retention for an offboarded principal', async () => {
+    await fixture.$client.query("UPDATE principals SET status = 'offboarded' WHERE id = $1", [
+      OTHER_ID,
+    ]);
+    try {
+      await worker.reconcile();
+      const keys = [...(await scheduleKeys())].filter((key) => key.includes(OTHER_ID));
+      expect(keys).toEqual([`retention|retention/${OTHER_ID}`]);
+    } finally {
+      await fixture.$client.query("UPDATE principals SET status = 'active' WHERE id = $1", [
+        OTHER_ID,
+      ]);
+      await worker.reconcile();
+    }
+  });
+});
+
+describe('retention and offboarding through pg-boss', () => {
+  const retentionEvents = async (principalId: string): Promise<number> => {
+    const result = await fixture.$client.query(
+      "SELECT count(*)::int AS n FROM ledger_events WHERE principal_id = $1 AND kind = 'retention_applied'",
+      [principalId],
+    );
+    return (result.rows as { n: number }[])[0]?.n ?? 0;
+  };
+
+  it('runs retention for a principal who is not active', async () => {
+    await fixture.$client.query("UPDATE principals SET status = 'paused' WHERE id = $1", [
+      OTHER_ID,
+    ]);
+    try {
+      const before = await retentionEvents(OTHER_ID);
+      const id = await boss.send('retention', { principalId: OTHER_ID });
+      await waitFor(async () => (await boss.getJobById('retention', id!))?.state === 'completed');
+      expect(await retentionEvents(OTHER_ID)).toBe(before + 1);
+    } finally {
+      await fixture.$client.query("UPDATE principals SET status = 'active' WHERE id = $1", [
+        OTHER_ID,
+      ]);
+    }
+  }, 30_000);
+
+  it('offboards a principal from the offboard queue and drops their schedules at once', async () => {
+    const synthetic = '01K5S9V6QW3SWCCPVB0N0E3Q8H';
+    await fixture.$client.query(
+      "INSERT INTO principals (id, upn, status) VALUES ($1, 'synthetic@example.test', 'active')",
+      [synthetic],
+    );
+    await worker.reconcile();
+    expect([...(await scheduleKeys())].some((key) => key.includes(`/${synthetic}`))).toBe(true);
+
+    const id = await boss.send('offboard-principal', {
+      principalId: synthetic,
+      actor: 'user:dom',
+      reason: 'drill',
+    });
+    await waitFor(
+      async () => (await boss.getJobById('offboard-principal', id!))?.state === 'completed',
+    );
+    const status = await fixture.$client.query('SELECT status FROM principals WHERE id = $1', [
+      synthetic,
+    ]);
+    expect((status.rows as { status: string }[])[0]?.status).toBe('offboarded');
+    expect([...(await scheduleKeys())].filter((key) => key.includes(`/${synthetic}`))).toEqual([
+      `retention|retention/${synthetic}`,
+    ]);
   }, 30_000);
 });
 

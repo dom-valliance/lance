@@ -1,5 +1,6 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createDb, scopedDb, type Db } from './client.js';
+import { grantRetentionMember } from './grants.js';
 import { SEED_PRINCIPAL_ID, seed } from './seed.js';
 
 /** The local image built by `docker compose build`, PostgreSQL 16 with AGE and pgvector (ADR 0004). */
@@ -66,6 +67,37 @@ export async function openAppTestDb(connectionString: string): Promise<Db> {
   url.username = TEST_APP_ROLE;
   url.password = TEST_APP_PASSWORD;
   return createDb({ connectionString: url.toString(), password: TEST_APP_PASSWORD });
+}
+
+const TEST_WORKER_ROLE = 'lance_test_worker';
+const TEST_WORKER_PASSWORD = 'lance_test_worker';
+
+/**
+ * Like `openAppTestDb`, logged in as a role that is also a member of
+ * lance_retention for SET ROLE only, as the worker's identity is after the
+ * migration job's grant (packages/db/src/grants.ts). For the retention and
+ * offboarding suites; everything else takes `openAppTestDb`.
+ */
+export async function openWorkerTestDb(connectionString: string): Promise<Db> {
+  const root = createDb({ connectionString, password: 'postgres' });
+  try {
+    await seed(root);
+    await root.$client.query(
+      `DO $$ BEGIN
+         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${TEST_WORKER_ROLE}') THEN
+           CREATE ROLE ${TEST_WORKER_ROLE} LOGIN PASSWORD '${TEST_WORKER_PASSWORD}';
+         END IF;
+       END $$`,
+    );
+    await root.$client.query(`GRANT lance_app TO ${TEST_WORKER_ROLE}`);
+    await grantRetentionMember(root, TEST_WORKER_ROLE);
+  } finally {
+    await root.$client.end();
+  }
+  const url = new URL(connectionString);
+  url.username = TEST_WORKER_ROLE;
+  url.password = TEST_WORKER_PASSWORD;
+  return createDb({ connectionString: url.toString(), password: TEST_WORKER_PASSWORD });
 }
 
 /**

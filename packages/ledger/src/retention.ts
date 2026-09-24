@@ -56,7 +56,8 @@ export interface RetentionOptions {
   now?: () => string;
 }
 
-export interface RetentionCounts {
+/** A type alias rather than an interface, so `Object.values` reads it as numbers. */
+export type RetentionCounts = {
   mailBodies: number;
   transcripts: number;
   derivedFromMail: number;
@@ -65,7 +66,7 @@ export interface RetentionCounts {
   agentRunErrors: number;
   ledgerPayloads: number;
   observations: number;
-}
+};
 
 export interface RetentionResult {
   counts: RetentionCounts;
@@ -97,7 +98,9 @@ const codeOf = (error: unknown): unknown => {
 
 const cutoffOf = (now: Date, days: number): Date => {
   if (!Number.isInteger(days) || days < 0) {
-    throw new Error(`A retention window must be a whole number of days, zero or more; got ${String(days)}.`);
+    throw new Error(
+      `A retention window must be a whole number of days, zero or more; got ${String(days)}.`,
+    );
   }
   return new Date(now.getTime() - days * 24 * 3600 * 1000);
 };
@@ -111,10 +114,7 @@ const derivedFrom = (system: string): SQL => sql`
      WHERE origin.source_system = ${system}
   )`;
 
-export async function applyRetention(
-  db: Db,
-  options: RetentionOptions,
-): Promise<RetentionResult> {
+export async function applyRetention(db: Db, options: RetentionOptions): Promise<RetentionResult> {
   const clock = options.now ?? nowIso;
   const ts = clock();
   const now = new Date(ts);

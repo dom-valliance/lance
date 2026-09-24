@@ -1,4 +1,4 @@
-import { principals, scopedDb, type Db } from '@lance/db';
+import { ledgerEvents, principals, scopedDb, type Db } from '@lance/db';
 import { LedgerWriter } from '@lance/ledger';
 import {
   hashRecord,
@@ -9,7 +9,7 @@ import {
   nowIso,
   type LanceRole,
 } from '@lance/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { raiseAlert } from '../alerts/raise.js';
 
@@ -43,10 +43,22 @@ export interface RoleCheckCredentials {
   clientSecret: string;
 }
 
+/**
+ * Offboarding by the role check (package 5.6). A principal the check paused
+ * who still holds neither role `afterDays` later is offboarded: the first
+ * night only pauses, so a mistaken group change costs nothing but a pause.
+ */
+export interface RoleCheckOffboarding {
+  afterDays: number;
+  run: (request: { principalId: string; actor: string; reason: string }) => Promise<unknown>;
+}
+
 export interface RoleCheckOptions {
   /** Unscoped. The check scopes each read and write itself. */
   root: Db;
   credentials: RoleCheckCredentials;
+  /** Absent, the check pauses and never offboards. */
+  offboarding?: RoleCheckOffboarding;
   /** Injected in tests; msw intercepts the global fetch either way. */
   fetchImpl?: typeof fetch;
   now?: () => string;
@@ -60,6 +72,8 @@ export interface RoleCheckResult {
   unbound: string[];
   /** Admin principals alerted, once per paused principal. */
   alerted: string[];
+  /** Principals paused by an earlier check who still hold no role and were offboarded. */
+  offboarded: string[];
 }
 
 const TokenSchema = z.object({ access_token: z.string().min(1) });
@@ -230,7 +244,13 @@ export async function runRoleCheck(options: RoleCheckOptions): Promise<RoleCheck
     .from(principals)
     .where(eq(principals.status, 'active'));
 
-  const result: RoleCheckResult = { holders, paused: [], unbound: [], alerted: [] };
+  const result: RoleCheckResult = {
+    holders,
+    paused: [],
+    unbound: [],
+    alerted: [],
+    offboarded: [],
+  };
   const adminPrincipals = active.filter((p) => p.entraOid !== null && admins.has(p.entraOid));
 
   for (const principal of active) {
@@ -280,5 +300,55 @@ export async function runRoleCheck(options: RoleCheckOptions): Promise<RoleCheck
       result.alerted.push(recipient.id);
     }
   }
+
+  if (options.offboarding !== undefined) {
+    result.offboarded = await offboardLapsed(options.root, options.offboarding, anyRole, clock());
+  }
   return result;
+}
+
+/** When the role check paused this principal, from their own ledger; null if it never did. */
+const pausedByCheckAt = async (root: Db, principalId: string): Promise<Date | null> => {
+  const rows = await scopedDb(root, { principalId, admin: true })
+    .select({ ts: ledgerEvents.ts })
+    .from(ledgerEvents)
+    .where(
+      and(
+        eq(ledgerEvents.kind, 'state_changed'),
+        eq(ledgerEvents.actor, ROLE_CHECK_ACTOR),
+        sql`${ledgerEvents.payload} ->> 'change' = 'principal_paused'`,
+      ),
+    )
+    .orderBy(desc(ledgerEvents.id))
+    .limit(1);
+  return rows[0]?.ts ?? null;
+};
+
+/** Offboards every principal the check paused at least `afterDays` ago who still holds no role. */
+async function offboardLapsed(
+  root: Db,
+  offboarding: RoleCheckOffboarding,
+  anyRole: ReadonlySet<string>,
+  ts: string,
+): Promise<string[]> {
+  const paused = await root
+    .select({ id: principals.id, entraOid: principals.entraOid })
+    .from(principals)
+    .where(eq(principals.status, 'paused'));
+  const offboarded: string[] = [];
+  const now = Date.parse(ts);
+  for (const principal of paused) {
+    if (principal.entraOid === null || anyRole.has(principal.entraOid)) continue;
+    const since = await pausedByCheckAt(root, principal.id);
+    if (since === null) continue;
+    const days = (now - since.getTime()) / (24 * 3600 * 1000);
+    if (days < offboarding.afterDays) continue;
+    await offboarding.run({
+      principalId: principal.id,
+      actor: ROLE_CHECK_ACTOR,
+      reason: `held neither Lance app role for ${String(Math.floor(days))} days after the role check paused them`,
+    });
+    offboarded.push(principal.id);
+  }
+  return offboarded;
 }

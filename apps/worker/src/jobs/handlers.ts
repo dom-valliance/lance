@@ -28,6 +28,13 @@ import { runWatcher } from '../watchers/runner.js';
 import { connectorOfWatcher } from './connectors.js';
 import type { PrincipalContext } from './context.js';
 import { runRoleCheck, type RoleCheckCredentials } from '../roles/roleCheck.js';
+import {
+  OFFBOARD_QUEUE,
+  offboardPrincipal,
+  type OffboardDeps,
+  type OffboardResult,
+} from '../offboarding/offboard.js';
+import { runRetention } from '../retention/run.js';
 import { runOrganisationBudgetGuard } from './organisationBudget.js';
 import type { ReconcileResult } from './reconcile.js';
 import {
@@ -36,6 +43,7 @@ import {
   EXPIRY_QUEUE,
   ORGANISATION_BUDGET_QUEUE,
   RECONCILE_QUEUE,
+  RETENTION_QUEUE,
   ROLE_CHECK_QUEUE,
   SYSTEM_JOBS,
 } from './registry.js';
@@ -70,6 +78,13 @@ export const ChasePayloadSchema = z.object({
   commitmentId: UlidSchema,
 });
 
+/** What the admin page's offboard action and the role check put on the queue. */
+export const OffboardPayloadSchema = z.object({
+  principalId: UlidSchema,
+  actor: z.string().min(1),
+  reason: z.string().min(1),
+});
+
 /** What the api may add when it asks for a reconcile, for the log line. */
 const ReconcilePayloadSchema = z.object({ principalId: UlidSchema.optional() }).passthrough();
 
@@ -90,6 +105,12 @@ export interface HandlerDeps {
    * skips with a log line.
    */
   roleCheckCredentials: RoleCheckCredentials | null;
+  /**
+   * Where offboarding deletes secrets and archives channels (package 5.6).
+   * Each half is null in a process without the principal vault or a Slack
+   * bot token, and the step is then recorded as skipped.
+   */
+  offboarding: Pick<OffboardDeps, 'secrets' | 'channels'>;
 }
 
 type PrincipalHandler = (context: PrincipalContext) => Promise<void>;
@@ -251,12 +272,17 @@ function organisationHandlers(deps: HandlerDeps): Map<string, (data: unknown) =>
         const result = await runRoleCheck({
           root: deps.root,
           credentials: deps.roleCheckCredentials,
+          offboarding: {
+            afterDays: deps.config.offboarding.afterRoleLossDays,
+            run: (request) => offboard(deps, request),
+          },
         });
         console.info(
           {
             paused: result.paused.map((principal) => principal.principalId),
             unbound: result.unbound,
             alerted: result.alerted,
+            offboarded: result.offboarded,
           },
           'role check finished',
         );
@@ -275,8 +301,58 @@ function organisationHandlers(deps: HandlerDeps): Map<string, (data: unknown) =>
   ]);
 }
 
+/** Offboards one principal and logs the outcome of each step, never its detail. */
+async function offboard(
+  deps: HandlerDeps,
+  request: z.infer<typeof OffboardPayloadSchema>,
+): Promise<OffboardResult> {
+  deps.contexts.evict(request.principalId);
+  const result = await offboardPrincipal(
+    { root: deps.root, config: deps.config, ...deps.offboarding },
+    request,
+  );
+  deps.contexts.evict(request.principalId);
+  console.info(
+    {
+      principalId: result.principalId,
+      correlationId: result.correlationId,
+      steps: result.steps.map((step) => `${step.step}:${step.outcome}`),
+    },
+    'principal offboarded',
+  );
+  // Their schedules go at once rather than at the next minute's reconcile.
+  await deps.reconcile();
+  return result;
+}
+
+/**
+ * Jobs declared for every status (retention): the payload names the
+ * principal, who must exist, and the handler runs whatever their status,
+ * over a handle it scopes itself, without building their connectors.
+ */
+async function registerEveryStatus(deps: HandlerDeps): Promise<void> {
+  await work<unknown>(deps.boss, RETENTION_QUEUE, async (jobs) => {
+    for (const job of jobs) {
+      const { principalId } = PrincipalPayloadSchema.parse(job.data);
+      const result = await runRetention({
+        root: deps.root,
+        config: deps.config,
+        principalId,
+        trigger: 'nightly',
+      });
+      console.info({ principalId, counts: result.counts }, 'retention applied');
+    }
+  });
+}
+
 async function registerOnDemand(deps: HandlerDeps): Promise<void> {
   const { boss, contexts } = deps;
+  await boss.createQueue(OFFBOARD_QUEUE);
+  await work<unknown>(boss, OFFBOARD_QUEUE, async (jobs) => {
+    for (const job of jobs) {
+      await offboard(deps, OffboardPayloadSchema.parse(job.data));
+    }
+  });
   await workForPrincipal(
     boss,
     QUEUES.execute,
@@ -339,7 +415,11 @@ export async function registerJobHandlers(deps: HandlerDeps): Promise<void> {
   const principal = scheduledHandlers(deps);
   const organisation = organisationHandlers(deps);
   const missing = SYSTEM_JOBS.filter((job) =>
-    job.scope === 'principal' ? !principal.has(job.slug) : !organisation.has(job.slug),
+    job.everyStatus
+      ? job.slug !== RETENTION_QUEUE
+      : job.scope === 'principal'
+        ? !principal.has(job.slug)
+        : !organisation.has(job.slug),
   ).map((job) => job.slug);
   if (missing.length > 0) {
     throw new Error(
@@ -348,6 +428,7 @@ export async function registerJobHandlers(deps: HandlerDeps): Promise<void> {
   }
   for (const job of SYSTEM_JOBS) {
     await deps.boss.createQueue(job.slug);
+    if (job.everyStatus) continue;
     if (job.scope === 'principal') {
       const handler = principal.get(job.slug);
       if (handler === undefined) continue;
@@ -366,5 +447,6 @@ export async function registerJobHandlers(deps: HandlerDeps): Promise<void> {
       });
     }
   }
+  await registerEveryStatus(deps);
   await registerOnDemand(deps);
 }

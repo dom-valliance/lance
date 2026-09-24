@@ -1,9 +1,9 @@
 import { principals, scopedDb, type Db, type JobRow } from '@lance/db';
 import { JobControl } from '@lance/ledger';
-import { eq } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import {
   effectiveSchedules,
+  everyStatusJobs,
   isDeclaredQueue,
   organisationJobs,
   principalJobs,
@@ -111,6 +111,23 @@ function desiredForPrincipal(
   return desired;
 }
 
+/**
+ * A principal who is not active keeps only the jobs declared for every
+ * status (retention), on their default schedules: those jobs are locked,
+ * so no row can change them, and nothing else of theirs runs.
+ */
+function desiredForInactive(principal: { id: string; timeZone: string }): DesiredSchedule[] {
+  return everyStatusJobs().flatMap((job) =>
+    job.schedules.map((cron, index) => ({
+      queue: job.slug,
+      key: principalScheduleKey(job.slug, principal.id, index, job.schedules.length),
+      cron,
+      timeZone: principal.timeZone,
+      data: { principalId: principal.id },
+    })),
+  );
+}
+
 function desiredForOrganisation(timeZone: string): DesiredSchedule[] {
   return organisationJobs().flatMap((job: JobDeclaration) =>
     job.schedules.map((cron, index) => ({
@@ -142,12 +159,15 @@ export function createReconciler(deps: ReconcileDeps): () => Promise<ReconcileRe
 }
 
 export async function reconcileOnce(deps: ReconcileDeps): Promise<ReconcileResult> {
-  const active = await deps.root
-    .select({ id: principals.id, timeZone: principals.timeZone })
-    .from(principals)
-    .where(eq(principals.status, 'active'));
+  const everyone = await deps.root
+    .select({ id: principals.id, timeZone: principals.timeZone, status: principals.status })
+    .from(principals);
+  const active = everyone.filter((principal) => principal.status === 'active');
 
   const desired: DesiredSchedule[] = desiredForOrganisation(deps.organisationTimeZone);
+  for (const principal of everyone) {
+    if (principal.status !== 'active') desired.push(...desiredForInactive(principal));
+  }
   const defaults = principalJobs().map((job) => ({ slug: job.slug, locked: job.locked }));
   for (const principal of active) {
     const control = new JobControl(scopedDb(deps.root, { principalId: principal.id }));

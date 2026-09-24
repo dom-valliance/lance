@@ -69,6 +69,7 @@ describe('loadConfig defaults', () => {
       ledgerDays: 730,
       modelLogsDays: 30,
     });
+    expect(config.offboarding).toEqual({ afterRoleLossDays: 7 });
     expect(config.featureFlags).toEqual({
       graphWrites: false,
       notionWrites: false,
@@ -154,6 +155,7 @@ describe('loadConfig env overrides', () => {
       RETENTION_TRANSCRIPTS_DAYS: '60',
       RETENTION_LEDGER_DAYS: '365',
       RETENTION_MODEL_LOGS_DAYS: '7',
+      OFFBOARD_AFTER_ROLE_LOSS_DAYS: '14',
       FF_GRAPH_WRITES: 'true',
       FF_NOTION_WRITES: '1',
       FF_SLACK_WRITES: 'false',
@@ -208,6 +210,7 @@ describe('loadConfig env overrides', () => {
       ledgerDays: 365,
       modelLogsDays: 7,
     });
+    expect(config.offboarding).toEqual({ afterRoleLossDays: 14 });
     expect(config.featureFlags).toEqual({
       graphWrites: true,
       notionWrites: true,

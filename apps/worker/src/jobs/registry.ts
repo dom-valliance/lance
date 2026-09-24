@@ -62,6 +62,12 @@ export interface JobDeclaration {
   /** Shown but never disabled; the reconciler schedules it whatever its row says. */
   readonly locked: boolean;
   readonly scope: JobScope;
+  /**
+   * A per-principal job that runs whatever the principal's status, not only
+   * while they are active. Only retention: a paused or offboarded
+   * principal's data still ages out (spec 4.4). Such a job must be locked.
+   */
+  readonly everyStatus: boolean;
 }
 
 /** Runs the reconciler on a timer, so a principal whose status changes gains or loses schedules within a minute. */
@@ -72,6 +78,8 @@ export const ROLE_CHECK_QUEUE = 'role-check';
 export const EXPIRY_QUEUE = 'expire-proposals';
 export const ALERT_DELIVERY_QUEUE = 'alerts-deliver';
 export const DIGEST_QUEUE = 'dry-run-digest';
+/** Nightly retention for each principal, whatever their status (spec 4.4, ADR 0011). */
+export const RETENTION_QUEUE = 'retention';
 
 /** The budget guard raises the alert that says a principal's agents are paused, so it stays on. */
 const LOCKED_DETECTORS = new Set(['budget_guard']);
@@ -79,12 +87,13 @@ const LOCKED_DETECTORS = new Set(['budget_guard']);
 const DAILY = 24 * 60;
 
 const declare = (
-  declaration: Omit<JobDeclaration, 'bounds' | 'locked' | 'scope'> &
-    Partial<Pick<JobDeclaration, 'bounds' | 'locked' | 'scope'>>,
+  declaration: Omit<JobDeclaration, 'bounds' | 'locked' | 'scope' | 'everyStatus'> &
+    Partial<Pick<JobDeclaration, 'bounds' | 'locked' | 'scope' | 'everyStatus'>>,
 ): JobDeclaration => ({
   bounds: {},
   locked: false,
   scope: 'principal',
+  everyStatus: false,
   ...declaration,
 });
 
@@ -112,6 +121,13 @@ export const SYSTEM_JOBS: readonly JobDeclaration[] = [
     schedules: ['30 2 * * *'],
     locked: true,
     scope: 'organisation',
+  }),
+  declare({
+    slug: RETENTION_QUEUE,
+    title: 'Apply the retention windows to what Lance holds',
+    schedules: ['15 3 * * *'],
+    locked: true,
+    everyStatus: true,
   }),
   declare({
     slug: EXPIRY_QUEUE,
@@ -187,6 +203,10 @@ export function isDeclaredQueue(queue: string): boolean {
 
 export const principalJobs = (): JobDeclaration[] =>
   SYSTEM_JOBS.filter((job) => job.scope === 'principal');
+
+/** Per-principal jobs that run for every principal, not only active ones. */
+export const everyStatusJobs = (): JobDeclaration[] =>
+  SYSTEM_JOBS.filter((job) => job.scope === 'principal' && job.everyStatus);
 
 export const organisationJobs = (): JobDeclaration[] =>
   SYSTEM_JOBS.filter((job) => job.scope === 'organisation');

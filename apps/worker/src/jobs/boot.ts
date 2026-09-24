@@ -3,6 +3,7 @@ import { principals, scopedDb, type Db, type Principal } from '@lance/db';
 import type { Config } from '@lance/shared';
 import { eq } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
+import type { OffboardDeps } from '../offboarding/offboard.js';
 import type { RoleCheckCredentials } from '../roles/roleCheck.js';
 import { startBoss } from '../scheduler/boss.js';
 import type { ConnectorLookup } from './connectors.js';
@@ -33,6 +34,8 @@ export interface BootOptions {
   roleCheckCredentials: RoleCheckCredentials | null;
   /** How long the organisation budget is cached between model runs; 30 seconds by default. */
   organisationBudgetTtlMs?: number;
+  /** Offboarding's vault and Slack halves; both null when omitted, and those steps are skipped. */
+  offboarding?: Pick<OffboardDeps, 'secrets' | 'channels'>;
 }
 
 export interface BootedWorker {
@@ -88,6 +91,7 @@ export async function bootWorker(options: BootOptions): Promise<BootedWorker> {
     root,
     webUrl: options.webUrl,
     roleCheckCredentials: options.roleCheckCredentials,
+    offboarding: options.offboarding ?? { secrets: null, channels: null },
   });
   const initial = await reconcile();
   // Every active principal's context is built now rather than at their
