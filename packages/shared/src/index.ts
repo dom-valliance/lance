@@ -11,3 +11,4 @@ export * from './time.js';
 export * from './voice.js';
 export * from './roles.js';
 export * from './cron.js';
+export * from './slack.js';
