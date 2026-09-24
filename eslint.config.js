@@ -25,6 +25,8 @@ const CREATE_DB_MESSAGE =
 const CREATE_DB_ALLOWED = [
   'apps/*/src/main.ts',
   'packages/ontology/src/rebuild.ts',
+  // The local offboarding rehearsal, an entrypoint of its own (docs/runbooks/offboard-principal.md).
+  'apps/worker/src/offboarding/drill.ts',
   'packages/db/src/**/*.ts',
   '**/*.test.ts',
 ];

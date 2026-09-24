@@ -66,6 +66,9 @@ export default async function AdminPage() {
   ]);
   const me = await client.me.query();
   const healthOf = new Map(health.map((row) => [row.principalId, row]));
+  // Every step is idempotent, so an offboarded principal stays listed: a
+  // run that stopped part way is finished by running it again.
+  const others = principals.filter((principal) => principal.id !== me.principalId);
   const today = new Date();
   const monthAgo = new Date(today.getTime() - 30 * 24 * 3600 * 1000);
 
@@ -314,29 +317,29 @@ export default async function AdminPage() {
             transcripts and model logs. Their ledger stays. Deleted secrets remain recoverable,
             soft-deleted, until the vault&apos;s retention period ends.
           </p>
-          {principals.filter((p) => p.status !== 'offboarded' && p.id !== me.principalId).length ===
-          0 ? (
+          {others.length === 0 ? (
             <EmptyState>Nobody else can be offboarded.</EmptyState>
           ) : (
             <ul className="flex flex-col gap-3">
-              {principals
-                .filter((p) => p.status !== 'offboarded' && p.id !== me.principalId)
-                .map((principal) => (
-                  <li key={principal.id}>
-                    <details className="rounded-lg border border-border p-3">
-                      <summary className="cursor-pointer text-sm font-medium">
-                        {principal.upn}
-                      </summary>
-                      <div className="mt-3">
-                        <OffboardForm
-                          action={offboardAction}
-                          principalId={principal.id}
-                          upn={principal.upn}
-                        />
-                      </div>
-                    </details>
-                  </li>
-                ))}
+              {others.map((principal) => (
+                <li key={principal.id}>
+                  <details className="rounded-lg border border-border p-3">
+                    <summary className="cursor-pointer text-sm font-medium">
+                      {principal.upn}
+                      {principal.status === 'offboarded'
+                        ? ', offboarded: run again to finish any step that failed'
+                        : ''}
+                    </summary>
+                    <div className="mt-3">
+                      <OffboardForm
+                        action={offboardAction}
+                        principalId={principal.id}
+                        upn={principal.upn}
+                      />
+                    </div>
+                  </details>
+                </li>
+              ))}
             </ul>
           )}
         </section>

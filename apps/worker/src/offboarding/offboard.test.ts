@@ -57,7 +57,9 @@ const payloadOf = (event: { payload: unknown }): Record<string, unknown> =>
   (event.payload ?? {}) as Record<string, unknown>;
 
 const statusOf = async (id: string): Promise<string> => {
-  const rows = await rowsOf<{ status: string }>('SELECT status FROM principals WHERE id = $1', [id]);
+  const rows = await rowsOf<{ status: string }>('SELECT status FROM principals WHERE id = $1', [
+    id,
+  ]);
   return rows[0]?.status ?? 'missing';
 };
 
@@ -141,10 +143,7 @@ afterAll(async () => {
   await container?.stop();
 });
 
-const deps = (
-  vault: InMemorySecrets | null,
-  archiver: RecordingArchiver | null,
-): OffboardDeps => ({
+const deps = (vault: InMemorySecrets | null, archiver: RecordingArchiver | null): OffboardDeps => ({
   root,
   config,
   secrets: vault === null ? null : createPrincipalSecretPurger(vault),
@@ -161,7 +160,10 @@ describe('offboardPrincipal', () => {
   const request = { principalId: SYNTHETIC, actor: 'user:dom', reason: 'left Valliance' };
 
   it('runs every step in order and leaves no secret, link, channel or cached content', async () => {
-    const ledgerBefore = await rowsOf<{ n: number }>('SELECT count(*)::int AS n FROM ledger_events WHERE principal_id = $1', [SYNTHETIC]);
+    const ledgerBefore = await rowsOf<{ n: number }>(
+      'SELECT count(*)::int AS n FROM ledger_events WHERE principal_id = $1',
+      [SYNTHETIC],
+    );
 
     const result = await offboardPrincipal(deps(vault, archiver), request);
 
@@ -182,21 +184,33 @@ describe('offboardPrincipal', () => {
     expect(vault.has(`graph-refresh-token--${SYNTHETIC}`)).toBe(false);
     expect(vault.has(`jamie-api-key--${SYNTHETIC}`)).toBe(false);
     expect(vault.has(`graph-refresh-token--${SEED_PRINCIPAL_ID}`)).toBe(true);
-    const links = await rowsOf<{ revoked: boolean }>('SELECT revoked_at IS NOT NULL AS revoked FROM slack_links WHERE principal_id = $1', [SYNTHETIC]);
+    const links = await rowsOf<{ revoked: boolean }>(
+      'SELECT revoked_at IS NOT NULL AS revoked FROM slack_links WHERE principal_id = $1',
+      [SYNTHETIC],
+    );
     expect(links).toEqual([{ revoked: true }]);
     expect(archiver.asked).toEqual([SYNTHETIC_CHANNEL]);
 
-    const content = await rowsOf<{ kind: string; nulled: boolean }>(`SELECT kind::text, payload IS NULL AS nulled FROM ledger_events
+    const content = await rowsOf<{ kind: string; nulled: boolean }>(
+      `SELECT kind::text, payload IS NULL AS nulled FROM ledger_events
         WHERE principal_id = $1
           AND (kind = 'observed' OR (kind = 'resolved' AND actor LIKE 'agent:triage@%'))
-        ORDER BY id`, [SYNTHETIC]);
+        ORDER BY id`,
+      [SYNTHETIC],
+    );
     expect(content.every((row) => row.nulled)).toBe(true);
     expect(content).toHaveLength(3);
-    const observations = await rowsOf<{ nulled: boolean }>('SELECT payload IS NULL AS nulled FROM observations WHERE principal_id = $1', [SYNTHETIC]);
+    const observations = await rowsOf<{ nulled: boolean }>(
+      'SELECT payload IS NULL AS nulled FROM observations WHERE principal_id = $1',
+      [SYNTHETIC],
+    );
     expect(observations).toEqual([{ nulled: true }, { nulled: true }]);
 
     // Nothing was deleted from the ledger: every row is still there, plus the new events.
-    const ledgerAfter = await rowsOf<{ n: number }>('SELECT count(*)::int AS n FROM ledger_events WHERE principal_id = $1', [SYNTHETIC]);
+    const ledgerAfter = await rowsOf<{ n: number }>(
+      'SELECT count(*)::int AS n FROM ledger_events WHERE principal_id = $1',
+      [SYNTHETIC],
+    );
     expect(ledgerAfter[0]!.n).toBeGreaterThan(ledgerBefore[0]!.n);
   });
 
