@@ -1,9 +1,10 @@
 import { createAnthropicClient, sdkModelRunner } from '@lance/agents';
+import { principalVaultFromEnv, staticVaultFromEnv } from '@lance/connectors';
 import { createDb, scopedDb, waitForPrincipalByUpn } from '@lance/db';
 import { getConfig, nowIso, readSecret } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { bootWorker } from './jobs/boot.js';
-import { singleOwnerConnectors, WORKER_VERSION } from './jobs/connectors.js';
+import { principalConnectors, WORKER_VERSION } from './jobs/connectors.js';
 import { ensureSeedRules } from './policy/rules.js';
 import type { RoleCheckCredentials } from './roles/roleCheck.js';
 import { createBoss } from './scheduler/boss.js';
@@ -61,7 +62,15 @@ async function main(): Promise<void> {
     boss,
     admin,
     modelRunner,
-    connectorsFor: singleOwnerConnectors(config),
+    // Each principal's Graph and Jamie credentials come from their own
+    // secrets in the principal vault (ADR 0022); the static vault is read
+    // only for the one-time copy of Dom's legacy Graph token.
+    connectorsFor: principalConnectors({
+      config,
+      root,
+      principalVault: principalVaultFromEnv(),
+      staticVault: staticVaultFromEnv(),
+    }),
     webUrl: env('PUBLIC_WEB_URL') ?? null,
     roleCheckCredentials: roleCheckCredentials(),
   });

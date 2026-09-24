@@ -31,6 +31,7 @@ import type {
   ApiDeps,
   Caller,
   GraphConsentDeps,
+  JamieKeyDeps,
   SlackLinkIssue,
   SlackLinkOutcome,
   SlackLinkPreview,
@@ -563,11 +564,12 @@ export const fakeNotionTaskObservation = (
 /** The observations table's task rows without a database. */
 export class FakeTaskStore implements TaskStoreLike {
   rows: ObservationRecord[] = [fakeNotionTaskObservation()];
+  notionUserId: string | null = '1fdd872b-594c-8146-b22f-00028f1f5a41';
   readonly queries: TaskQuery[] = [];
   readonly counts: TaskCountQuery[] = [];
 
   private matching(query: TaskCountQuery): ObservationRecord[] {
-    const options = { domNotionUserId: '1fdd872b-594c-8146-b22f-00028f1f5a41' };
+    const options = { principalNotionUserId: this.notionUserId };
     return this.rows
       .filter((row) => query.source === undefined || row.sourceSystem === query.source)
       .filter((row) => {
@@ -588,6 +590,10 @@ export class FakeTaskStore implements TaskStoreLike {
   count(query: TaskCountQuery): Promise<number> {
     this.counts.push(query);
     return Promise.resolve(this.matching(query).length);
+  }
+
+  principalNotionUserId(): Promise<string | null> {
+    return Promise.resolve(this.notionUserId);
   }
 }
 
@@ -964,6 +970,7 @@ export interface FakeDepsOverrides {
   principal?: PrincipalRef;
   directory?: FakeDirectory;
   graph?: GraphConsentDeps;
+  jamieKeys?: JamieKeyDeps;
   /** Omit the Slack surface, as a process with no bot token has. */
   withoutSlackSurface?: boolean;
   now?: () => string;
@@ -1104,6 +1111,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     slack: { signingSecret: TEST_SIGNING_SECRET, fallbackUserId: null, links, replay },
     ingestSecret: TEST_INGEST_SECRET,
     ...(overrides.graph === undefined ? {} : { graph: overrides.graph }),
+    ...(overrides.jamieKeys === undefined ? {} : { jamieKeys: overrides.jamieKeys }),
     ...(overrides.now === undefined ? {} : { now: overrides.now }),
   };
 

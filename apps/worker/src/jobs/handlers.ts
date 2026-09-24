@@ -25,6 +25,7 @@ import { QUEUES } from '../scheduler/queues.js';
 import { runTriage } from '../triage/run.js';
 import { createAgentLogsDetector } from '../watchers/agent-logs/index.js';
 import { runWatcher } from '../watchers/runner.js';
+import { connectorOfWatcher } from './connectors.js';
 import type { PrincipalContext } from './context.js';
 import { runRoleCheck, type RoleCheckCredentials } from '../roles/roleCheck.js';
 import { runOrganisationBudgetGuard } from './organisationBudget.js';
@@ -92,6 +93,37 @@ export interface HandlerDeps {
 }
 
 type PrincipalHandler = (context: PrincipalContext) => Promise<void>;
+
+/**
+ * A watcher run for a principal without the connector it needs (ADR 0022):
+ * recorded as skipped, naming the secret that is missing, and never run
+ * with anyone else's credentials. When the secret has appeared since the
+ * principal's context was built (they connected in the meantime), the
+ * context is dropped so the next job rebuilds it with the new connector.
+ */
+export async function recordSkippedWatcherRun(
+  deps: Pick<HandlerDeps, 'contexts'>,
+  context: PrincipalContext,
+  slug: string,
+): Promise<void> {
+  const connector = connectorOfWatcher(slug);
+  const gap = context.connectors?.notConnected.find((entry) => entry.connector === connector);
+  console.info(
+    {
+      queue: slug,
+      principalId: context.principal.id,
+      status: 'skipped',
+      connector,
+      missing: gap?.missing ?? null,
+    },
+    gap === undefined
+      ? `watcher run skipped: this process has no ${connector ?? 'connector'} configured for the principal`
+      : `watcher run skipped: ${gap.connector} is not connected for this principal; the secret ${gap.missing} is absent`,
+  );
+  if (gap !== undefined && (await gap.recheck())) {
+    deps.contexts.evict(context.principal.id);
+  }
+}
 
 function detectors(): Detector[] {
   return [
@@ -178,13 +210,7 @@ function scheduledHandlers(deps: HandlerDeps): Map<string, PrincipalHandler> {
     handlers.set(job.slug, async (context) => {
       const watcher = context.watchers.get(job.slug);
       if (watcher === undefined) {
-        // Connectors are Dom's alone until package 5.2 adds credentials per
-        // principal; a principal without them is skipped, never polled with
-        // someone else's.
-        console.info(
-          { queue: job.slug, principalId: context.principal.id, upn: context.principal.upn },
-          'watcher run skipped: this principal has no connector credentials for it',
-        );
+        await recordSkippedWatcherRun(deps, context, job.slug);
         return;
       }
       await runWatcher(context.runner, watcher);

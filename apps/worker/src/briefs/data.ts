@@ -35,8 +35,21 @@ export interface BriefDataDeps {
   db: Db;
   ontology: OntologyRepository;
   config: Pick<Config, 'timeZone' | 'dom' | 'briefs' | 'cost' | 'notion'>;
+  /**
+   * The principal's Notion user id, `principals.notion_user_id` (ADR 0022).
+   * Null while it is unresolved, and then the brief lists no Notion task
+   * rather than guess whose they are. Undefined falls back to
+   * `config.notion.domUserId`, for callers built before ADR 0022.
+   */
+  principalNotionUserId?: string | null;
   now: () => string;
 }
+
+/** Whose Notion tasks a brief lists (ADR 0022). */
+const principalNotionUserOf = (deps: BriefDataDeps): string | null =>
+  deps.principalNotionUserId === undefined
+    ? deps.config.notion.domUserId
+    : deps.principalNotionUserId;
 
 /** The working day the free block calculation looks at, local hours. */
 const WORKING_DAY = { startHour: 8, endHour: 18 } as const;
@@ -458,16 +471,18 @@ type TaskSource = 'notion' | 'jamie';
  * the brief keeps the rows whose Assignee includes the principal's Notion
  * user; the Jamie watcher stamps its action items with `assignedToDom`
  * from the assignee's email. A page the Notion watcher recorded as removed
- * has left the database and is never a task. Dom is the only principal in
- * v1; the principal's identifiers come from config, never from this file.
+ * has left the database and is never a task. The principal's Notion user
+ * id comes from `principals.notion_user_id` (ADR 0022); while it is null
+ * no Notion task is theirs.
  */
 export function isPrincipalsLiveTask(
   source: TaskSource,
   payload: Record<string, unknown>,
-  principalNotionUserId: string,
+  principalNotionUserId: string | null,
 ): boolean {
   if (payload['removed'] === true) return false;
   if (source === 'jamie') return payload['assignedToDom'] === true;
+  if (principalNotionUserId === null) return false;
   const assignees = payload['assigneeIds'];
   return Array.isArray(assignees) && assignees.includes(principalNotionUserId);
 }
@@ -497,7 +512,7 @@ export async function tasksDue(
   for (const row of rows) {
     const p = (row.payload ?? {}) as Record<string, unknown>;
     const source = row.sourceSystem as TaskSource;
-    if (!isPrincipalsLiveTask(source, p, deps.config.notion.domUserId)) continue;
+    if (!isPrincipalsLiveTask(source, p, principalNotionUserOf(deps))) continue;
     if (isTaskDone(source, p)) continue;
     const due = (str(p['due']) ?? str(p['dueDate']))?.slice(0, 10) ?? null;
     if (due === null || due > today) continue;
@@ -743,7 +758,7 @@ export async function assembleAfternoonBoard(
     if (seen.has(row.sourceRecordId)) continue;
     seen.add(row.sourceRecordId);
     const source = row.sourceSystem as TaskSource;
-    if (!isPrincipalsLiveTask(source, p, deps.config.notion.domUserId)) continue;
+    if (!isPrincipalsLiveTask(source, p, principalNotionUserOf(deps))) continue;
     if (!isTaskDone(source, p)) continue;
     tasksCompleted.push({
       taskId: `${row.sourceSystem}:${row.sourceRecordId}`,

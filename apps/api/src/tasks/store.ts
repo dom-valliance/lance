@@ -1,4 +1,4 @@
-import { newestObservationFirst, observations, type Db } from '@lance/db';
+import { newestObservationFirst, observations, principals, type Db } from '@lance/db';
 import { and, count, desc, eq, lt, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
 import { NOTION_CLOSED_STATUSES, type ObservationRecord, type TaskSource } from './view.js';
 
@@ -24,6 +24,8 @@ export interface TaskStoreLike {
   list(query: TaskQuery): Promise<ObservationRecord[]>;
   /** Every row `list` would return across all its pages, over the same newest observations. */
   count(query: TaskCountQuery): Promise<number>;
+  /** The reading principal's `principals.notion_user_id` (ADR 0022), or null while unresolved. */
+  principalNotionUserId(): Promise<string | null>;
 }
 
 const notionClosedList = sql.join(
@@ -82,6 +84,14 @@ function outerConditions(latest: LatestTasks, status: TaskQuery['status']): SQL[
 
 export function createTaskStore(db: Db): TaskStoreLike {
   return {
+    async principalNotionUserId(): Promise<string | null> {
+      const rows = await db
+        .select({ notionUserId: principals.notionUserId })
+        .from(principals)
+        .where(eq(principals.id, sql`app_principal()`))
+        .limit(1);
+      return rows[0]?.notionUserId ?? null;
+    },
     async list(query: TaskQuery): Promise<ObservationRecord[]> {
       const latest = latestTasks(db, query.source);
       const outer = outerConditions(latest, query.status);

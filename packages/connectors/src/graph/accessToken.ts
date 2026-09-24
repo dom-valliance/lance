@@ -18,6 +18,14 @@ const EXPIRY_MARGIN_MS = 2 * 60 * 1000;
 
 export type AccessTokenProvider = () => Promise<string>;
 
+/**
+ * Runs `work` while holding a lock that every process sharing the store
+ * takes for the same principal and connector. The worker's lock is a
+ * Postgres advisory lock (ADR 0022), so two replicas never race one
+ * rotation: the second reads the token the first has just stored.
+ */
+export type RotationLock = <T>(work: () => Promise<T>) => Promise<T>;
+
 export interface AccessTokenProviderOptions {
   store: GraphTokenStore;
   tenantId: string;
@@ -32,6 +40,15 @@ export interface AccessTokenProviderOptions {
    */
   onRefreshFailed?: (error: TokenRefreshError) => void | Promise<void>;
   fetchImpl?: typeof fetch;
+  /**
+   * Held across the read of the stored refresh token, the refresh and the
+   * write of the rotated one. Without it, concurrent callers in this
+   * process still share one refresh, but another process could redeem
+   * the same refresh token at the same time.
+   */
+  rotationLock?: RotationLock;
+  /** The message when no token is stored: who should connect, and where. */
+  notConnectedMessage?: string;
 }
 
 interface CachedToken {
@@ -46,11 +63,14 @@ export function createAccessTokenProvider(
   let cached: CachedToken | null = null;
   let inFlight: Promise<string> | null = null;
 
+  const lock: RotationLock = options.rotationLock ?? ((work) => work());
+
   const refresh = async (): Promise<string> => {
     const refreshToken = await options.store.getRefreshToken();
     if (refreshToken === null) {
       throw new ConnectorError(
-        'graph token: no Microsoft Graph refresh token is stored. Open /auth/graph/connect as Dom and consent once; see docs/runbooks/entra-setup.md section 7.',
+        options.notConnectedMessage ??
+          'graph token: no Microsoft Graph refresh token is stored. Open /auth/graph/connect as the principal and consent once; see docs/runbooks/entra-setup.md section 7.',
         { connector: 'graph', operation: 'token', retryable: false },
       );
     }
@@ -83,7 +103,7 @@ export function createAccessTokenProvider(
     }
     // Concurrent callers share one refresh, so a burst of watcher calls
     // rotates the stored token once rather than racing each other.
-    inFlight ??= refresh().finally(() => {
+    inFlight ??= lock(refresh).finally(() => {
       inFlight = null;
     });
     return inFlight;

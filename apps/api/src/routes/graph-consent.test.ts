@@ -1,8 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ServerDeps, GraphTokenStoreLike } from '../deps.js';
+import type { ServerDeps } from '../deps.js';
 import { buildServer } from '../server.js';
-import { fakeDeps, type FakeDeps } from '../test-fakes.js';
+import {
+  fakeDeps,
+  fakeIdentity,
+  fakeVerifier,
+  TEST_PRINCIPAL_ID,
+  type FakeDeps,
+} from '../test-fakes.js';
 import { graphConsentConfigurationError } from './graph-consent.js';
 
 const BEARER = { authorization: 'Bearer good-token' };
@@ -10,23 +16,24 @@ const TENANT = '11111111-2222-3333-4444-555555555555';
 const CLIENT = '66666666-7777-8888-9999-000000000000';
 const REFRESH_TOKEN = 'the-first-refresh-token';
 
-class FakeGraphTokenStore implements GraphTokenStoreLike {
+/** The principal vault as the api sees it: one writer per principal, nothing to read. */
+class FakeTokenWriters {
   stored: string | null = null;
   writes = 0;
+  readonly principals: string[] = [];
 
-  getRefreshToken(): Promise<string | null> {
-    return Promise.resolve(this.stored);
-  }
-
-  setRefreshToken(token: string): Promise<void> {
-    this.stored = token;
-    this.writes += 1;
-    return Promise.resolve();
-  }
+  writerFor = (principalId: string) => ({
+    setRefreshToken: (token: string): Promise<void> => {
+      this.stored = token;
+      this.writes += 1;
+      this.principals.push(principalId);
+      return Promise.resolve();
+    },
+  });
 }
 
 let harness: FakeDeps;
-let tokenStore: FakeGraphTokenStore;
+let tokenStore: FakeTokenWriters;
 let server: FastifyInstance;
 /** The form each stubbed token request carried. */
 let tokenRequests: URLSearchParams[];
@@ -60,7 +67,7 @@ const startConsent = async (): Promise<string> => {
 
 beforeEach(() => {
   harness = fakeDeps();
-  tokenStore = new FakeGraphTokenStore();
+  tokenStore = new FakeTokenWriters();
   tokenRequests = [];
   const deps: ServerDeps = {
     ...harness.server,
@@ -69,7 +76,7 @@ beforeEach(() => {
       clientId: CLIENT,
       clientSecret: 'a-client-secret',
       publicApiUrl: 'https://api.example.com',
-      tokenStore,
+      tokenWriterFor: tokenStore.writerFor,
     },
   };
   server = buildServer(deps);
@@ -192,6 +199,8 @@ describe('GET /auth/graph/callback', () => {
     expect(response.body).toContain('Lance is connected');
     expect(response.body).toContain('You can close this tab.');
     expect(tokenStore.stored).toBe(REFRESH_TOKEN);
+    // The secret of the principal who started the consent, and nobody else's.
+    expect(tokenStore.principals).toEqual([TEST_PRINCIPAL_ID]);
 
     const sent = tokenRequests[0];
     expect(sent?.get('grant_type')).toBe('authorization_code');
@@ -267,6 +276,52 @@ describe('GET /auth/graph/callback', () => {
   });
 });
 
+describe('a consent by a second principal (ADR 0022)', () => {
+  it('lets an onboarding principal connect and stores the token in their own secret alone', async () => {
+    stubTokenEndpoint(200, {
+      token_type: 'Bearer',
+      expires_in: 3600,
+      access_token: 'an-access-token',
+      refresh_token: 'the-colleagues-refresh-token',
+    });
+    const writers = new FakeTokenWriters();
+    const colleague = fakeDeps({
+      auth: fakeVerifier({
+        'colleague-token': fakeIdentity({ oid: 'oid-colleague', upn: 'colleague@example.test' }),
+      }),
+    });
+    const app = buildServer({
+      ...colleague.server,
+      graph: {
+        tenantId: TENANT,
+        clientId: CLIENT,
+        clientSecret: 'a-client-secret',
+        publicApiUrl: 'https://api.example.com',
+        tokenWriterFor: writers.writerFor,
+      },
+    });
+
+    const connect = await app.inject({
+      method: 'GET',
+      url: '/auth/graph/connect',
+      headers: { authorization: 'Bearer colleague-token' },
+    });
+    expect(connect.statusCode).toBe(302);
+    const state = new URL(String(connect.headers['location'])).searchParams.get('state') ?? '';
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/auth/graph/callback?code=an-auth-code&state=${state}`,
+    });
+
+    expect(callback.statusCode).toBe(200);
+    const created = colleague.directory.principals.get('oid-colleague');
+    expect(created?.status).toBe('onboarding');
+    expect(writers.principals).toEqual([created?.id]);
+    expect(writers.principals).not.toContain(TEST_PRINCIPAL_ID);
+    await app.close();
+  });
+});
+
 describe('an api that was not given the Entra app credentials', () => {
   it('answers 503 rather than half-running the flow', async () => {
     const bare = buildServer(fakeDeps().server);
@@ -292,6 +347,6 @@ describe('an api that was not given the Entra app credentials', () => {
     expect(error.statusCode).toBe(503);
     expect(error.message).toContain('PUBLIC_API_URL');
     expect(error.message).toContain('ENTRA_CLIENT_SECRET');
-    expect(error.message).toContain('KEY_VAULT_URL');
+    expect(error.message).toContain('PRINCIPAL_KEY_VAULT_URL');
   });
 });

@@ -90,6 +90,7 @@ describe('taskDraft', () => {
       },
       [{ system: 'graph', recordId: 'm1', hash: 'h', observedAt: '2026-09-21T08:00:00.000Z' }],
       config.notion,
+      config.notion.domUserId,
     );
     expect(draft.actionClass).toBe('create_task');
     expect(draft.counterpartyClass).toBe('internal');

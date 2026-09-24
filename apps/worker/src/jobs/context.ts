@@ -304,6 +304,8 @@ export async function buildPrincipalContext(
   const slack = connectors?.slack ?? null;
   const graph = connectors?.graph ?? null;
   const notion = connectors?.notion ?? null;
+  // Whose rows in the shared All Tasks database are the principal's (ADR 0022).
+  const principalNotionUserId = notion?.principalUserId ?? principal.notionUserId ?? null;
   const agent = buildAgent(shared, principal, db, control);
   const verifier = verifierFor(graph);
 
@@ -437,6 +439,7 @@ export async function buildPrincipalContext(
       reads: briefReads(db, ontology),
       slack,
       createProposal,
+      principalNotionUserId,
     },
     weekly: { db, config, agent, slack },
     detectors: { db, config, ontology, control, now: nowIso },
@@ -463,7 +466,7 @@ export async function buildPrincipalContext(
             createProposal,
             ontology,
             extractCommitments,
-            dom: { ...config.dom, notionUserId: config.notion.domUserId },
+            dom: { ...config.dom, notionUserId: principalNotionUserId },
             debrief: { slack },
           },
     chase: agent === null ? null : { db, config, agent, ontology, createProposal },

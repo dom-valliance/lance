@@ -56,6 +56,8 @@ export interface BriefDeps {
   reads: ReadToolDeps;
   slack: Pick<SlackSurface, 'post'> | null;
   createProposal: ReturnType<typeof createProposalHandler>;
+  /** `principals.notion_user_id`, whose Notion tasks the briefs list (ADR 0022). */
+  principalNotionUserId?: string | null;
   now?: () => string;
 }
 
@@ -74,7 +76,15 @@ interface SlackDelivery {
 type StoredMorningBrief = MorningBriefContent & SlackDelivery;
 
 function dataDeps(deps: BriefDeps, now: () => string): BriefDataDeps {
-  return { db: deps.db, ontology: deps.ontology, config: deps.config, now };
+  return {
+    db: deps.db,
+    ontology: deps.ontology,
+    config: deps.config,
+    ...(deps.principalNotionUserId === undefined
+      ? {}
+      : { principalNotionUserId: deps.principalNotionUserId }),
+    now,
+  };
 }
 
 async function recordBrief(

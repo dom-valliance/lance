@@ -74,6 +74,15 @@ export const verifiedCaller = (request: FastifyRequest): Caller => {
  * reaches only the placeholder page (package 5.5 builds the checklist); a
  * paused or offboarded principal reaches nothing.
  */
+/**
+ * Connecting a credential (Microsoft 365, Jamie) is part of onboarding
+ * (docs/plans/multi-user.md M3, steps 2 and 3), so an onboarding principal
+ * may do it as well as an active one. Paused and offboarded principals may
+ * not.
+ */
+export const requireConnectable = (caller: Caller): Caller =>
+  caller.principal.status === 'onboarding' ? caller : requireActive(caller);
+
 export const requireActive = (caller: Caller): Caller => {
   switch (caller.principal.status) {
     case 'active':

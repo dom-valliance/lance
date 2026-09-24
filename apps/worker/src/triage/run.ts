@@ -179,11 +179,16 @@ async function existingTaskProposals(db: Db, correlationId: string): Promise<Map
   return byTitle;
 }
 
-/** Deterministic conversion of a task candidate into a Notion create_task draft (ADR 0009). */
+/**
+ * Deterministic conversion of a task candidate into a Notion create_task
+ * draft (ADR 0009). The task is assigned to the principal: `assigneeId` is
+ * their `principals.notion_user_id` (ADR 0022).
+ */
 export function taskDraft(
   candidate: TaskCandidate,
   provenance: ProvenanceRef[],
   notion: Config['notion'],
+  assigneeId: string,
 ): ProposalDraft {
   const delegate =
     candidate.assigneeName !== null && candidate.assigneeName.trim().length > 0
@@ -196,7 +201,7 @@ export function taskDraft(
     // property names by the connector); the critic checks the same keys.
     input: {
       title,
-      assigneeIds: [notion.domUserId],
+      assigneeIds: [assigneeId],
       ...(candidate.dueDate === null ? {} : { due: candidate.dueDate }),
       ...(candidate.priority === null ? {} : { priority: candidate.priority }),
       ...(candidate.description === null ? {} : { description: candidate.description }),
@@ -311,10 +316,22 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   // correlation id is reported as that proposal rather than created again.
   const existing = await existingTaskProposals(deps.db, job.correlationId);
   const taskProposals: string[] = [];
+  // Undefined falls back to config for callers built before ADR 0022; null
+  // means the principal's Notion user is unresolved, and a task nobody can
+  // be assigned is not proposed.
+  const assigneeId =
+    deps.dom?.notionUserId === undefined ? deps.config.notion.domUserId : deps.dom.notionUserId;
+  if (assigneeId === null && output.taskCandidates.length > 0) {
+    console.warn(
+      { correlationId: job.correlationId, candidates: output.taskCandidates.length },
+      'task candidates not proposed: the principal has no Notion user id yet (principals.notion_user_id)',
+    );
+  }
   for (const candidate of output.taskCandidates) {
+    if (assigneeId === null) break;
     const provenance = provenanceFor(events, candidate.recordId);
     if (provenance.length === 0) continue;
-    const draft = taskDraft(candidate, provenance, deps.config.notion);
+    const draft = taskDraft(candidate, provenance, deps.config.notion, assigneeId);
     const already = existing.get(taskTitleOf(draft));
     if (already !== undefined) {
       taskProposals.push(already);

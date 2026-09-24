@@ -1,81 +1,71 @@
-import { DefaultAzureCredential } from '@azure/identity';
-import { SecretClient } from '@azure/keyvault-secrets';
+import { LEGACY_GRAPH_PLACEHOLDER, principalSecretName } from '@lance/shared';
+import type { SecretStore, SecretWriter } from '../secrets/index.js';
 
 /**
- * Where the delegated Graph refresh token lives. Spec 4.1: "Tokens live in
- * Key Vault, never in Postgres." Spec 4.2: the token is rotated on every
- * use, so the store is written far more often than it is read.
+ * Where a principal's delegated Graph refresh token lives. Spec 4.1:
+ * "Tokens live in Key Vault, never in Postgres." Spec 4.2: the token is
+ * rotated on every use. ADR 0022: one secret per principal,
+ * `graph-refresh-token--<principalId>`, in the principal vault; the api
+ * writes it at consent and the worker reads and rotates it.
  *
  * Nothing in this file logs, returns in an error, or otherwise reveals a
  * token value.
  */
 
-/** The Key Vault secret name the Entra runbook provisions. */
-export const GRAPH_REFRESH_TOKEN_SECRET_NAME = 'graph-refresh-token';
+/**
+ * The one secret the whole environment used before ADR 0022, in the
+ * static vault. The worker copies it once into Dom's per-principal secret
+ * and never writes it.
+ */
+export const LEGACY_GRAPH_REFRESH_TOKEN_SECRET_NAME = 'graph-refresh-token';
 
 /**
- * Placeholder the infrastructure writes so the Key Vault reference on the
- * Container App resolves before Dom has consented. It is not a token and
- * reads as "not connected yet".
+ * Placeholder the Phase 0 runbook wrote before the first consent. It is
+ * not a token and reads as "not connected yet".
  */
-export const PENDING_FIRST_CONSENT = 'pending-first-consent';
+export const PENDING_FIRST_CONSENT = LEGACY_GRAPH_PLACEHOLDER;
 
 export interface GraphTokenStore {
-  /** The stored refresh token, or null when Lance has never been connected. */
+  /** The stored refresh token, or null when the principal has never connected. */
   getRefreshToken(): Promise<string | null>;
   setRefreshToken(token: string): Promise<void>;
 }
 
-/** The part of `SecretClient` this store uses, so a test can supply a double. */
-export interface SecretClientLike {
-  getSecret(name: string): Promise<{ value?: string | undefined }>;
-  setSecret(name: string, value: string): Promise<unknown>;
+/** What the api holds: it stores the first token at consent and can read nothing back. */
+export interface GraphTokenWriter {
+  setRefreshToken(token: string): Promise<void>;
 }
 
-function isSecretNotFound(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false;
-  const statusCode = 'statusCode' in error ? error.statusCode : undefined;
-  const code = 'code' in error ? error.code : undefined;
-  return statusCode === 404 || code === 'SecretNotFound';
-}
+/** The name of `principalId`'s refresh token secret in the principal vault. */
+export const graphRefreshTokenSecretName = (principalId: string): string =>
+  principalSecretName('graph-refresh-token', principalId);
 
-/** The production store: one secret in the environment's Key Vault. */
-export class KeyVaultTokenStore implements GraphTokenStore {
+/** The production store: one principal's secret in the principal vault. */
+export class PrincipalTokenStore implements GraphTokenStore {
+  readonly secretName: string;
+
   constructor(
-    private readonly client: SecretClientLike,
-    private readonly secretName: string = GRAPH_REFRESH_TOKEN_SECRET_NAME,
-  ) {}
-
-  /**
-   * Builds the store over `KEY_VAULT_URL` and the Container App's managed
-   * identity. `DefaultAzureCredential` also picks up the Azure CLI login
-   * on a developer machine, so the same code path works locally.
-   */
-  static fromEnv(env: NodeJS.ProcessEnv = process.env): KeyVaultTokenStore {
-    const vaultUrl = env['KEY_VAULT_URL'];
-    if (vaultUrl === undefined || vaultUrl === '') {
-      throw new Error(
-        'Missing required environment variable "KEY_VAULT_URL". It is the vault URI printed by docs/runbooks/deploy.md step 3, for example https://kv-lance-dev-abcd.vault.azure.net.',
-      );
-    }
-    return new KeyVaultTokenStore(new SecretClient(vaultUrl, new DefaultAzureCredential()));
+    private readonly secrets: SecretStore,
+    principalId: string,
+  ) {
+    this.secretName = graphRefreshTokenSecretName(principalId);
   }
 
-  async getRefreshToken(): Promise<string | null> {
-    let value: string | undefined;
-    try {
-      value = (await this.client.getSecret(this.secretName)).value;
-    } catch (error) {
-      if (isSecretNotFound(error)) return null;
-      throw error;
-    }
-    if (value === undefined || value === '' || value === PENDING_FIRST_CONSENT) return null;
-    return value;
+  getRefreshToken(): Promise<string | null> {
+    return this.secrets.get(this.secretName);
   }
 
   async setRefreshToken(token: string): Promise<void> {
-    await this.client.setSecret(this.secretName, token);
+    await this.secrets.set(this.secretName, token);
   }
+}
+
+/** The api's half: writes `principalId`'s secret and nothing else. */
+export function principalTokenWriter(secrets: SecretWriter, principalId: string): GraphTokenWriter {
+  const name = graphRefreshTokenSecretName(principalId);
+  return {
+    setRefreshToken: (token) => secrets.set(name, token),
+  };
 }
 
 /**

@@ -54,8 +54,12 @@ export interface ObservationRecord {
 }
 
 export interface TaskViewOptions {
-  /** `config.notion.domUserId`; an All Tasks row assigned to it is Dom's. */
-  domNotionUserId: string;
+  /**
+   * `principals.notion_user_id` of the principal reading the page (ADR
+   * 0022); an All Tasks row assigned to it is theirs. Null while it is
+   * unresolved, and then no Notion row is marked as theirs.
+   */
+  principalNotionUserId: string | null;
 }
 
 function asRecord(payload: unknown): Record<string, unknown> | null {
@@ -102,7 +106,9 @@ function notionTaskView(
     // The All Tasks DB holds assignee ids, not names; the page shows whose
     // it is through `assignedToDom` until the ontology fills the rest in.
     assigneeName: null,
-    assignedToDom: strings(record, 'assigneeIds').includes(options.domNotionUserId),
+    assignedToDom:
+      options.principalNotionUserId !== null &&
+      strings(record, 'assigneeIds').includes(options.principalNotionUserId),
     url: str(record, 'url'),
     observedAt: row.ts.toISOString(),
     meetingTitle: null,

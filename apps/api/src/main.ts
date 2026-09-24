@@ -1,9 +1,14 @@
 import {
+  checkAccess,
+  createJamieConnector,
   createSlackChannelProvisioner,
   createSlackSurface,
+  principalVaultFromEnv,
+  writeOnly,
+  type SecretWriter,
   type SlackSurface,
 } from '@lance/connectors';
-import { KeyVaultTokenStore } from '@lance/connectors/graph';
+import { principalTokenWriter } from '@lance/connectors/graph';
 import { createDb, scopedDb, systemState, SYSTEM_STATE_ID, type Db } from '@lance/db';
 import {
   countProposals,
@@ -17,7 +22,13 @@ import {
   SystemControl,
 } from '@lance/ledger';
 import { OntologyRepository } from '@lance/ontology';
-import { deliveryChannelFor, getConfig, readSecret, type Config } from '@lance/shared';
+import {
+  deliveryChannelFor,
+  getConfig,
+  principalSecretName,
+  readSecret,
+  type Config,
+} from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { pathToFileURL } from 'node:url';
 import { eq } from 'drizzle-orm';
@@ -32,6 +43,7 @@ import { createTaskStore } from './tasks/store.js';
 import type {
   ApiDeps,
   GraphConsentDeps,
+  JamieKeyDeps,
   PrincipalKey,
   ServerDeps,
   SlackDeps,
@@ -197,6 +209,8 @@ export interface ServerRuntimeOptions {
   webUrl?: string | null;
   /** Defaults to the Postgres nonce store over `root`. */
   replay?: ReplayGuardLike;
+  /** Omitted by a process without the principal vault. */
+  jamieKeys?: JamieKeyDeps;
   /**
    * One queue for every principal: pg-boss's tables carry no principal, so
    * every job payload names the principal it is for (ADR 0025).
@@ -259,8 +273,22 @@ export const createServerDeps = (options: ServerRuntimeOptions): ServerDeps => {
     },
     ingestSecret: options.ingestSecret,
     ...(options.graph === undefined ? {} : { graph: options.graph }),
+    ...(options.jamieKeys === undefined ? {} : { jamieKeys: options.jamieKeys }),
   };
 };
+
+/**
+ * Storing a principal's Jamie key (ADR 0022): a test call through the
+ * read-only connector's own access check, then a write to the principal
+ * vault the api can never read back.
+ */
+export const jamieKeyDeps = (vault: SecretWriter): JamieKeyDeps => ({
+  check: async (apiKey) => {
+    await checkAccess(createJamieConnector({ apiKey }));
+  },
+  store: (principalId, apiKey) =>
+    vault.set(principalSecretName('jamie-api-key', principalId), apiKey),
+});
 
 /**
  * The bot token, or null when none is set. A local api then still answers
@@ -317,6 +345,16 @@ export const main = async (): Promise<void> => {
   const root = createDb();
   const executeQueue = createExecuteQueue(root);
 
+  // The principal vault, write only (ADR 0022). Without it the consent and
+  // Jamie routes answer 503 naming PRINCIPAL_KEY_VAULT_URL.
+  const vault = principalVaultFromEnv();
+  const principalSecrets = vault === null ? null : writeOnly(vault);
+  if (principalSecrets === null) {
+    console.warn(
+      'PRINCIPAL_KEY_VAULT_URL is not set: Microsoft 365 consent and Jamie keys cannot be stored by this api.',
+    );
+  }
+
   const slackToken = slackTokenFromEnv();
   const deps = createServerDeps({
     config,
@@ -331,13 +369,19 @@ export const main = async (): Promise<void> => {
         }),
     webUrl: nonEmpty(process.env['PUBLIC_WEB_URL']),
     auth: createEntraVerifier({ tenantId, clientId }),
-    graph: {
-      tenantId,
-      clientId,
-      clientSecret: readSecret('ENTRA_CLIENT_SECRET'),
-      publicApiUrl: requiredEnv('PUBLIC_API_URL'),
-      tokenStore: KeyVaultTokenStore.fromEnv(),
-    },
+    ...(principalSecrets === null
+      ? {}
+      : {
+          graph: {
+            tenantId,
+            clientId,
+            clientSecret: readSecret('ENTRA_CLIENT_SECRET'),
+            publicApiUrl: requiredEnv('PUBLIC_API_URL'),
+            tokenWriterFor: (principalId: string) =>
+              principalTokenWriter(principalSecrets, principalId),
+          },
+          jamieKeys: jamieKeyDeps(principalSecrets),
+        }),
     slack: {
       signingSecret: readSecret('SLACK_SIGNING_SECRET'),
       // Dom's Slack id until he has linked through /lance login (ADR 0021).

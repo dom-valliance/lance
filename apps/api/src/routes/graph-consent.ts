@@ -10,21 +10,22 @@ import { newUlid, nowIso } from '@lance/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { createConsentStateStore } from '../auth/graph-state.js';
-import { requireActive, requireEntra, verifiedCaller } from '../auth/require-entra.js';
+import { requireConnectable, requireEntra, verifiedCaller } from '../auth/require-entra.js';
 import type { GraphConsentDeps, ServerDeps } from '../deps.js';
-import { BadRequestError, ForbiddenError, HttpError } from '../errors.js';
+import { BadRequestError, HttpError } from '../errors.js';
 
 /**
  * The delegated Graph consent flow (spec 4.1, docs/runbooks/entra-setup.md
- * section 7). Dom opens `/auth/graph/connect` once, consents, and Entra
- * returns him to `/auth/graph/callback` with an authorisation code. The
+ * section 7). A principal opens `/auth/graph/connect` once, consents, and
+ * Entra returns them to `/auth/graph/callback` with an authorisation code. The
  * api swaps the code for the first token pair, stores the refresh token
  * and records the connection in the ledger.
  *
- * `connect` sits behind the Entra guard, so only an active principal can
- * start a consent, and the state remembers which one did. The token store
- * is still the one secret until package 5.2 makes it per principal, so
- * until then only the principal in DOM_EMAIL may connect.
+ * `connect` sits behind the Entra guard, so only an active or onboarding
+ * principal can start a consent, and the state remembers which one did.
+ * The callback writes that principal's own secret,
+ * `graph-refresh-token--<principalId>` in the principal vault (ADR 0022),
+ * which the api can set and never read back.
  * `callback` cannot: Entra sends the browser there with no bearer token.
  * Its protection is the `state` value, which only a `connect` in the last
  * ten minutes can have issued and which is good for one use.
@@ -50,7 +51,7 @@ const redirectUri = (graph: GraphConsentDeps): string =>
 export const graphConsentConfigurationError = (): HttpError =>
   new HttpError(
     503,
-    'The Microsoft Graph consent flow is not configured on this api. Set PUBLIC_API_URL, ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET and KEY_VAULT_URL, then restart the container.',
+    'The Microsoft Graph consent flow is not configured on this api. Set PUBLIC_API_URL, ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET and PRINCIPAL_KEY_VAULT_URL, then restart the container.',
   );
 
 const graphDeps = (server: ServerDeps): GraphConsentDeps => {
@@ -58,7 +59,7 @@ const graphDeps = (server: ServerDeps): GraphConsentDeps => {
   return server.graph;
 };
 
-/** The page Dom sees when the consent has landed. */
+/** The page the principal sees when the consent has landed. */
 export const connectedPage = (agentDisplayName: string): string =>
   `<!doctype html>
 <html lang="en-GB">
@@ -88,12 +89,7 @@ export const graphConsentRoutes =
     const states = createConsentStateStore();
 
     fastify.get('/auth/graph/connect', { onRequest: requireEntra(server) }, (request, reply) => {
-      const caller = requireActive(verifiedCaller(request));
-      if (caller.principal.upn.toLowerCase() !== server.config.dom.email.toLowerCase()) {
-        throw new ForbiddenError(
-          `Lance holds one Microsoft 365 connection for now, and it belongs to ${server.config.dom.email}. Connections for other accounts are not open yet.`,
-        );
-      }
+      const caller = requireConnectable(verifiedCaller(request));
       const graph = graphDeps(server);
       const state = generateState();
       const codeVerifier = generateCodeVerifier();
@@ -172,7 +168,9 @@ export const graphConsentRoutes =
         throw error;
       }
 
-      await graph.tokenStore.setRefreshToken(tokens.refreshToken);
+      // The principal who started the consent, from the state, never from
+      // anything the callback's query could name.
+      await graph.tokenWriterFor(claimed.principal.id).setRefreshToken(tokens.refreshToken);
 
       const deps = server.depsFor(claimed.principal);
       await deps.writer.append({

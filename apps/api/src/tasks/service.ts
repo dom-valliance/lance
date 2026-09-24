@@ -34,18 +34,19 @@ export async function listTasks(deps: TaskDeps, input: ListTasksInput): Promise<
   };
   // One row beyond the page tells us whether a next page exists; the count
   // runs beside it over the same filters, without the cursor.
-  const [rows, total] = await Promise.all([
+  const [rows, total, principalNotionUserId] = await Promise.all([
     deps.tasks.list({
       ...filter,
       limit: size + 1,
       ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
     }),
     deps.tasks.count(filter),
+    deps.tasks.principalNotionUserId(),
   ]);
   const page = rows.slice(0, size);
   const nextCursor = rows.length > size ? (page.at(-1)?.id ?? null) : null;
   return {
-    items: toTaskViews(page, { domNotionUserId: deps.config.notion.domUserId }),
+    items: toTaskViews(page, { principalNotionUserId }),
     nextCursor,
     total,
   };

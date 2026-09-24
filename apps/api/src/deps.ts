@@ -263,12 +263,12 @@ export interface SlackLinksLike {
 }
 
 /**
- * Where the delegated Graph refresh token lives. Structural, like the
- * other `*Like` types here: `KeyVaultTokenStore` from `@lance/connectors`
- * satisfies it without knowing about the api, and a test passes a double.
+ * Where the consent callback stores a principal's first Graph refresh
+ * token (ADR 0022): `graph-refresh-token--<principalId>` in the principal
+ * vault, which the api may write and never read. `principalTokenWriter`
+ * from `@lance/connectors` satisfies it; a test passes a double.
  */
-export interface GraphTokenStoreLike {
-  getRefreshToken(): Promise<string | null>;
+export interface GraphTokenWriterLike {
   setRefreshToken(token: string): Promise<void>;
 }
 
@@ -279,7 +279,20 @@ export interface GraphConsentDeps {
   clientSecret: string;
   /** Origin the browser reaches the api on, from `PUBLIC_API_URL`. */
   publicApiUrl: string;
-  tokenStore: GraphTokenStoreLike;
+  /** The writer for one principal's own refresh token secret. */
+  tokenWriterFor: (principalId: string) => GraphTokenWriterLike;
+}
+
+/**
+ * What `POST /credentials/jamie` needs (ADR 0022, docs/plans/multi-user.md
+ * M2 and M3 step 3). The key goes from the request body to a test call and
+ * then to Key Vault; it is never written to Postgres or a log line.
+ */
+export interface JamieKeyDeps {
+  /** A test call with the key. Resolves when Jamie accepts it; rejects with a reason otherwise. */
+  check: (apiKey: string) => Promise<void>;
+  /** Stores the key as `jamie-api-key--<principalId>` in the principal vault. Write only. */
+  store: (principalId: string, apiKey: string) => Promise<void>;
 }
 
 /**
@@ -399,6 +412,11 @@ export interface ServerDeps {
    * naming what is missing rather than half-running the flow.
    */
   graph?: GraphConsentDeps;
+  /**
+   * Absent in a process without the principal vault
+   * (`PRINCIPAL_KEY_VAULT_URL`); the route then answers 503.
+   */
+  jamieKeys?: JamieKeyDeps;
   /** Injected in tests. Returns an ISO-8601 instant with an explicit offset. */
   now?: () => string;
 }
