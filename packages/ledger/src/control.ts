@@ -8,7 +8,7 @@ import {
   type SystemState,
 } from '@lance/db';
 import { newUlid, nowIso, type SystemMode } from '@lance/shared';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { LedgerReader } from './reader.js';
 import { LedgerWriter, type DbExecutor } from './writer.js';
 
@@ -216,6 +216,7 @@ export class SystemControl {
 
   async pause(options: PauseOptions): Promise<PauseResult> {
     return this.db.transaction(async (tx) => {
+      await this.lockHolds(tx);
       const current = await this.readOwn(tx);
       const ts = nowIso();
       const correlationId = newUlid();
@@ -268,6 +269,7 @@ export class SystemControl {
    */
   async pauseAll(options: PauseOptions): Promise<PauseResult> {
     return this.db.transaction(async (tx) => {
+      await this.lockHolds(tx);
       const current = await this.readGlobal(tx);
       const ts = nowIso();
       const held = await holdProposals(tx, ts);
@@ -344,27 +346,63 @@ export class SystemControl {
   }
 
   /**
-   * Records that the executor held a proposal because the system was paused
-   * when its job ran, so resume can release it (spec 4.3). The executor calls
-   * this after moving the proposal to held.
+   * Serialises every change to this principal's holds (ADR 0015): pause,
+   * resume and the executor's hold take the same transaction lock, so a
+   * resume never reads the ledger between a hold's status change and its
+   * event. The key comes from the session's own scope.
    */
-  async recordHold(
-    held: HeldProposal[],
-    options: ActorOptions & { reason: string },
-  ): Promise<{ eventId: string }> {
-    const event = await this.writer.append({
-      ts: nowIso(),
-      actor: options.actor,
-      kind: 'state_changed',
-      sourceSystem: 'lance',
-      correlationId: newUlid(),
-      payload: { change: 'hold', reason: options.reason, held },
+  private async lockHolds(tx: DbExecutor): Promise<void> {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended('lance:holds:' || app_principal(), 0))`,
+    );
+  }
+
+  /**
+   * The executor's hold, atomic with its ledger event and ordered against
+   * pause and resume. Under the lock the run state is read again: if a
+   * resume landed after the executor's own check, `runnable` says so and
+   * nothing is held, so the executor goes on to the write rather than
+   * parking a proposal no resume will ever release.
+   */
+  async holdUnlessRunnable(
+    proposal: {
+      id: string;
+      from: HoldableStatus;
+      current: readonly (HoldableStatus | 'executing')[];
+    },
+    options: ActorOptions & { reason: string; runnable: (state: RunState) => boolean },
+  ): Promise<{ held: boolean; eventId: string | null }> {
+    return this.db.transaction(async (tx) => {
+      await this.lockHolds(tx);
+      if (options.runnable(await this.readWith(tx))) return { held: false, eventId: null };
+      const moved = await tx
+        .update(proposals)
+        .set({ status: 'held', updatedAt: new Date(nowIso()) })
+        .where(and(eq(proposals.id, proposal.id), inArray(proposals.status, [...proposal.current])))
+        .returning({ id: proposals.id });
+      if (moved.length === 0) return { held: false, eventId: null };
+      const event = await this.writer.append(
+        {
+          ts: nowIso(),
+          actor: options.actor,
+          kind: 'state_changed',
+          sourceSystem: 'lance',
+          correlationId: newUlid(),
+          payload: {
+            change: 'hold',
+            reason: options.reason,
+            held: [{ id: proposal.id, from: proposal.from }],
+          },
+        },
+        tx,
+      );
+      return { held: true, eventId: event.id };
     });
-    return { eventId: event.id };
   }
 
   async resume(options: ActorOptions): Promise<ResumeResult> {
     return this.db.transaction(async (tx) => {
+      await this.lockHolds(tx);
       const current = await this.readOwn(tx);
       const ts = nowIso();
       if ((await this.readGlobal(tx)).paused) {

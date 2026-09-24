@@ -14,6 +14,7 @@ import {
 } from '@lance/db';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { eq } from 'drizzle-orm';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SystemControl, type PauseResult, type ResumeResult } from './control.js';
@@ -463,5 +464,43 @@ describe('the kill switch across principals', () => {
     const resumed = await control.resume({ actor: DOM });
     expect(resumed.releasedProposalIds).toContain(approvedId);
     expect(await statusOf(approvedId)).toBe('approved');
+  });
+});
+
+describe("the executor's hold against a racing resume", () => {
+  it('never leaves a proposal held once the principal is running again', async () => {
+    const liveOrNot = (state: { paused: boolean }): boolean => !state.paused;
+    for (let round = 0; round < 15; round += 1) {
+      const id = await insertProposal('approved');
+      await control.pause({ reason: `race ${String(round)}`, actor: DOM });
+      // The pause already held it; put it back as the executor would find a
+      // proposal approved a moment after the pause.
+      await appDb.update(proposals).set({ status: 'approved' }).where(eq(proposals.id, id));
+      const [, hold] = await Promise.all([
+        control.resume({ actor: DOM }),
+        control.holdUnlessRunnable(
+          { id, from: 'approved', current: ['approved', 'edited'] },
+          { actor: 'agent:executor@0.1.0', reason: 'paused', runnable: liveOrNot },
+        ),
+      ]);
+      const state = await control.read();
+      expect(state.paused).toBe(false);
+      // Either the hold committed before the resume read the ledger and the
+      // resume released it, or the resume came first and nothing was held.
+      expect({ round, held: hold.held, status: await statusOf(id) }).toMatchObject({
+        round,
+        status: 'approved',
+      });
+    }
+  }, 60000);
+
+  it('holds nothing once a resume has landed, so the executor goes on to the write', async () => {
+    const id = await insertProposal('approved');
+    const hold = await control.holdUnlessRunnable(
+      { id, from: 'approved', current: ['approved', 'edited'] },
+      { actor: 'agent:executor@0.1.0', reason: 'paused', runnable: () => true },
+    );
+    expect(hold).toEqual({ held: false, eventId: null });
+    expect(await statusOf(id)).toBe('approved');
   });
 });

@@ -2,7 +2,7 @@ import { proposals, type Db } from '@lance/db';
 import { LedgerWriter, SystemControl } from '@lance/ledger';
 import { newUlid, nowIso } from '@lance/shared';
 import { and, eq, inArray } from 'drizzle-orm';
-import type { PauseGate } from '../scheduler/gate.js';
+import { writeVerdict, type PauseGate } from '../scheduler/gate.js';
 import type { ExecuteJob } from '../scheduler/queues.js';
 
 export const EXECUTOR = 'executor';
@@ -62,18 +62,18 @@ export async function executeProposal(
   }
 
   if (!verdict.runnable) {
-    const held = await deps.db
-      .update(proposals)
-      .set({ status: 'held', updatedAt: new Date(nowIso()) })
-      .where(and(eq(proposals.id, proposal.id), inArray(proposals.status, ['approved', 'edited'])))
-      .returning({ id: proposals.id });
-    if (held.length > 0) {
-      await new SystemControl(deps.db).recordHold([{ id: proposal.id, from: proposal.status }], {
+    // The hold and its ledger event commit together under the lock resume
+    // takes, and the state is read again there: a resume in between means
+    // the write goes ahead instead (ADR 0015).
+    const hold = await new SystemControl(deps.db).holdUnlessRunnable(
+      { id: proposal.id, from: proposal.status, current: ['approved', 'edited'] },
+      {
         actor: EXECUTOR_ACTOR,
         reason: verdict.reason,
-      });
-    }
-    return { status: 'held', reason: verdict.reason };
+        runnable: (state) => writeVerdict(state).runnable,
+      },
+    );
+    if (hold.held) return { status: 'held', reason: verdict.reason };
   }
 
   // Compare-and-swap: only the worker that moves the row from approved or
@@ -92,15 +92,15 @@ export async function executeProposal(
   // meantime stops the write and the proposal goes back to held.
   const recheck = await deps.gate.checkWrite();
   if (!recheck.runnable) {
-    await deps.db
-      .update(proposals)
-      .set({ status: 'held', updatedAt: new Date(nowIso()) })
-      .where(eq(proposals.id, proposal.id));
-    await new SystemControl(deps.db).recordHold([{ id: proposal.id, from: proposal.status }], {
-      actor: EXECUTOR_ACTOR,
-      reason: recheck.reason,
-    });
-    return { status: 'held', reason: recheck.reason };
+    const hold = await new SystemControl(deps.db).holdUnlessRunnable(
+      { id: proposal.id, from: proposal.status, current: ['executing'] },
+      {
+        actor: EXECUTOR_ACTOR,
+        reason: recheck.reason,
+        runnable: (state) => writeVerdict(state).runnable,
+      },
+    );
+    if (hold.held) return { status: 'held', reason: recheck.reason };
   }
 
   const ledger = new LedgerWriter(deps.db);
