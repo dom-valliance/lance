@@ -30,3 +30,4 @@ One file per decision, numbered, never edited after acceptance except to add a `
 | 0031 | Phase order after Phase 3 | Accepted |
 | 0032 | Migrations run before the apps move | Accepted |
 | 0033 | Shared nodes carry no private provenance | Accepted |
+| 0034 | Bulk mail skips model triage | Accepted |
