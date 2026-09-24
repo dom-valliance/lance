@@ -27,6 +27,8 @@ const CREATE_DB_ALLOWED = [
   'packages/ontology/src/rebuild.ts',
   // The local offboarding rehearsal, an entrypoint of its own (docs/runbooks/offboard-principal.md).
   'apps/worker/src/offboarding/drill.ts',
+  // The load harness, likewise an entrypoint of its own (docs/runbooks/load-test.md).
+  'apps/worker/src/load/run.ts',
   'packages/db/src/**/*.ts',
   '**/*.test.ts',
 ];
