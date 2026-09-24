@@ -108,7 +108,13 @@ function readEnv(name: string): string {
   return process.env[name] ?? '';
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+export const {
+  handlers,
+  auth,
+  signIn,
+  signOut,
+  unstable_update: updateSession,
+} = NextAuth({
   // Runs on Azure Container Apps, never on Vercel, so Auth.js must be told to
   // trust the incoming request's Host header explicitly.
   trustHost: true,
@@ -131,7 +137,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // tokens. Every later call checks the id token's own expiry and renews
     // it through the refresh token while there is still time; a refusal
     // marks the token so the session ends rather than failing every page.
-    async jwt({ token, account }) {
+    async jwt({ token, account, trigger }) {
       if (account !== null && account !== undefined && typeof account.id_token === 'string') {
         token[ID_TOKEN_CLAIM] = account.id_token;
         token[REFRESH_TOKEN_CLAIM] = account.refresh_token ?? null;
@@ -141,6 +147,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       if (token[ERROR_CLAIM] === REFRESH_ERROR) return token;
       const idToken = claimString(token, ID_TOKEN_CLAIM);
+      // `updateSession()` asks for the principal's status again: onboarding
+      // calls it when the principal becomes active, so the proxy stops
+      // sending them back to the checklist.
+      if (
+        trigger === 'update' &&
+        idToken !== null &&
+        !needsRefresh(claimNumber(token, EXPIRES_AT_CLAIM), Date.now())
+      ) {
+        return stampIdentity(token, idToken);
+      }
       const expiresAt =
         claimNumber(token, EXPIRES_AT_CLAIM) ?? (idToken === null ? null : jwtExpiresAt(idToken));
       if (!needsRefresh(expiresAt, Date.now())) {

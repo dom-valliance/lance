@@ -2,14 +2,20 @@
  * Where a signed-in person may go (ADR 0020). The api decides a principal's
  * status and refuses an onboarding principal everything but `me`; the web
  * app reads that status once at sign-in and at each id token renewal, and
- * sends an onboarding principal to the placeholder page instead of letting
- * every page fail.
+ * sends an onboarding principal to the onboarding checklist instead of
+ * letting every page fail.
  */
 
 export const PRINCIPAL_STATUSES = ['onboarding', 'active', 'paused', 'offboarded'] as const;
 export type PrincipalStatus = (typeof PRINCIPAL_STATUSES)[number];
 
 export const ONBOARDING_PATH = '/onboarding';
+
+/**
+ * Where an onboarding principal may go besides the checklist: the proxy
+ * that starts the Microsoft 365 consent (step 2) and sign-out.
+ */
+const ONBOARDING_ROUTES = ['/api/graph/connect', '/api/sign-out'];
 
 const isPrincipalStatus = (value: unknown): value is PrincipalStatus =>
   typeof value === 'string' && (PRINCIPAL_STATUSES as readonly string[]).includes(value);
@@ -41,7 +47,8 @@ export async function fetchPrincipalStatus(
 
 /**
  * The redirect, if any, for a request to `pathname`. An onboarding
- * principal sees only the placeholder; anyone else is sent away from it.
+ * principal sees only the checklist and the routes its steps use; anyone
+ * else is sent away from it.
  * An unknown status sends nobody anywhere.
  */
 export function redirectFor(
@@ -49,7 +56,9 @@ export function redirectFor(
   pathname: string,
 ): string | null {
   const onPlaceholder = pathname === ONBOARDING_PATH || pathname.startsWith(`${ONBOARDING_PATH}/`);
-  if (status === 'onboarding') return onPlaceholder ? null : ONBOARDING_PATH;
+  if (status === 'onboarding') {
+    return onPlaceholder || ONBOARDING_ROUTES.includes(pathname) ? null : ONBOARDING_PATH;
+  }
   if (status !== null && status !== undefined && onPlaceholder) return '/';
   return null;
 }

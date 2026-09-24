@@ -1,35 +1,33 @@
-import { SIGN_OUT_PATH } from '@/components/shell/nav';
-import { Wordmark } from '@/components/shell/wordmark';
-import { Button } from '@/components/ui/button';
+import { redirect } from 'next/navigation';
+import { dataProcessingNotice } from '@/lib/notice';
+import { onboardingRedirect } from '@/lib/onboarding-view';
+import { apiClient } from '@/lib/trpc';
+import { OnboardingChecklist } from './checklist';
 
 /**
- * Where a principal in status onboarding lands (ADR 0020). The shell
- * renders it centred with no navigation, because every other page and
- * every api procedure but `me` refuses them. Package 5.5 replaces this
- * with the onboarding checklist.
+ * The onboarding checklist (docs/plans/multi-user.md M3). A principal whose
+ * status is onboarding lands here from every page, and the shell renders it
+ * centred with no navigation. Each step's state comes from the api, so a
+ * reload shows where they stand; each write answers its own form through
+ * `useActionState`. When every required step is done, "Open Lance" asks the
+ * api to activate them, in dry run. A principal the api no longer counts as
+ * onboarding is sent on to the app.
  */
 
-const CARD = 'mx-auto flex w-full max-w-[360px] flex-col gap-5 rounded-xl bg-card p-8';
+export const dynamic = 'force-dynamic';
 
 function agentDisplayName(): string {
   return process.env['AGENT_DISPLAY_NAME'] ?? 'Lance';
 }
 
-export default function OnboardingPage() {
-  const name = agentDisplayName();
+export default async function OnboardingPage() {
+  const agentName = agentDisplayName();
+  const notice = dataProcessingNotice();
+  const client = await apiClient();
+  const state = await client.onboarding.state.query({ noticeSha256: notice.sha256 });
+  const target = onboardingRedirect(state.status);
+  if (target !== null) redirect(target);
   return (
-    <div className={CARD}>
-      <Wordmark name={name} className="h-6" />
-      <h1 className="text-xl font-semibold">Onboarding is not open yet</h1>
-      <p className="text-sm text-muted-foreground">
-        Your account has access to {name}, and you are on the list. Setting up your own mail,
-        meetings and tasks opens soon; until then there is nothing else here to use.
-      </p>
-      <form action={SIGN_OUT_PATH} method="post">
-        <Button type="submit" variant="outline" size="lg" className="w-full">
-          Sign out
-        </Button>
-      </form>
-    </div>
+    <OnboardingChecklist state={state} noticeMarkdown={notice.markdown} agentName={agentName} />
   );
 }

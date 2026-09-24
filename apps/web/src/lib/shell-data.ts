@@ -24,9 +24,9 @@ export interface ShellData {
    */
   signedIn: boolean;
   /**
-   * True for a principal whose onboarding has not opened: like the
-   * sign-in page, the placeholder renders alone, and nothing is read from
-   * the api, which would refuse it.
+   * True for a principal still onboarding: like the sign-in page, the
+   * checklist renders alone, and nothing else is read from the api, which
+   * would refuse it.
    */
   onboarding: boolean;
   /** True for a `Lance.Admin`, who alone sees Admin in the navigation (ADR 0024). */

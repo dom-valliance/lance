@@ -47,6 +47,13 @@ describe('redirectFor', () => {
     expect(redirectFor('onboarding', '/onboarding')).toBeNull();
   });
 
+  it('lets an onboarding principal start the Microsoft 365 consent and sign out', () => {
+    expect(redirectFor('onboarding', '/api/graph/connect')).toBeNull();
+    expect(redirectFor('onboarding', '/api/sign-out')).toBeNull();
+    expect(redirectFor('onboarding', '/onboarding/continue')).toBeNull();
+    expect(redirectFor('onboarding', '/api/events')).toBe('/onboarding');
+  });
+
   it('lets an active principal reach the app and sends them away from the placeholder', () => {
     expect(redirectFor('active', '/today')).toBeNull();
     expect(redirectFor('active', '/onboarding')).toBe('/');
