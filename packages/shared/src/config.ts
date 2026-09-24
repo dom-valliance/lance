@@ -85,6 +85,19 @@ export interface Config {
   scheduler: {
     tickSeconds: number;
   };
+  /**
+   * The per-process model limiter (docs/plans/multi-user.md M5): every
+   * model run waits for one of `concurrency` slots, shared by every
+   * principal, and each principal draws from their own token bucket of
+   * `principalBurst` runs refilled at `principalRunsPerMinute`. Slots go to
+   * waiting principals in turn, so one principal's backfill cannot starve
+   * another's morning brief.
+   */
+  modelLimiter: {
+    concurrency: number;
+    principalBurst: number;
+    principalRunsPerMinute: number;
+  };
   proposals: {
     expiryHours: number;
   };
@@ -396,6 +409,36 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
   };
 
+  const modelLimiter: Config['modelLimiter'] = {
+    concurrency: readField(
+      errors,
+      env,
+      'MODEL_CONCURRENCY',
+      z.number().int().positive(),
+      4,
+      'must be a positive integer',
+      toNumber,
+    ),
+    principalBurst: readField(
+      errors,
+      env,
+      'MODEL_PRINCIPAL_BURST',
+      z.number().int().positive(),
+      6,
+      'must be a positive integer',
+      toNumber,
+    ),
+    principalRunsPerMinute: readField(
+      errors,
+      env,
+      'MODEL_PRINCIPAL_RUNS_PER_MINUTE',
+      z.number().positive(),
+      12,
+      'must be a positive number',
+      toNumber,
+    ),
+  };
+
   const proposals: Config['proposals'] = {
     expiryHours: readField(
       errors,
@@ -652,6 +695,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     prices,
     cost,
     scheduler,
+    modelLimiter,
     proposals,
     interruption,
     promotion,

@@ -49,6 +49,11 @@ describe('loadConfig defaults', () => {
 
     expect(config.cost).toEqual({ dailyCeilingGbp: 15, usdToGbp: 0.78 });
     expect(config.scheduler).toEqual({ tickSeconds: 30 });
+    expect(config.modelLimiter).toEqual({
+      concurrency: 4,
+      principalBurst: 6,
+      principalRunsPerMinute: 12,
+    });
     expect(config.proposals).toEqual({ expiryHours: 48 });
     expect(config.interruption).toEqual({
       quietHoursStart: '19:00',
@@ -134,6 +139,9 @@ describe('loadConfig env overrides', () => {
       COST_DAILY_CEILING_GBP: '25',
       COST_USD_TO_GBP: '0.8',
       SCHEDULER_TICK_SECONDS: '15',
+      MODEL_CONCURRENCY: '8',
+      MODEL_PRINCIPAL_BURST: '3',
+      MODEL_PRINCIPAL_RUNS_PER_MINUTE: '30',
       PROPOSALS_EXPIRY_HOURS: '24',
       INTERRUPTION_QUIET_HOURS_START: '20:00',
       INTERRUPTION_QUIET_HOURS_END: '08:00',
@@ -180,6 +188,11 @@ describe('loadConfig env overrides', () => {
     expect(config.prices['claude-sonnet-5']).toBeDefined();
     expect(config.cost).toEqual({ dailyCeilingGbp: 25, usdToGbp: 0.8 });
     expect(config.scheduler).toEqual({ tickSeconds: 15 });
+    expect(config.modelLimiter).toEqual({
+      concurrency: 8,
+      principalBurst: 3,
+      principalRunsPerMinute: 30,
+    });
     expect(config.proposals).toEqual({ expiryHours: 24 });
     expect(config.interruption).toEqual({
       quietHoursStart: '20:00',

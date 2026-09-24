@@ -538,6 +538,9 @@ importers:
 
   packages/shared:
     dependencies:
+      cron-parser:
+        specifier: 5.10.1
+        version: 5.10.1
       ulid:
         specifier: 3.0.2
         version: 3.0.2
