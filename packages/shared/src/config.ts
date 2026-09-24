@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SystemModeSchema, type SystemMode } from './enums.js';
+import { MailLabelSchema, SystemModeSchema, type MailLabel, type SystemMode } from './enums.js';
 
 /**
  * Config loader. Reads `process.env` (or an injected env object, for tests)
@@ -122,6 +122,24 @@ export interface Config {
      */
     watermarkAlert: boolean;
     watermarkMaxAgeHours: number;
+  };
+  triage: {
+    /**
+     * ADR 0034: a mail observation whose labels all fall in this set skips
+     * model triage and is filed by deterministic code under the seed rules.
+     * Default `Newsletters` and `Notifications`, the labels seed rules 3
+     * and 4 file automatically.
+     */
+    bulkLabels: readonly MailLabel[];
+  };
+  /**
+   * The queues whose jobs wait on the model: `watcher-graph-mail` and
+   * `triage` (load-test option A, ADR 0034). `concurrency` is how many of
+   * each queue's jobs one worker runs at once; a principal never has more
+   * than one in flight on either.
+   */
+  modelQueues: {
+    concurrency: number;
   };
   briefs: {
     minFreeBlockHours: number;
@@ -552,6 +570,34 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
   };
 
+  const triage: Config['triage'] = {
+    bulkLabels: readField(
+      errors,
+      env,
+      'TRIAGE_BULK_LABELS',
+      z.array(MailLabelSchema).min(1),
+      ['Newsletters', 'Notifications'],
+      'must be a comma-separated list of mail labels, at least one',
+      toCommaList,
+    ),
+  };
+
+  // Twice the default MODEL_CONCURRENCY across the two queues: each job
+  // holds at most one model slot at a time, so four of each keeps the
+  // limiter's four slots busy while some jobs are between calls
+  // (docs/runbooks/load-test.md).
+  const modelQueues: Config['modelQueues'] = {
+    concurrency: readField(
+      errors,
+      env,
+      'MODEL_QUEUE_CONCURRENCY',
+      z.number().int().positive(),
+      4,
+      'must be a positive integer',
+      toNumber,
+    ),
+  };
+
   const briefs: Config['briefs'] = {
     minFreeBlockHours: readField(
       errors,
@@ -753,6 +799,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     promotion,
     watchers,
     inboxAgent,
+    triage,
+    modelQueues,
     briefs,
     retention,
     offboarding,

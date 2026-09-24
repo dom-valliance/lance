@@ -80,6 +80,8 @@ describe('loadConfig defaults', () => {
     expect(config.promotion).toEqual({ threshold: 10, minSpanDays: 14 });
     expect(config.watchers).toEqual({ dryRunDaysForNewWatcher: 5 });
     expect(config.inboxAgent).toEqual({ watermarkAlert: false, watermarkMaxAgeHours: 24 });
+    expect(config.triage).toEqual({ bulkLabels: ['Newsletters', 'Notifications'] });
+    expect(config.modelQueues).toEqual({ concurrency: 4 });
     expect(config.briefs).toEqual({ minFreeBlockHours: 2 });
     expect(config.retention).toEqual({
       mailBodiesDays: 90,
@@ -277,6 +279,26 @@ describe('loadConfig validation failures', () => {
 
   it('rejects DATABASE_URL missing in development', () => {
     expect(() => loadConfig({ NODE_ENV: 'development' })).toThrowError(/DATABASE_URL/);
+  });
+});
+
+describe('bulk mail and model queues', () => {
+  const base = { NODE_ENV: 'test', DATABASE_URL: 'postgres://lance:pw@localhost:5432/lance' };
+
+  it('reads the bulk labels as a comma-separated list and the model queue team size', () => {
+    const config = loadConfig({
+      ...base,
+      TRIAGE_BULK_LABELS: 'Newsletters, Alerts',
+      MODEL_QUEUE_CONCURRENCY: '6',
+    });
+    expect(config.triage.bulkLabels).toEqual(['Newsletters', 'Alerts']);
+    expect(config.modelQueues.concurrency).toBe(6);
+  });
+
+  it('refuses a bulk label outside the mail taxonomy', () => {
+    expect(() => loadConfig({ ...base, TRIAGE_BULK_LABELS: 'Newsletters,Spam' })).toThrowError(
+      /TRIAGE_BULK_LABELS/,
+    );
   });
 });
 
