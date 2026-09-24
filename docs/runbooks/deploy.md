@@ -179,6 +179,30 @@ az keyvault secret set --vault-name $KV --name notion-token            --value '
 az keyvault secret set --vault-name $KV --name agent-log-ingest-secret --value "$(openssl rand -hex 32)"
 ```
 
+The evidence export's signing key (spec 4.4) is an Ed25519 private key, set from a file so its line breaks survive, and never kept on disk afterwards. Record the key id it prints in the ISO 27001 evidence register (`docs/compliance/iso27001-access-review.md`); an auditor checks a bundle's `signature.keyId` against it:
+
+The `openssl` macOS ships is LibreSSL and has no Ed25519; use OpenSSL 3, which Homebrew installs at `/opt/homebrew/bin/openssl` (`brew install openssl@3` if it is missing):
+
+```
+OPENSSL=/opt/homebrew/bin/openssl
+umask 077
+$OPENSSL genpkey -algorithm ed25519 -out /tmp/evidence-signing-key.pem
+az keyvault secret set --vault-name $KV --name evidence-signing-key --file /tmp/evidence-signing-key.pem --query name -o tsv
+EVIDENCE_KEY_ID=$($OPENSSL pkey -in /tmp/evidence-signing-key.pem -pubout -outform DER | $OPENSSL dgst -sha256 | awk '{print substr($NF, 1, 16)}')
+echo "$EVIDENCE_KEY_ID"
+rm /tmp/evidence-signing-key.pem
+```
+
+The api resolves the key when its revision starts. On a new environment step 6 starts it after this; on an environment already running, restart the api once:
+
+```
+API_REVISION=$(az containerapp show -g rg-lance-dev -n ca-lance-api-dev --query properties.latestRevisionName -o tsv)
+echo "$API_REVISION"
+az containerapp revision restart -g rg-lance-dev -n ca-lance-api-dev --revision "$API_REVISION"
+```
+
+Until then the admin page's evidence export answers that the key is missing.
+
 Leave `graph-refresh-token` and `jamie-api-key` as placeholders on a new environment. They are the pre-ADR 0022 single-owner credentials, read only for the one-time copy into Dom's own secrets (see the last section), and the apps read the placeholder as "not set". Each principal connects Microsoft 365 and Jamie for themselves, and those credentials land in the principal vault as `graph-refresh-token--<principalId>` and `jamie-api-key--<principalId>`; nothing is set there by hand. An environment deployed before ADR 0020 also holds `allowed-upn`; no app reads it, and it stays until someone deletes it deliberately.
 
 The Notion token alone reaches nothing. The integration is the organisation's, named `Lance` (renamed from `Dom's Lance` for ADR 0022; renaming it in Notion under Settings, Connections, Develop or manage integrations keeps the same token). In Notion, open the All Tasks database, choose the three dots, Connections, and add the integration. The Meetings database is not in use (spec Q7) and is not shared. Until All Tasks is shared, every query returns `object_not_found` and the notion watcher raises a breaker alert on each poll. Check with:
@@ -306,7 +330,19 @@ GRANT lance_app TO "id-lance-api-dev";
 GRANT lance_app TO "id-lance-worker-dev";
 ```
 
-The role names are case sensitive and the identity names must stay in double quotes. `lance_retention` arrives with the retention jobs in Phase 5 (ADR 0011); its identity and grant are added then.
+The role names are case sensitive and the identity names must stay in double quotes.
+
+Nobody grants `lance_retention` by hand. The migration job (step 8) grants it to the worker identity after the migrations and the seed, from the `LANCE_RETENTION_MEMBER` variable the template sets to the worker identity's name (`packages/db/src/grants.ts`, ADR 0011). The grant is `WITH INHERIT FALSE, SET TRUE`: the worker's sessions run as `lance_app` and gain nothing from it, and the nightly retention job uses it only through `SET LOCAL ROLE lance_retention` inside its own transaction. The migrate identity may make the grant because it created the role in migration 0000. The job needs the worker's Postgres principal from step 7; if the job ran before step 7, run it again after. Check, in the same psql session:
+
+```sql
+SELECT u.rolname AS member, m.inherit_option, m.set_option
+  FROM pg_auth_members m
+  JOIN pg_roles r ON r.oid = m.roleid
+  JOIN pg_roles u ON u.oid = m.member
+ WHERE r.rolname = 'lance_retention';
+```
+
+One row: `id-lance-worker-dev | f | t`. No row names `lance_app`, `id-lance-api-dev` or `id-lance-web-dev`.
 
 The three apps connect with `PG_ROLE=lance_app` (set by the template), so every session acts as the shared role and anything created at runtime, pg-boss's queue tables above all, is owned by `lance_app` rather than by whichever identity made it. An environment deployed before `PG_ROLE` existed has pg-boss tables owned by the worker identity, which the api cannot read; repair it once with `scripts/psql-admin.sh lance`:
 
@@ -371,7 +407,7 @@ What each step consumes comes from the step before it. The order is fixed.
 
    The first prints `dcd10611-553f-42e2-911d-2904e3716c5e`; the second prints `1`. If the CD deploy runs before this step, it stops at the principal vault's api assignment with `AuthorizationFailed` or `RoleDefinitionDoesNotExist`. The apps stay on their old image in that case, because the Container Apps depend on both vault modules, and the migration job has only run migration 0015, which the old image ignores. Run this step and re-run the workflow.
 
-2. **Merge; the `Deploy` workflow does the rest.** It runs migration 0015 on the new image, reads `LANCE_EXISTING_SECRETS` (all twelve dev secrets exist, so no placeholder is written), creates `kv-lance-p-dev-j7riq4` with its three assignments, creates the eighteen per-secret assignments on the static vault (the worker's existing Secrets Officer grant on `graph-refresh-token` is adopted, same name), moves the apps, and then `scripts/remove-legacy-vault-grants.sh` deletes the four vault-wide Secrets User assignments and the api's Secrets Officer grant on `graph-refresh-token`. To see in advance what the script will delete: `LANCE_DRY_RUN=1 scripts/remove-legacy-vault-grants.sh dev` (read-only; on 2026-09-24 it listed exactly those five).
+2. **Merge; the `Deploy` workflow does the rest.** It runs migration 0015 on the new image, reads `LANCE_EXISTING_SECRETS` (the twelve dev secrets of ADR 0022 exist; `evidence-signing-key`, added by package 5.6, does not, so it alone is written as a placeholder and step 4 sets it), creates `kv-lance-p-dev-j7riq4` with its three assignments, creates the nineteen per-secret assignments on the static vault (the worker's existing Secrets Officer grant on `graph-refresh-token` is adopted, same name), moves the apps, and then `scripts/remove-legacy-vault-grants.sh` deletes the four vault-wide Secrets User assignments and the api's Secrets Officer grant on `graph-refresh-token`. To see in advance what the script will delete: `LANCE_DRY_RUN=1 scripts/remove-legacy-vault-grants.sh dev` (read-only; on 2026-09-24 it listed exactly those five).
 
 3. **The worker copies Dom's credentials on its first start.** On first use for the principal whose UPN is `DOM_EMAIL`, it copies `graph-refresh-token` from the static vault into `graph-refresh-token--<Dom's principal id>` and `JAMIE_API_KEY` into `jamie-api-key--<Dom's principal id>`, each under the rotation lock and only when the per-principal secret is absent, and records a `state_changed` event with `change: credential_migrated` for each. The old secrets are never written. For the minute both revisions run, the old worker may still rotate the old secret; Entra keeps the previous refresh token valid, and if the copied one is ever refused the P0 `token_refresh_failed` alert asks Dom to reconnect from Settings, which writes the per-principal secret directly. Check:
 

@@ -28,4 +28,4 @@ The index page of the package records ten decisions that changed the existing bu
 | Page header, filter pills, tables, timeline, provenance, ageing, empty and failure states | `apps/web/src/components/` |
 | Shell: sidebar, top bar, drawer, paused banner | `apps/web/src/components/shell/` |
 
-Alerts, Ontology, Policies and Agents are not in this package; the index marks them as the next pass. Their pages carry the spec's description until then.
+Alerts, Ontology, Policies and Agents are not in this package; the index marks them as the next pass. Their pages carry the spec's description until then. Admin (package 5.6, `apps/web/src/app/admin`) has no design either and is built from the components above.
