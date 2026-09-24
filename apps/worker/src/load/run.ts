@@ -465,16 +465,24 @@ async function runWindow(
       schedules = await boss.getSchedules();
       schedulesReadAt = Date.now();
     }
+    const fired = new Set<string>();
     for (const due of dueBetween(schedules, last, now)) {
       await boss.send(due.schedule.name, due.schedule.data ?? {}, {});
+      const principalId = (due.schedule.data as { principalId?: string } | null)?.principalId;
+      fired.add(`${due.schedule.name}|${principalId ?? ''}`);
       sent += 1;
     }
     if (!aligned && now >= opening) {
       aligned = true;
       if (SETTINGS.alignWatchers) {
+        // Only the polls the schedule does not already put at 06:30: the
+        // calendar and Jamie fall due every fifteen minutes, mail at 06:00
+        // and 07:00, so this adds the mail poll alone.
         for (const principal of list) {
           for (const name of ALIGNED_WATCHERS) {
-            await boss.send(watcherQueue({ name }), { principalId: principal.id }, {});
+            const queue = watcherQueue({ name });
+            if (fired.has(`${queue}|${principal.id}`)) continue;
+            await boss.send(queue, { principalId: principal.id }, {});
             sent += 1;
           }
         }
@@ -656,7 +664,19 @@ async function collect(
   const budgets = (
     await db.fixture.$client.query('SELECT principal_id, push_budget_per_hour FROM principal_state')
   ).rows as { principal_id: string; push_budget_per_hour: number }[];
-  const briefParents = new Set([...briefs.values()].map((row) => row.slackTs));
+  // Briefs, boards, preps and debriefs are exempt from the push budget
+  // (spec 9.4); each records its Slack ts in the ledger when it posts.
+  const exempt = (
+    await db.fixture.$client.query(
+      `SELECT payload ->> 'slackTs' AS ts FROM ledger_events
+        WHERE kind = 'resolved' AND payload ->> 'kind' IN ('brief', 'debrief') AND ts >= $1`,
+      [new Date(startReal)],
+    )
+  ).rows as { ts: string | null }[];
+  const briefParents = new Set([
+    ...[...briefs.values()].map((row) => row.slackTs),
+    ...exempt.map((row) => row.ts),
+  ]);
   const unsolicited = list.map((principal) => {
     const topLevel = fixtures.slack.posts.filter(
       (post) =>
@@ -668,7 +688,7 @@ async function collect(
     return {
       principal: principal.index + 1,
       recordedPushes: pushes.find((row) => row.principal_id === principal.id)?.n ?? 0,
-      topLevelNonBriefPosts: topLevel,
+      unsolicitedPosts: topLevel,
       budgetPerHour:
         budgets.find((row) => row.principal_id === principal.id)?.push_budget_per_hour ?? 3,
     };
@@ -697,7 +717,7 @@ async function collect(
 
   const brief: Summary = summarise(stored);
   const queueP95 = percentile(allLatencies, 95);
-  const maxPushes = Math.max(0, ...unsolicited.map((row) => row.topLevelNonBriefPosts));
+  const maxPushes = Math.max(0, ...unsolicited.map((row) => row.unsolicitedPosts));
   return {
     label: SETTINGS.label,
     settings: {
@@ -720,7 +740,7 @@ async function collect(
         pushBudgetMaxUsed: maxPushes,
         pass:
           posted.length === list.length &&
-          unsolicited.every((row) => row.topLevelNonBriefPosts <= row.budgetPerHour),
+          unsolicited.every((row) => row.unsolicitedPosts <= row.budgetPerHour),
       },
       queueLatencyP95: {
         targetMs: QUEUE_P95_TARGET_MS,
