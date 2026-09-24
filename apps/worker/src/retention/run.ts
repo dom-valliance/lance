@@ -16,7 +16,6 @@ import { GRAPH_MAIL_WATCHER_NAME } from '../watchers/graph/index.js';
  * content windows at zero.
  */
 
-
 export const nightlyWindows = (config: Pick<Config, 'retention'>): RetentionWindows => ({
   mailBodiesDays: config.retention.mailBodiesDays,
   transcriptsDays: config.retention.transcriptsDays,
@@ -47,7 +46,8 @@ export interface RetentionRun {
 
 export async function runRetention(run: RetentionRun): Promise<RetentionResult> {
   return applyRetention(scopedDb(run.root, { principalId: run.principalId }), {
-    windows: run.trigger === 'offboarding' ? offboardingWindows(run.config) : nightlyWindows(run.config),
+    windows:
+      run.trigger === 'offboarding' ? offboardingWindows(run.config) : nightlyWindows(run.config),
     trigger: run.trigger,
     mailWatcher: GRAPH_MAIL_WATCHER_NAME,
     ...(run.actor === undefined ? {} : { actor: run.actor }),

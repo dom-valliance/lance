@@ -222,13 +222,9 @@
         "ledger_events_principal_id_principals_id_fk": {
           "name": "ledger_events_principal_id_principals_id_fk",
           "tableFrom": "ledger_events",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -435,13 +431,9 @@
         "observations_principal_id_principals_id_fk": {
           "name": "observations_principal_id_principals_id_fk",
           "tableFrom": "observations",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -682,13 +674,9 @@
         "proposals_principal_id_principals_id_fk": {
           "name": "proposals_principal_id_principals_id_fk",
           "tableFrom": "proposals",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -859,13 +847,9 @@
         "policy_rules_principal_id_principals_id_fk": {
           "name": "policy_rules_principal_id_principals_id_fk",
           "tableFrom": "policy_rules",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -963,13 +947,9 @@
         "policy_decisions_principal_id_principals_id_fk": {
           "name": "policy_decisions_principal_id_principals_id_fk",
           "tableFrom": "policy_decisions",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1038,13 +1018,9 @@
         "cursors_principal_id_principals_id_fk": {
           "name": "cursors_principal_id_principals_id_fk",
           "tableFrom": "cursors",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1052,11 +1028,7 @@
       "compositePrimaryKeys": {
         "cursors_principal_id_watcher_key_pk": {
           "name": "cursors_principal_id_watcher_key_pk",
-          "columns": [
-            "principal_id",
-            "watcher",
-            "key"
-          ]
+          "columns": ["principal_id", "watcher", "key"]
         }
       },
       "uniqueConstraints": {},
@@ -1264,13 +1236,9 @@
         "alerts_principal_id_principals_id_fk": {
           "name": "alerts_principal_id_principals_id_fk",
           "tableFrom": "alerts",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1439,13 +1407,9 @@
         "commitments_principal_id_principals_id_fk": {
           "name": "commitments_principal_id_principals_id_fk",
           "tableFrom": "commitments",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1560,13 +1524,9 @@
         "briefs_principal_id_principals_id_fk": {
           "name": "briefs_principal_id_principals_id_fk",
           "tableFrom": "briefs",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1744,13 +1704,9 @@
         "agent_runs_principal_id_principals_id_fk": {
           "name": "agent_runs_principal_id_principals_id_fk",
           "tableFrom": "agent_runs",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1918,9 +1874,7 @@
       "uniqueConstraints": {
         "users_upn_unique": {
           "name": "users_upn_unique",
-          "columns": [
-            "upn"
-          ],
+          "columns": ["upn"],
           "nullsNotDistinct": false
         }
       },
@@ -2028,30 +1982,22 @@
       "uniqueConstraints": {
         "principals_entra_oid_unique": {
           "name": "principals_entra_oid_unique",
-          "columns": [
-            "entra_oid"
-          ],
+          "columns": ["entra_oid"],
           "nullsNotDistinct": false
         },
         "principals_upn_unique": {
           "name": "principals_upn_unique",
-          "columns": [
-            "upn"
-          ],
+          "columns": ["upn"],
           "nullsNotDistinct": false
         },
         "principals_slack_user_id_unique": {
           "name": "principals_slack_user_id_unique",
-          "columns": [
-            "slack_user_id"
-          ],
+          "columns": ["slack_user_id"],
           "nullsNotDistinct": false
         },
         "principals_slack_channel_id_unique": {
           "name": "principals_slack_channel_id_unique",
-          "columns": [
-            "slack_channel_id"
-          ],
+          "columns": ["slack_channel_id"],
           "nullsNotDistinct": false
         }
       },
@@ -2153,13 +2099,9 @@
         "principal_state_principal_id_principals_id_fk": {
           "name": "principal_state_principal_id_principals_id_fk",
           "tableFrom": "principal_state",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -2263,13 +2205,9 @@
         "jobs_principal_id_principals_id_fk": {
           "name": "jobs_principal_id_principals_id_fk",
           "tableFrom": "jobs",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -2414,13 +2352,9 @@
         "slack_links_principal_id_principals_id_fk": {
           "name": "slack_links_principal_id_principals_id_fk",
           "tableFrom": "slack_links",
-          "columnsFrom": [
-            "principal_id"
-          ],
+          "columnsFrom": ["principal_id"],
           "tableTo": "principals",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -2504,88 +2438,47 @@
     "public.agent_run_status": {
       "name": "agent_run_status",
       "schema": "public",
-      "values": [
-        "running",
-        "succeeded",
-        "failed"
-      ]
+      "values": ["running", "succeeded", "failed"]
     },
     "public.alert_severity": {
       "name": "alert_severity",
       "schema": "public",
-      "values": [
-        "P0",
-        "P1",
-        "P2"
-      ]
+      "values": ["P0", "P1", "P2"]
     },
     "public.alert_status": {
       "name": "alert_status",
       "schema": "public",
-      "values": [
-        "open",
-        "acked",
-        "resolved",
-        "suppressed"
-      ]
+      "values": ["open", "acked", "resolved", "suppressed"]
     },
     "public.brief_kind": {
       "name": "brief_kind",
       "schema": "public",
-      "values": [
-        "morning_brief",
-        "afternoon_board",
-        "meeting_prep",
-        "debrief",
-        "weekly_review"
-      ]
+      "values": ["morning_brief", "afternoon_board", "meeting_prep", "debrief", "weekly_review"]
     },
     "public.commitment_direction": {
       "name": "commitment_direction",
       "schema": "public",
-      "values": [
-        "outbound",
-        "inbound"
-      ]
+      "values": ["outbound", "inbound"]
     },
     "public.commitment_status": {
       "name": "commitment_status",
       "schema": "public",
-      "values": [
-        "open",
-        "chased",
-        "done",
-        "dropped"
-      ]
+      "values": ["open", "chased", "done", "dropped"]
     },
     "public.counterparty_class": {
       "name": "counterparty_class",
       "schema": "public",
-      "values": [
-        "self",
-        "internal",
-        "client",
-        "prospect",
-        "partner",
-        "vendor",
-        "unknown"
-      ]
+      "values": ["self", "internal", "client", "prospect", "partner", "vendor", "unknown"]
     },
     "public.decision": {
       "name": "decision",
       "schema": "public",
-      "values": [
-        "forbid",
-        "propose",
-        "auto"
-      ]
+      "values": ["forbid", "propose", "auto"]
     },
     "public.job_origin": {
       "name": "job_origin",
       "schema": "public",
-      "values": [
-        "system"
-      ]
+      "values": ["system"]
     },
     "public.ledger_kind": {
       "name": "ledger_kind",
@@ -2608,12 +2501,7 @@
     "public.principal_status": {
       "name": "principal_status",
       "schema": "public",
-      "values": [
-        "onboarding",
-        "active",
-        "paused",
-        "offboarded"
-      ]
+      "values": ["onboarding", "active", "paused", "offboarded"]
     },
     "public.proposal_status": {
       "name": "proposal_status",
@@ -2633,38 +2521,22 @@
     "public.reversibility": {
       "name": "reversibility",
       "schema": "public",
-      "values": [
-        "reversible",
-        "compensatable",
-        "irreversible"
-      ]
+      "values": ["reversible", "compensatable", "irreversible"]
     },
     "public.rule_creator": {
       "name": "rule_creator",
       "schema": "public",
-      "values": [
-        "user:dom",
-        "agent:promotion-analyser"
-      ]
+      "values": ["user:dom", "agent:promotion-analyser"]
     },
     "public.system_mode": {
       "name": "system_mode",
       "schema": "public",
-      "values": [
-        "live",
-        "dry_run"
-      ]
+      "values": ["live", "dry_run"]
     },
     "public.target_system": {
       "name": "target_system",
       "schema": "public",
-      "values": [
-        "graph",
-        "jamie",
-        "notion",
-        "slack",
-        "lance"
-      ]
+      "values": ["graph", "jamie", "notion", "slack", "lance"]
     }
   },
   "schemas": {},

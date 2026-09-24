@@ -27,8 +27,7 @@ const REFUSED = new Set(['lance_app', 'lance_migrator', 'public']);
 export const RETENTION_MEMBER_ENV = 'LANCE_RETENTION_MEMBER';
 
 export type GrantOutcome =
-  | { status: 'granted'; role: string }
-  | { status: 'skipped'; reason: string };
+  { status: 'granted'; role: string } | { status: 'skipped'; reason: string };
 
 /** Grants `lance_retention` to `member` for SET ROLE only. Repeating it changes nothing. */
 export async function grantRetentionMember(db: Db, member: string): Promise<GrantOutcome> {
