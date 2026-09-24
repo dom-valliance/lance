@@ -7,7 +7,15 @@ export type BudgetState = 'ok' | 'warning' | 'exceeded';
  */
 export const BUDGET_WARNING_FRACTION = 0.8;
 
+/**
+ * Whose ceiling a check is against: one principal's own daily ceiling, or
+ * the organisation's across every active principal (multi-user plan M5).
+ */
+export type BudgetScope = 'principal' | 'organisation';
+
 export interface BudgetCheck {
+  /** Absent means `principal`, which is every check made before Phase 5. */
+  scope?: BudgetScope;
   spentGbp: number;
   ceilingGbp: number;
   fraction: number;
@@ -18,7 +26,9 @@ export class BudgetExceededError extends Error {
   override readonly name = 'BudgetExceededError';
   constructor(readonly check: BudgetCheck) {
     super(
-      `Daily model spend of GBP ${check.spentGbp.toFixed(2)} has reached the ceiling of GBP ${check.ceilingGbp.toFixed(2)}; model-backed agents are paused until tomorrow or until the ceiling is raised in Settings (spec 13).`,
+      check.scope === 'organisation'
+        ? `The organisation's daily model spend of GBP ${check.spentGbp.toFixed(2)} across every principal has reached its ceiling of GBP ${check.ceilingGbp.toFixed(2)}; model-backed agents are paused for everyone until tomorrow or until an admin raises the organisation ceiling.`
+        : `Daily model spend of GBP ${check.spentGbp.toFixed(2)} has reached the ceiling of GBP ${check.ceilingGbp.toFixed(2)}; model-backed agents are paused until tomorrow or until the ceiling is raised in Settings (spec 13).`,
     );
   }
 }
@@ -46,10 +56,11 @@ export type SpendReader = () => Promise<number>;
 
 export async function checkDailyBudget(
   readSpendUsd: SpendReader,
-  options: { ceilingGbp: number; usdToGbp: number },
+  options: { ceilingGbp: number; usdToGbp: number; scope?: BudgetScope },
 ): Promise<BudgetCheck> {
   const spendUsd = await readSpendUsd();
   return {
+    scope: options.scope ?? 'principal',
     spentGbp: spendUsd * options.usdToGbp,
     ceilingGbp: options.ceilingGbp,
     fraction: budgetFraction(spendUsd, options.ceilingGbp, options.usdToGbp),

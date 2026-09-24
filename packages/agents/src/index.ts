@@ -11,7 +11,9 @@ export {
   budgetState,
   checkDailyBudget,
 } from './budget.js';
-export type { BudgetCheck, BudgetState, SpendReader } from './budget.js';
+export type { BudgetCheck, BudgetScope, BudgetState, SpendReader } from './budget.js';
+export { FairShareLimiter } from './limiter.js';
+export type { FairShareOptions } from './limiter.js';
 export { dbRunRecorder, dbSpendReader } from './runs.js';
 export type { RunFinish, RunRecorder, RunStart } from './runs.js';
 export { AgentOutputError, AgentStoppedError, runAgent } from './defineAgent.js';
