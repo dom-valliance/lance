@@ -7,7 +7,9 @@ export const POSTGRES_TEST_IMAGE = 'lance-postgres:16';
 
 function isTransientDockerError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /pull access denied|404|EOF|socket hang up|ECONNRESET/i.test(message);
+  return /pull access denied|404|EOF|socket hang up|ECONNRESET|waiting for container ports to be bound/i.test(
+    message,
+  );
 }
 
 /**

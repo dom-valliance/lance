@@ -25,7 +25,7 @@ const CORRELATION = '01K5S9V6QW3SWCCPVB0N0E309Z';
 
 let container: StartedPostgreSqlContainer;
 let client: pg.Client;
-let partialFolder: string;
+let partialFolder: string | undefined;
 
 /** A copy of the migrations folder whose journal stops at 0008. */
 const migrationsUpTo0008 = (): string => {
@@ -85,7 +85,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await client?.end();
   await container?.stop();
-  rmSync(partialFolder, { recursive: true, force: true });
+  if (partialFolder !== undefined) rmSync(partialFolder, { recursive: true, force: true });
 });
 
 describe('migration 0009 over existing data', () => {
