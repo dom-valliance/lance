@@ -14,6 +14,7 @@ import {
 import { eq } from 'drizzle-orm';
 import { recordPush, remainingPushes } from '../alerts/engine/budget.js';
 import type { CriticVerdict } from '../critic/index.js';
+import { policyTarget } from './target.js';
 
 export interface ProposalContext {
   correlationId: string;
@@ -64,6 +65,9 @@ export function createProposalHandler(
     const state = await deps.control.read();
     const dryRun = state.mode === 'dry_run' || context.watcherDryRun === true;
 
+    // A context that names no target takes it from the draft, as the
+    // executor does, so a move into AI-Filed meets seed rule 4 here too.
+    const target = context.target ?? policyTarget(draft.actionClass, draft.payload) ?? undefined;
     const input = {
       actionClass: draft.actionClass,
       counterpartyClass: draft.counterpartyClass,
@@ -72,7 +76,7 @@ export function createProposalHandler(
       at: ts,
       stage: 'proposal' as const,
       ...(context.labels === undefined ? {} : { labels: context.labels }),
-      ...(context.target === undefined ? {} : { target: context.target }),
+      ...(target === undefined ? {} : { target }),
     };
     const evaluation = evaluate(input, await deps.loadRules());
 

@@ -89,6 +89,31 @@ describe('createProposal', () => {
     expect(trail[0]?.policyDecisionId).not.toBeNull();
   });
 
+  it('auto-approves a newsletter move into AI-Filed, reading the folder from the draft', async () => {
+    const outcome = await handler()(
+      draft({
+        actionClass: 'move_mail',
+        payload: { destinationFolderName: 'AI-Filed', sourceFolderId: 'inbox' },
+        preview: 'Move to AI-Filed',
+      }),
+      { ...context, labels: ['Newsletters'] },
+    );
+    expect(outcome).toMatchObject({ decision: 'auto', status: 'approved' });
+  });
+
+  it('proposes a newsletter move into any folder but AI-Filed', async () => {
+    const outcome = await handler()(
+      draft({
+        actionClass: 'move_mail',
+        payload: { destinationFolderName: 'Archive' },
+        preview: 'Move to Archive',
+      }),
+      { ...context, labels: ['Newsletters'] },
+    );
+    expect(outcome).toMatchObject({ decision: 'propose', status: 'pending' });
+    expect(outcome.note).toContain('targetAnyOf');
+  });
+
   it('posts a card and leaves the proposal pending when policy says propose', async () => {
     const outcome = await handler()(draft({ counterpartyClass: 'client' }), {
       ...context,
