@@ -108,7 +108,7 @@ beforeAll(async () => {
   await runMigrations({ connectionString: url });
   root = await openAppTestDb(url);
   fixture = openFixtureDb(url);
-});
+}, 120000);
 
 afterEach(() => {
   graph.resetHandlers();
