@@ -58,3 +58,35 @@ describe('vaults from the environment', () => {
     ).toBeInstanceOf(KeyVaultSecrets);
   });
 });
+
+describe('KeyVaultSecrets.delete', () => {
+  const deleting = (outcome: 'ok' | Error): SecretClientLike & { deleted: string[] } => {
+    const deleted: string[] = [];
+    return {
+      deleted,
+      getSecret: () => Promise.resolve({}),
+      setSecret: () => Promise.resolve({}),
+      beginDeleteSecret: (name: string) => {
+        if (outcome instanceof Error) return Promise.reject(outcome);
+        deleted.push(name);
+        return Promise.resolve({ pollUntilDone: () => Promise.resolve({}) });
+      },
+    };
+  };
+
+  it('soft-deletes the secret and waits for the delete to finish', async () => {
+    const client = deleting('ok');
+    await expect(new KeyVaultSecrets(client).delete('jamie-api-key--x')).resolves.toBe('deleted');
+    expect(client.deleted).toEqual(['jamie-api-key--x']);
+  });
+
+  it('reads a secret that is already gone as absent, so a second run succeeds', async () => {
+    const missing = Object.assign(new Error('not found'), { statusCode: 404 });
+    await expect(new KeyVaultSecrets(deleting(missing)).delete('x')).resolves.toBe('absent');
+  });
+
+  it('passes any other failure on', async () => {
+    const forbidden = Object.assign(new Error('forbidden'), { statusCode: 403 });
+    await expect(new KeyVaultSecrets(deleting(forbidden)).delete('x')).rejects.toThrow('forbidden');
+  });
+});

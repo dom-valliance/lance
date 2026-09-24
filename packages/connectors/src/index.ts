@@ -8,3 +8,4 @@ export * from './graph/index.js';
 export * from './jamie/index.js';
 export * from './appinsights/index.js';
 export * from './secrets/index.js';
+export * from './offboarding/index.js';

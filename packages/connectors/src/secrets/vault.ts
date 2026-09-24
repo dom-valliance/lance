@@ -16,6 +16,12 @@ import { isUnsetSecretValue } from '@lance/shared';
 export interface SecretClientLike {
   getSecret(name: string): Promise<{ value?: string | undefined }>;
   setSecret(name: string, value: string): Promise<unknown>;
+  /**
+   * Starts a soft delete and resolves with a poller. Optional because only
+   * the worker's principal vault deletes (offboarding); a double that never
+   * deletes can leave it out.
+   */
+  beginDeleteSecret?(name: string): Promise<{ pollUntilDone(): Promise<unknown> }>;
 }
 
 export interface SecretReader {
@@ -30,6 +36,18 @@ export interface SecretWriter {
 
 export type SecretStore = SecretReader & SecretWriter;
 
+/** What a delete found: the secret was there and is now deleted, or it was already gone. */
+export type SecretDeleteOutcome = 'deleted' | 'absent';
+
+export interface SecretDeleter {
+  /**
+   * Deletes the secret. In a vault with purge protection (both of Lance's)
+   * this is a soft delete: the value stays recoverable by a Secrets Officer
+   * until the retention period ends, and nobody can purge it early.
+   */
+  delete(name: string): Promise<SecretDeleteOutcome>;
+}
+
 function isSecretNotFound(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   const statusCode = 'statusCode' in error ? error.statusCode : undefined;
@@ -38,7 +56,7 @@ function isSecretNotFound(error: unknown): boolean {
 }
 
 /** One vault over a `SecretClient`. */
-export class KeyVaultSecrets implements SecretStore {
+export class KeyVaultSecrets implements SecretStore, SecretDeleter {
   constructor(private readonly client: SecretClientLike) {}
 
   /**
@@ -63,6 +81,24 @@ export class KeyVaultSecrets implements SecretStore {
 
   async set(name: string, value: string): Promise<void> {
     await this.client.setSecret(name, value);
+  }
+
+  async delete(name: string): Promise<SecretDeleteOutcome> {
+    if (this.client.beginDeleteSecret === undefined) {
+      throw new Error(
+        `This Key Vault client cannot delete secrets, so ${name} was left in place. Build the store with KeyVaultSecrets.at.`,
+      );
+    }
+    try {
+      const poller = await this.client.beginDeleteSecret(name);
+      await poller.pollUntilDone();
+    } catch (error) {
+      // Absent, or already soft-deleted by an earlier run: either way the
+      // secret is no longer readable, which is what the caller wants.
+      if (isSecretNotFound(error)) return 'absent';
+      throw error;
+    }
+    return 'deleted';
   }
 }
 
@@ -98,10 +134,11 @@ export function staticVaultFromEnv(env: NodeJS.ProcessEnv = process.env): KeyVau
  * For tests and local development: a vault in memory. `values` seeds it;
  * `writes` records every set in order, values included, for assertions.
  */
-export class InMemorySecrets implements SecretStore {
+export class InMemorySecrets implements SecretStore, SecretDeleter {
   private readonly values = new Map<string, string>();
   readonly writes: { name: string; value: string }[] = [];
   readonly reads: string[] = [];
+  readonly deletes: string[] = [];
 
   constructor(initial: Record<string, string> = {}) {
     for (const [name, value] of Object.entries(initial)) this.values.set(name, value);
@@ -117,6 +154,11 @@ export class InMemorySecrets implements SecretStore {
     this.writes.push({ name, value });
     this.values.set(name, value);
     return Promise.resolve();
+  }
+
+  delete(name: string): Promise<SecretDeleteOutcome> {
+    this.deletes.push(name);
+    return Promise.resolve(this.values.delete(name) ? 'deleted' : 'absent');
   }
 
   has(name: string): boolean {

@@ -5,4 +5,11 @@ export {
   staticVaultFromEnv,
   writeOnly,
 } from './vault.js';
-export type { SecretClientLike, SecretReader, SecretStore, SecretWriter } from './vault.js';
+export type {
+  SecretClientLike,
+  SecretDeleteOutcome,
+  SecretDeleter,
+  SecretReader,
+  SecretStore,
+  SecretWriter,
+} from './vault.js';

@@ -25,7 +25,8 @@ export interface PostMessageInput {
 
 /**
  * The four Slack writes spec 8 allows: post, update, ephemeral, open modal;
- * and the two that give a principal their private channel (ADR 0023).
+ * the two that give a principal their private channel (ADR 0023); and the
+ * one that archives it at offboarding.
  * Lance posts as its own bot user, never as Dom (spec 4.1). Reachable only
  * from the executor and the proposal router through the writes entry point,
  * and the write capability comes from `slackWriteAccess`, which no barrel
@@ -125,6 +126,25 @@ export function slackWrites(client: SlackClient) {
         if (isSlackApiError(error, 'already_in_channel')) return;
         throw error;
       }
+    },
+    /**
+     * `conversations.archive`, for a principal's private channel when they
+     * are offboarded (ADR 0023). Archiving twice is answered
+     * `already_archived`, which is the state asked for, so it counts as done.
+     */
+    async archiveChannel(
+      input: { channel: string },
+      context?: CallContext,
+    ): Promise<'archived' | 'already_archived'> {
+      try {
+        await write('conversations.archive', { channel: input.channel }, context, undefined, {
+          idempotent: true,
+        });
+      } catch (error) {
+        if (isSlackApiError(error, 'already_archived')) return 'already_archived';
+        throw error;
+      }
+      return 'archived';
     },
   };
 }

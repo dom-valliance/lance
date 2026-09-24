@@ -140,13 +140,14 @@ describe('Slack connector', () => {
     expect(captured[0]?.url).toBe('https://slack.com/api/auth.test');
   });
 
-  it('exposes the four writes spec 8 allows and the two a private channel needs', () => {
+  it('exposes the four writes spec 8 allows, the two a private channel needs and its archive', () => {
     const client = createSlackClient({
       token: 't',
       fetchImpl: stubFetch([]).fetchImpl,
       clock: new FakeClock(),
     });
     expect(Object.keys(slackWrites(client)).sort()).toEqual([
+      'archiveChannel',
       'createPrivateChannel',
       'inviteToChannel',
       'openView',
