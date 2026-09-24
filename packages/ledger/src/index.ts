@@ -39,3 +39,11 @@ export type {
 } from './proposalView.js';
 export { raiseAlert } from './raiseAlert.js';
 export type { RaiseAlertInput, RaiseAlertResult } from './raiseAlert.js';
+export { applyRetention, RETENTION_ACTOR, RetentionRoleError } from './retention.js';
+export type {
+  RetentionCounts,
+  RetentionOptions,
+  RetentionResult,
+  RetentionTrigger,
+  RetentionWindows,
+} from './retention.js';
