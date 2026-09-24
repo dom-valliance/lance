@@ -92,6 +92,7 @@ export async function bootWorker(options: BootOptions): Promise<BootedWorker> {
     webUrl: options.webUrl,
     roleCheckCredentials: options.roleCheckCredentials,
     offboarding: options.offboarding ?? { secrets: null, channels: null },
+    connectorsFor: options.connectorsFor,
   });
   const initial = await reconcile();
   // Every active principal's context is built now rather than at their

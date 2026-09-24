@@ -75,6 +75,13 @@ export const RECONCILE_QUEUE = 'jobs-reconcile';
 export const ORGANISATION_BUDGET_QUEUE = 'organisation-budget-guard';
 /** The nightly Lance role check (ADR 0020): pauses a principal who has lost both roles. */
 export const ROLE_CHECK_QUEUE = 'role-check';
+/**
+ * Onboarding step 6's prefill (docs/plans/multi-user.md M3): reads each
+ * onboarding principal's mailbox settings once they have connected
+ * Microsoft 365. Organisation scope, because per-principal jobs run for
+ * active principals only.
+ */
+export const ONBOARDING_PREFILL_QUEUE = 'onboarding-prefill';
 export const EXPIRY_QUEUE = 'expire-proposals';
 export const ALERT_DELIVERY_QUEUE = 'alerts-deliver';
 export const DIGEST_QUEUE = 'dry-run-digest';
@@ -128,6 +135,13 @@ export const SYSTEM_JOBS: readonly JobDeclaration[] = [
     schedules: ['0 3 * * *'],
     locked: true,
     everyStatus: true,
+  }),
+  declare({
+    slug: ONBOARDING_PREFILL_QUEUE,
+    title: "Prefill new principals' quiet hours from their mailbox",
+    schedules: ['* * * * *'],
+    locked: true,
+    scope: 'organisation',
   }),
   declare({
     slug: EXPIRY_QUEUE,

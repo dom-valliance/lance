@@ -25,7 +25,8 @@ import { QUEUES } from '../scheduler/queues.js';
 import { runTriage } from '../triage/run.js';
 import { createAgentLogsDetector } from '../watchers/agent-logs/index.js';
 import { runWatcher } from '../watchers/runner.js';
-import { connectorOfWatcher } from './connectors.js';
+import { runOnboardingPrefill } from '../onboarding/prefill.js';
+import { connectorOfWatcher, type ConnectorLookup } from './connectors.js';
 import type { PrincipalContext } from './context.js';
 import { runRoleCheck, type RoleCheckCredentials } from '../roles/roleCheck.js';
 import {
@@ -41,6 +42,7 @@ import {
   ALERT_DELIVERY_QUEUE,
   DIGEST_QUEUE,
   EXPIRY_QUEUE,
+  ONBOARDING_PREFILL_QUEUE,
   ORGANISATION_BUDGET_QUEUE,
   RECONCILE_QUEUE,
   RETENTION_QUEUE,
@@ -111,6 +113,8 @@ export interface HandlerDeps {
    * bot token, and the step is then recorded as skipped.
    */
   offboarding: Pick<OffboardDeps, 'secrets' | 'channels'>;
+  /** Each principal's connectors, for the onboarding prefill's mailbox read. */
+  connectorsFor: ConnectorLookup;
 }
 
 type PrincipalHandler = (context: PrincipalContext) => Promise<void>;
@@ -286,6 +290,18 @@ function organisationHandlers(deps: HandlerDeps): Map<string, (data: unknown) =>
           },
           'role check finished',
         );
+      },
+    ],
+    [
+      ONBOARDING_PREFILL_QUEUE,
+      async () => {
+        const result = await runOnboardingPrefill({
+          root: deps.root,
+          connectorsFor: deps.connectorsFor,
+        });
+        if (result.read.length > 0 || result.failed.length > 0) {
+          console.info(result, 'onboarding prefill finished');
+        }
       },
     ],
     [

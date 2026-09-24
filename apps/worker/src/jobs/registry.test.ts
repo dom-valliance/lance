@@ -63,6 +63,7 @@ describe('the job registry', () => {
       'detector-budget_guard',
       'expire-proposals',
       'jobs-reconcile',
+      'onboarding-prefill',
       'organisation-budget-guard',
       'retention',
       'role-check',
@@ -81,12 +82,12 @@ describe('the job registry', () => {
     ]);
   });
 
-  it('runs only the reconciler, the organisation budget and the role check once for the organisation', () => {
+  it('runs only the reconciler, the organisation budget, the role check and the onboarding prefill once for the organisation', () => {
     expect(
       SYSTEM_JOBS.filter((declared) => declared.scope === 'organisation').map(
         (declared) => declared.slug,
       ),
-    ).toEqual(['jobs-reconcile', 'organisation-budget-guard', 'role-check']);
+    ).toEqual(['jobs-reconcile', 'organisation-budget-guard', 'role-check', 'onboarding-prefill']);
   });
 
   it('runs the role check nightly at 02:30', () => {
