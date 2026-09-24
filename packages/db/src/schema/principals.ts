@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text } from 'drizzle-orm/pg-core';
+import { check, pgTable, text } from 'drizzle-orm/pg-core';
 import { principalStatus } from '../enums.js';
-import { createdAt, ulid, ulidCheck, updatedAt } from './columns.js';
+import { createdAt, timestamptz, ulid, ulidCheck, updatedAt } from './columns.js';
 
 /**
  * The people Lance acts for (ADR 0015). It is the lookup that turns an
@@ -11,6 +11,11 @@ import { createdAt, ulid, ulidCheck, updatedAt } from './columns.js';
  * to a first sign-in: an `onboarding` insert, or binding a missing
  * `entra_oid`; an admin scope may change a status. Dom's row reuses his
  * `users` id.
+ *
+ * `slack_user_id` is written by the database alone, from the principal's
+ * active row in `slack_links` (ADR 0021, migration 0014). The principal's
+ * own scope may record their Lance app roles and set their private Slack
+ * channel once (ADR 0023).
  */
 export const principals = pgTable(
   'principals',
@@ -23,10 +28,28 @@ export const principals = pgTable(
     foundryEmployeeId: text('foundry_employee_id'),
     timeZone: text('time_zone').notNull().default('Europe/London'),
     status: principalStatus('status').notNull().default('active'),
+    /** The principal's private Slack channel (ADR 0023); every delivery posts here. */
+    slackChannelId: text('slack_channel_id').unique(),
+    /**
+     * The Lance app roles the principal's last verified Entra token carried,
+     * recorded at each sign-in and at the Slack link, so a Slack request,
+     * which carries no token, can be gated on `Lance.Admin`.
+     */
+    lanceRoles: text('lance_roles')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    rolesRecordedAt: timestamptz('roles_recorded_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  () => [ulidCheck('principals', 'id')],
+  (table) => [
+    ulidCheck('principals', 'id'),
+    check(
+      'principals_lance_roles_known',
+      sql`${table.lanceRoles} <@ ARRAY['Lance.User', 'Lance.Admin']::text[]`,
+    ),
+  ],
 );
 
 /**

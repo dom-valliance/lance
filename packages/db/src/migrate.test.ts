@@ -31,6 +31,9 @@ const EXPECTED_TABLES = [
   'principal_state',
   'principals',
   'proposals',
+  'slack_link_tokens',
+  'slack_links',
+  'slack_request_nonces',
   'system_state',
   'users',
 ] as const;
