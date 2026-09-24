@@ -45,6 +45,8 @@ import {
 import { listLedger, MAX_PAGE_SIZE as MAX_LEDGER_PAGE_SIZE } from './ledger/service.js';
 import { listProposals, proposalSummary } from './proposals/service.js';
 import { listTasks } from './tasks/service.js';
+import { TRPCError } from '@trpc/server';
+import { BadRequestError } from './errors.js';
 import { adminProcedure, procedure, router, signedInProcedure } from './trpc.js';
 
 /**
@@ -219,6 +221,30 @@ export const BriefListInputSchema = z
   .default({});
 export type BriefListInput = z.infer<typeof BriefListInputSchema>;
 
+/** An evidence export's period and optional principal (spec 4.4). */
+export const EvidenceInputSchema = z.object({
+  from: TimestampSchema,
+  to: TimestampSchema,
+  principalId: UlidSchema.nullable().default(null),
+});
+
+export const OffboardInputSchema = z.object({
+  principalId: UlidSchema,
+  reason: z.string().trim().min(1).max(500),
+});
+
+/** A request the admin store refused, as the 400 it is rather than a 500. */
+const asBadRequest = async <T>(work: () => Promise<T>): Promise<T> => {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof BadRequestError) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
+    }
+    throw error;
+  }
+};
+
 export const appRouter = router({
   /**
    * Who is signed in and whether Lance is open to them yet. The one
@@ -254,8 +280,54 @@ export const appRouter = router({
     ),
   }),
   admin: router({
+    /** Every principal with their status and which onboarding steps are done. */
     principals: adminProcedure.query(({ ctx }) => ctx.server.admin.principals()),
+    /** Watchers, breakers, recorded secrets and cost, per principal. */
     health: adminProcedure.query(({ ctx }) => ctx.server.admin.health()),
+    /** Changes to organisation-default rules, newest first. */
+    ruleChanges: adminProcedure.query(({ ctx }) => ctx.server.admin.ruleChanges()),
+    /** Alerts the organisation jobs raised for this admin. */
+    systemAlerts: adminProcedure.query(({ ctx }) =>
+      ctx.server.admin.systemAlerts(ctx.caller.principal.id),
+    ),
+    /**
+     * Offboards a principal (docs/runbooks/offboard-principal.md): recorded
+     * here, carried out by the worker, which holds the vault and Slack rights.
+     */
+    offboard: adminProcedure.input(OffboardInputSchema).mutation(({ ctx, input }) =>
+      asBadRequest(() =>
+        ctx.server.admin.requestOffboarding({
+          principalId: input.principalId,
+          reason: input.reason,
+          actor: ctx.deps.actor,
+          callerId: ctx.caller.principal.id,
+        }),
+      ),
+    ),
+    /**
+     * The signed evidence bundle for a period (spec 4.4). A mutation, so the
+     * period travels in the request body; without a principal it covers
+     * system events only (ADR 0024).
+     */
+    evidence: adminProcedure.input(EvidenceInputSchema).mutation(({ ctx, input }) => {
+      const exporter = ctx.server.evidence;
+      if (exporter === undefined) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message:
+            'The evidence export has no signing key. Set evidence-signing-key in the static Key Vault to an Ed25519 key (docs/compliance/iso27001-access-review.md) and restart the api.',
+        });
+      }
+      return asBadRequest(() =>
+        exporter.export({
+          from: input.from,
+          to: input.to,
+          principalId: input.principalId,
+          actor: ctx.deps.actor,
+          callerId: ctx.caller.principal.id,
+        }),
+      );
+    }),
     /**
      * The organisation kill switch (multi-user plan M5): sets the global
      * row, which pauses every principal. `Lance.Admin` only; the caller's

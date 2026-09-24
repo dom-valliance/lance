@@ -27,7 +27,12 @@ import {
 } from '@lance/shared';
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWTVerifyGetKey } from 'jose';
 import type {
+  AdminPrincipalView,
   AdminStoreLike,
+  OffboardingQueued,
+  OffboardingRequest,
+  RuleChangeView,
+  SystemAlertView,
   ApiDeps,
   Caller,
   GraphConsentDeps,
@@ -67,7 +72,8 @@ import type {
 } from './commitments/store.js';
 import type { TaskCountQuery, TaskQuery, TaskStoreLike } from './tasks/store.js';
 import { toTaskView, type ObservationRecord } from './tasks/view.js';
-import { UnauthorisedError } from './errors.js';
+import { onboardingProgress } from './admin/onboarding.js';
+import { BadRequestError, UnauthorisedError } from './errors.js';
 import { createFeed, type Feed, type FeedEvent } from './events.js';
 import type { JobListing, JobsServiceLike, JobToggleStatus } from './jobs/service.js';
 import type { DecisionRequest } from './proposals/decide.js';
@@ -894,27 +900,56 @@ export const fakeHealth = (overrides: Partial<PrincipalHealth> = {}): PrincipalH
   status: 'active',
   watchers: [{ watcher: 'graph-mail', lastRunAgeMinutes: 3 }],
   breakers: [],
+  secrets: [
+    { connector: 'graph', state: 'stored', recordedAt: '2026-09-20T09:00:00.000Z' },
+    { connector: 'jamie', state: 'never_stored', recordedAt: null },
+  ],
   costTodayGbp: 1.5,
   costWeekGbp: 7.25,
   ...overrides,
 });
 
 export class FakeAdminStore implements AdminStoreLike {
+  readonly offboardings: OffboardingRequest[] = [];
+  readonly alertsFor: string[] = [];
+
   constructor(private readonly directory: PrincipalDirectoryLike) {}
 
-  async principals() {
+  async principals(): Promise<AdminPrincipalView[]> {
     const all = await this.directory.list();
     return all.map((p) => ({
       id: p.id,
       upn: p.upn,
       status: p.status,
       createdAt: p.createdAt.toISOString(),
+      onboarding: onboardingProgress(new Set(['slack_linked'])),
     }));
   }
 
   async health(): Promise<PrincipalHealth[]> {
     const all = await this.directory.list();
     return all.map((p) => fakeHealth({ principalId: p.id, upn: p.upn, status: p.status }));
+  }
+
+  ruleChanges(): Promise<RuleChangeView[]> {
+    return Promise.resolve([]);
+  }
+
+  systemAlerts(adminPrincipalId: string): Promise<SystemAlertView[]> {
+    this.alertsFor.push(adminPrincipalId);
+    return Promise.resolve([]);
+  }
+
+  requestOffboarding(request: OffboardingRequest): Promise<OffboardingQueued> {
+    if (request.principalId === request.callerId) {
+      return Promise.reject(new BadRequestError('An admin cannot offboard themselves.'));
+    }
+    this.offboardings.push(request);
+    return Promise.resolve({
+      status: 'queued',
+      principalId: request.principalId,
+      jobId: 'job-offboard',
+    });
   }
 }
 

@@ -5,6 +5,7 @@ import { appRouter } from './router.js';
 import {
   fakeBrief,
   fakeContext,
+  FakeAdminStore,
   fakeDeps,
   fakePrincipal,
   fakeProposal,
@@ -580,12 +581,16 @@ describe('an onboarding principal', () => {
 describe('the admin router', () => {
   const adminPaths = procedurePaths.filter((path) => path.startsWith('admin.'));
 
-  it('covers the principals list, the health read and the organisation kill switch', () => {
+  it('covers the principals, health, rules, alerts, offboarding, evidence and the kill switch', () => {
     expect(adminPaths.sort()).toEqual([
+      'admin.evidence',
       'admin.health',
+      'admin.offboard',
       'admin.pauseAll',
       'admin.principals',
       'admin.resumeAll',
+      'admin.ruleChanges',
+      'admin.systemAlerts',
     ]);
   });
 
@@ -596,12 +601,13 @@ describe('the admin router', () => {
 
   it('lets a Lance.Admin list principals and read their health', async () => {
     const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
-    await expect(admin.admin.principals()).resolves.toEqual([
+    await expect(admin.admin.principals()).resolves.toMatchObject([
       {
         id: harness.deps.principalId,
         upn: TEST_UPN,
         status: 'active',
         createdAt: '2026-09-20T09:00:00.000Z',
+        onboarding: { complete: false },
       },
     ]);
     await expect(admin.admin.health()).resolves.toHaveLength(1);
@@ -618,5 +624,37 @@ describe('the admin router', () => {
     await admin.admin.resumeAll();
     expect(harness.control.pauseAllCalls).toEqual([{ reason: 'drill', actor: 'user:dom' }]);
     expect(harness.control.resumeAllCalls).toEqual([{ actor: 'user:dom' }]);
+  });
+
+  it("reads system alerts in the admin's own scope", async () => {
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    await admin.admin.systemAlerts();
+    expect((harness.server.admin as FakeAdminStore).alertsFor).toEqual([harness.deps.principalId]);
+  });
+
+  it('queues an offboarding with the admin as the actor, and refuses self-offboarding as a 400', async () => {
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    const target = '01K5S9V6QW3SWCCPVB0N0E3A01';
+    await expect(
+      admin.admin.offboard({ principalId: target, reason: 'left Valliance' }),
+    ).resolves.toEqual({ status: 'queued', principalId: target, jobId: 'job-offboard' });
+    expect((harness.server.admin as FakeAdminStore).offboardings).toEqual([
+      {
+        principalId: target,
+        reason: 'left Valliance',
+        actor: 'user:dom',
+        callerId: harness.deps.principalId,
+      },
+    ]);
+    await expect(
+      admin.admin.offboard({ principalId: harness.deps.principalId, reason: 'test' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('refuses the evidence export, naming the secret, while no signing key is configured', async () => {
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    await expect(
+      admin.admin.evidence({ from: '2026-09-01T00:00:00Z', to: '2026-09-24T00:00:00Z' }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: /evidence-signing-key/ });
   });
 });

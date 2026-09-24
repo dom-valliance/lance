@@ -10,14 +10,16 @@ import {
   scopedDb,
   type Db,
 } from '@lance/db';
-import { JobControl, LedgerReader, LedgerWriter } from '@lance/ledger';
+import { JobControl, LedgerReader, LedgerWriter, raiseAlert } from '@lance/ledger';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { createPublicKey, generateKeyPairSync, verify } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEntraVerifier, entraIssuer } from './auth/entra.js';
 import { createBoss, createExecuteQueue, type ExecuteQueue } from './executeQueue.js';
+import { evidenceSignerFromPem, type SignedEvidence } from './admin/evidence.js';
 import { createServerDeps } from './main.js';
 import { buildServer } from './server.js';
 import { slackSignature } from './slack/verify.js';
@@ -75,6 +77,15 @@ const auth = (bearer: string): Record<string, string> => ({ authorization: `Bear
 
 const trpcGet = (path: string, bearer: string) =>
   server.inject({ method: 'GET', url: `/trpc/${path}`, headers: auth(bearer) });
+
+const trpcPost = (path: string, bearer: string, input: Record<string, unknown>) =>
+  server.inject({ method: 'POST', url: `/trpc/${path}`, headers: auth(bearer), payload: input });
+
+/** The evidence export's key, generated for the suite as `openssl genpkey -algorithm ed25519` would. */
+const EVIDENCE_KEY = generateKeyPairSync('ed25519').privateKey.export({
+  type: 'pkcs8',
+  format: 'pem',
+});
 
 const dataOf = <T>(response: { json: <U>() => U }): T =>
   response.json<{ result: { data: T } }>().result.data;
@@ -188,6 +199,7 @@ beforeAll(async () => {
       auth: createEntraVerifier({ tenantId: TENANT_ID, clientId: CLIENT_ID, jwks: keys.jwks }),
       slack: { signingSecret: TEST_SIGNING_SECRET, fallbackUserId: null },
       ingestSecret: TEST_INGEST_SECRET,
+      evidenceSigner: evidenceSignerFromPem(EVIDENCE_KEY),
     }),
   );
   await server.ready();
@@ -527,5 +539,169 @@ describe('the admin procedures over a real database', () => {
         /"(payload|preview|rationale|body|title|description|bodyText|subject)"/,
       );
     }
+  });
+
+  it('list organisation rule changes and system alerts, and nothing of another principal', async () => {
+    const orgRule = newUlid();
+    const annRule = newUlid();
+    await fixture.$client.query(
+      `INSERT INTO policy_rules (id, principal_id, version, action_class, counterparty_class, system, decision, created_by, rationale)
+       VALUES ($1, NULL, 2, 'draft_email', 'client', 'graph', 'propose', 'user:dom', $3),
+              ($2, $4, 1, 'create_task', 'internal', 'notion', 'auto', 'user:dom', $3)`,
+      [orgRule, annRule, CONTENT_MARKER, ANN_ID],
+    );
+    await new LedgerWriter(db).append({
+      ts: new Date().toISOString(),
+      actor: 'user:dom',
+      kind: 'rule_changed',
+      sourceSystem: 'lance',
+      correlationId: newUlid(),
+      payload: { ruleId: orgRule, change: 'superseded' },
+    });
+    await new LedgerWriter(scopedDb(root, { principalId: ANN_ID })).append({
+      ts: new Date().toISOString(),
+      actor: 'user:ann',
+      kind: 'rule_changed',
+      sourceSystem: 'lance',
+      correlationId: newUlid(),
+      payload: { ruleId: annRule, change: 'created' },
+    });
+    await raiseAlert(db, {
+      kind: 'principal_access_revoked',
+      severity: 'P1',
+      dedupeKey: 'principal_access_revoked:someone',
+      title: 'someone@valliance.ai has lost Lance access and is paused',
+      body: 'The nightly role check paused them.',
+      actor: 'system:role-check',
+    });
+    await raiseAlert(db, {
+      kind: 'breaker_open',
+      severity: 'P1',
+      dedupeKey: 'breaker:jamie',
+      title: 'Dom own alert, not a system one',
+      body: 'x',
+      actor: 'agent:worker@0.1.0',
+    });
+
+    const rules = await trpcGet('admin.ruleChanges', domBearer);
+    const systemAlerts = await trpcGet('admin.systemAlerts', domBearer);
+
+    expect(dataOf<{ ruleId: string; change: string }[]>(rules)).toEqual([
+      expect.objectContaining({ ruleId: orgRule, change: 'superseded', actor: 'user:dom' }),
+    ]);
+    expect(dataOf<{ kind: string }[]>(systemAlerts).map((alert) => alert.kind)).toEqual([
+      'principal_access_revoked',
+    ]);
+    expect(rules.body).not.toContain(CONTENT_MARKER);
+    expect(systemAlerts.body).not.toContain(CONTENT_MARKER);
+    expect(rules.body).not.toMatch(/"(payload|rationale|body|title|conditions)"/);
+  });
+
+  it('count onboarding steps and recorded secrets from the ledger, never what was entered', async () => {
+    await new LedgerWriter(scopedDb(root, { principalId: ANN_ID })).append({
+      ts: new Date().toISOString(),
+      actor: 'user:ann',
+      kind: 'state_changed',
+      sourceSystem: 'lance',
+      correlationId: newUlid(),
+      payload: { change: 'jamie_connected' },
+    });
+    const principalsResponse = await trpcGet('admin.principals', domBearer);
+    const healthResponse = await trpcGet('admin.health', domBearer);
+    const ann = dataOf<{ id: string; onboarding: { steps: { step: string; done: boolean }[] } }[]>(
+      principalsResponse,
+    ).find((row) => row.id === ANN_ID);
+    const annHealth = dataOf<
+      { principalId: string; secrets: { connector: string; state: string }[] }[]
+    >(healthResponse).find((row) => row.principalId === ANN_ID);
+
+    expect(ann?.onboarding.steps.filter((step) => step.done).map((step) => step.step)).toEqual([
+      'jamie',
+    ]);
+    expect(annHealth?.secrets.map((secret) => [secret.connector, secret.state])).toEqual([
+      ['graph', 'never_stored'],
+      ['jamie', 'stored'],
+    ]);
+    for (const response of [principalsResponse, healthResponse]) {
+      expect(response.body).not.toContain(CONTENT_MARKER);
+    }
+  });
+
+  it('export a signed evidence bundle that verifies, with metadata and no content', async () => {
+    const from = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const to = new Date(Date.now() + 3600 * 1000).toISOString();
+    const refused = await trpcPost('admin.evidence', annBearer, { from, to });
+    const scoped = await trpcPost('admin.evidence', domBearer, { from, to, principalId: ANN_ID });
+    const system = await trpcPost('admin.evidence', domBearer, { from, to });
+
+    expect([refused.statusCode, scoped.statusCode, system.statusCode]).toEqual([403, 200, 200]);
+    for (const response of [scoped, system]) {
+      const bundle = dataOf<SignedEvidence>(response);
+      const key = createPublicKey(bundle.signature.publicKey);
+      expect(
+        verify(
+          null,
+          Buffer.from(bundle.signed, 'utf8'),
+          key,
+          Buffer.from(bundle.signature.value, 'base64'),
+        ),
+      ).toBe(true);
+      expect(bundle.signed).not.toContain(CONTENT_MARKER);
+    }
+    const annBundle = JSON.parse(dataOf<SignedEvidence>(scoped).signed) as {
+      scope: { kind: string };
+      ledgerEvents: { kind: string; payloadHash: string }[];
+      accessEvents: { payload: { change?: string } }[];
+    };
+    expect(annBundle.scope.kind).toBe('principal');
+    expect(annBundle.ledgerEvents.length).toBeGreaterThan(0);
+    expect(annBundle.ledgerEvents.every((event) => !('payload' in event))).toBe(true);
+    expect(annBundle.accessEvents.map((event) => event.payload.change)).toContain(
+      'jamie_connected',
+    );
+
+    const systemBundle = JSON.parse(dataOf<SignedEvidence>(system).signed) as {
+      scope: { kind: string };
+      ledgerEvents?: unknown;
+      principals: { id: string }[];
+    };
+    expect(systemBundle.scope.kind).toBe('system');
+    expect(systemBundle.ledgerEvents).toBeUndefined();
+    expect(systemBundle.principals.map((principal) => principal.id)).toContain(ANN_ID);
+
+    const exported = await new LedgerReader(db).query({ kind: 'state_changed' });
+    const changeOf = (event: { payload: unknown }): unknown =>
+      (event.payload as Record<string, unknown> | null)?.['change'];
+    expect(exported.filter((event) => changeOf(event) === 'evidence_exported')).toHaveLength(2);
+  });
+
+  it("record an offboarding request in the principal's ledger and queue it for the worker", async () => {
+    const own = await trpcPost('admin.offboard', domBearer, {
+      principalId: SEED_PRINCIPAL_ID,
+      reason: 'test',
+    });
+    expect(own.statusCode).toBe(400);
+
+    const response = await trpcPost('admin.offboard', domBearer, {
+      principalId: ANN_ID,
+      reason: 'left Valliance',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(dataOf<{ status: string }>(response).status).toBe('queued');
+
+    const requested = await new LedgerReader(scopedDb(root, { principalId: ANN_ID })).query({
+      kind: 'state_changed',
+    });
+    expect(requested[0]?.payload).toMatchObject({
+      change: 'offboarding_requested',
+      principalId: ANN_ID,
+      reason: 'left Valliance',
+    });
+    const queued = await db.execute<{ data: Record<string, unknown> }>(
+      sql`select data from pgboss.job where name = 'offboard-principal'`,
+    );
+    expect(queued.rows.map((row) => row.data)).toEqual([
+      { principalId: ANN_ID, actor: 'user:dom', reason: 'left Valliance' },
+    ]);
   });
 });

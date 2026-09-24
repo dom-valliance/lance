@@ -33,6 +33,11 @@ import { initTelemetry } from '@lance/telemetry';
 import { pathToFileURL } from 'node:url';
 import { eq } from 'drizzle-orm';
 import { actorFromUpn } from './actor.js';
+import {
+  createEvidenceExporter,
+  evidenceSignerFromEnv,
+  type EvidenceSigner,
+} from './admin/evidence.js';
 import { createAdminStore } from './admin/store.js';
 import { createAgentsStore } from './agents/store.js';
 import { createAlertStore } from './alerts/store.js';
@@ -216,6 +221,8 @@ export interface ServerRuntimeOptions {
    * every job payload names the principal it is for (ADR 0025).
    */
   executeQueue?: ExecuteQueue;
+  /** Signs the evidence export (`EVIDENCE_SIGNING_KEY`); null or omitted leaves it unavailable. */
+  evidenceSigner?: EvidenceSigner | null;
 }
 
 /** Everything `buildServer` needs, over the real database. */
@@ -248,7 +255,17 @@ export const createServerDeps = (options: ServerRuntimeOptions): ServerDeps => {
     admin: createAdminStore(options.root, directory, {
       usdToGbp: options.config.cost.usdToGbp,
       timeZone: options.config.timeZone,
+      enqueueOffboard: (job) => executeQueue.enqueueOffboard(job),
     }),
+    ...(options.evidenceSigner === undefined || options.evidenceSigner === null
+      ? {}
+      : {
+          evidence: createEvidenceExporter({
+            root: options.root,
+            directory,
+            signer: options.evidenceSigner,
+          }),
+        }),
     readiness: async () => {
       const rows = await options.root
         .select({ paused: systemState.paused, mode: systemState.mode })
@@ -355,11 +372,21 @@ export const main = async (): Promise<void> => {
     );
   }
 
+  // The evidence export's signing key (spec 4.4). Until it is set in the
+  // static vault, the export refuses and names the secret.
+  const evidenceSigner = evidenceSignerFromEnv();
+  if (evidenceSigner === null) {
+    console.warn(
+      'EVIDENCE_SIGNING_KEY is not set: the admin evidence export is unavailable until evidence-signing-key holds an Ed25519 key.',
+    );
+  }
+
   const slackToken = slackTokenFromEnv();
   const deps = createServerDeps({
     config,
     root,
     executeQueue,
+    evidenceSigner,
     ...(slackToken === null
       ? {}
       : {

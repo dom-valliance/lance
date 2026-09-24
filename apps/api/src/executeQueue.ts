@@ -17,6 +17,15 @@ export const CHASE_QUEUE = 'chase';
 export const BRIEF_QUEUE = 'brief-morning';
 /** The worker's reconciler (ADR 0025), asked to run after a job row changes. */
 export const RECONCILE_QUEUE = 'jobs-reconcile';
+/** The worker's offboarding (package 5.6); the api records the request and queues it. */
+export const OFFBOARD_QUEUE = 'offboard-principal';
+
+/** The job body the worker's offboarding consumes. */
+export interface OffboardJob extends PrincipalJob {
+  /** The admin's ledger actor. */
+  actor: string;
+  reason: string;
+}
 
 /**
  * Every job the api puts on a queue names the principal it is for
@@ -54,6 +63,8 @@ export interface ExecuteQueue {
   enqueueBrief(principalId: string): Promise<string>;
   /** Asks the worker to reconcile schedules after the principal's job rows changed. */
   enqueueReconcile(principalId: string): Promise<void>;
+  /** Hands one principal's offboarding to the worker; returns the pg-boss job id. */
+  enqueueOffboard(job: OffboardJob): Promise<string>;
   /** The schedules the worker's reconciler holds for the principal, for `/lance jobs`. */
   schedulesFor(principalId: string): Promise<JobSchedule[]>;
   stop(): Promise<void>;
@@ -85,6 +96,7 @@ export function createExecuteQueue(db: Db): ExecuteQueue {
     await boss.createQueue(CHASE_QUEUE);
     await boss.createQueue(BRIEF_QUEUE);
     await boss.createQueue(RECONCILE_QUEUE);
+    await boss.createQueue(OFFBOARD_QUEUE);
   };
 
   return {
@@ -126,6 +138,18 @@ export function createExecuteQueue(db: Db): ExecuteQueue {
       await started;
       const job: PrincipalJob = { principalId };
       await boss.send(RECONCILE_QUEUE, job);
+    },
+
+    async enqueueOffboard(job: OffboardJob): Promise<string> {
+      started ??= start();
+      await started;
+      const jobId = await boss.send(OFFBOARD_QUEUE, job);
+      if (jobId === null) {
+        throw new Error(
+          `The offboarding queue refused the job for principal ${job.principalId}. Check that the worker is running and that the pgboss schema is present.`,
+        );
+      }
+      return jobId;
     },
 
     async schedulesFor(principalId: string): Promise<JobSchedule[]> {

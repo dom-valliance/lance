@@ -24,6 +24,8 @@ import type {
   SystemMode,
 } from '@lance/shared';
 import type { PRINCIPAL_STATUS_VALUES } from '@lance/db';
+import type { OnboardingProgress } from './admin/onboarding.js';
+import type { SignedEvidence } from './admin/evidence.js';
 import type { AgentsStoreLike } from './agents/store.js';
 import type { AlertStoreLike } from './alerts/store.js';
 import type { BriefStoreLike } from './briefs/store.js';
@@ -364,6 +366,19 @@ export interface ApiDeps {
   now?: () => string;
 }
 
+/**
+ * Whether a principal's credential is in the principal vault, as the ledger
+ * records it: stored at onboarding (or copied from before ADR 0022), and
+ * deleted at offboarding. The api may write to the vault and never read
+ * it, so this is the record, not a vault read.
+ */
+export interface SecretState {
+  connector: 'graph' | 'jamie';
+  state: 'stored' | 'deleted' | 'never_stored';
+  /** When the ledger recorded the latest change; null for never stored. */
+  recordedAt: string | null;
+}
+
 /** Health for one principal, as a `Lance.Admin` sees it (ADR 0024). No content. */
 export interface PrincipalHealth {
   principalId: string;
@@ -371,22 +386,90 @@ export interface PrincipalHealth {
   status: PrincipalStatus;
   watchers: { watcher: string; lastRunAgeMinutes: number }[];
   breakers: { connector: string; state: 'open' }[];
+  secrets: SecretState[];
   costTodayGbp: number;
   costWeekGbp: number;
 }
 
-/** A principal as the admin list shows it (ADR 0024). */
+/** A principal as the admin list shows it (ADR 0024): status and which onboarding steps are done. */
 export interface AdminPrincipalView {
   id: string;
   upn: string;
   status: PrincipalStatus;
   createdAt: string;
+  onboarding: OnboardingProgress;
+}
+
+/** A change to an organisation-default rule, from the ledger's `rule_changed` events. */
+export interface RuleChangeView {
+  eventId: string;
+  ts: string;
+  actor: string;
+  ruleId: string;
+  /** `payload.change`, such as `created` or `superseded`, when the event names one. */
+  change: string | null;
+  rule: {
+    version: number;
+    active: boolean;
+    actionClass: string;
+    counterpartyClass: string;
+    system: string;
+    decision: string;
+  };
+}
+
+/** An alert an organisation job raised in the admin's own scope (the role check, the organisation budget). */
+export interface SystemAlertView {
+  id: string;
+  severity: string;
+  kind: string;
+  title: string;
+  status: string;
+  firstSeen: string;
+  lastSeen: string;
+  count: number;
+}
+
+export interface OffboardingRequest {
+  principalId: string;
+  reason: string;
+  /** The admin's ledger actor. */
+  actor: string;
+  /** The admin's own principal, who may not offboard themselves. */
+  callerId: string;
+}
+
+export interface OffboardingQueued {
+  status: 'queued';
+  principalId: string;
+  jobId: string;
 }
 
 /** The reads behind the admin procedures, each computed in the principal's own scope. */
 export interface AdminStoreLike {
   principals(): Promise<AdminPrincipalView[]>;
   health(): Promise<PrincipalHealth[]>;
+  /** Newest first, across every principal's ledger. */
+  ruleChanges(): Promise<RuleChangeView[]>;
+  /** Open and acknowledged, in the admin's own scope. */
+  systemAlerts(adminPrincipalId: string): Promise<SystemAlertView[]>;
+  /** Records the request in the principal's ledger and hands the steps to the worker. */
+  requestOffboarding(request: OffboardingRequest): Promise<OffboardingQueued>;
+}
+
+export interface EvidenceRequest {
+  from: string;
+  to: string;
+  /** Null for the system export, which covers system events only (ADR 0024). */
+  principalId: string | null;
+  actor: string;
+  /** The admin's own principal, whose ledger records the export. */
+  callerId: string;
+}
+
+/** Spec 4.4's evidence export, as a signed bundle. */
+export interface EvidenceExporterLike {
+  export(request: EvidenceRequest): Promise<SignedEvidence>;
 }
 
 /**
@@ -401,6 +484,11 @@ export interface ServerDeps {
   /** One principal's dependencies, built on first use and reused after. */
   depsFor: (principal: PrincipalKey) => ApiDeps;
   admin: AdminStoreLike;
+  /**
+   * Absent in a process without `EVIDENCE_SIGNING_KEY`; the export then
+   * refuses and names the missing secret.
+   */
+  evidence?: EvidenceExporterLike;
   /** The global `system_state` row, for the readiness probe. */
   readiness: () => Promise<{ paused: boolean; mode: SystemMode }>;
   slack: SlackDeps;
