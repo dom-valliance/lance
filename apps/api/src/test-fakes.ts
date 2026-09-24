@@ -18,14 +18,22 @@ import {
   loadConfig,
   newUlid,
   type Config,
+  type LanceRole,
   type LedgerEventInputCandidate,
   type Proposal,
   type SystemMode,
 } from '@lance/shared';
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWTVerifyGetKey } from 'jose';
 import type {
+  AdminStoreLike,
   ApiDeps,
+  GraphConsentDeps,
   LedgerReaderLike,
+  PrincipalDirectoryLike,
+  PrincipalHealth,
+  PrincipalRef,
+  ServerDeps,
+  VerifiedIdentity,
   LedgerWriterLike,
   OntologyLike,
   OntologyNodeLike,
@@ -54,6 +62,7 @@ import { UnauthorisedError } from './errors.js';
 import { createFeed, type Feed, type FeedEvent } from './events.js';
 import type { DecisionRequest } from './proposals/decide.js';
 import type { StatusSnapshot, StatusSource } from './status.js';
+import type { ApiContext } from './trpc.js';
 
 /**
  * Fakes and builders for the test suite. Not exported from the package
@@ -65,6 +74,25 @@ export const TEST_UPN = 'dom@valliance.ai';
 export const TEST_SIGNING_SECRET = 'slack-signing-secret-for-tests';
 export const TEST_INGEST_SECRET = 'ingest-secret-for-tests';
 export const TEST_SLACK_USER_ID = 'U0DOM';
+/** The seed principal's id, `SEED_PRINCIPAL_ID` in `@lance/db`. */
+export const TEST_PRINCIPAL_ID = '01K5S9V6QW3SWCCPVB0N0E300H';
+export const TEST_OID = '19fb2afd-6814-4600-8697-eb798ec5691f';
+
+export const fakePrincipal = (overrides: Partial<PrincipalRef> = {}): PrincipalRef => ({
+  id: TEST_PRINCIPAL_ID,
+  upn: TEST_UPN,
+  status: 'active',
+  slackUserId: TEST_SLACK_USER_ID,
+  createdAt: new Date('2026-09-20T09:00:00.000Z'),
+  ...overrides,
+});
+
+export const fakeIdentity = (overrides: Partial<VerifiedIdentity> = {}): VerifiedIdentity => ({
+  oid: TEST_OID,
+  upn: TEST_UPN,
+  roles: ['Lance.User'],
+  ...overrides,
+});
 
 export const testConfig = (env: NodeJS.ProcessEnv = {}): Config =>
   loadConfig({
@@ -683,15 +711,96 @@ export class FakeStatusSource implements StatusSource {
   }
 }
 
-/** Accepts exactly one token, so a test can prove a route is guarded. */
-export const fakeVerifier = (token: string, upn = TEST_UPN): TokenVerifier => ({
-  verify(bearer: string): Promise<{ upn: string }> {
-    if (bearer !== token) {
-      return Promise.reject(new UnauthorisedError('The bearer token was rejected.'));
-    }
-    return Promise.resolve({ upn });
-  },
+/**
+ * Accepts the tokens it is given, each for its own identity, so a test can
+ * prove a route is guarded and sign in as more than one person.
+ */
+export const fakeVerifier = (
+  tokens: string | Record<string, VerifiedIdentity>,
+  roles: LanceRole[] = ['Lance.User'],
+): TokenVerifier => {
+  const known: Record<string, VerifiedIdentity> =
+    typeof tokens === 'string' ? { [tokens]: fakeIdentity({ roles }) } : tokens;
+  return {
+    verify(bearer: string): Promise<VerifiedIdentity> {
+      const identity = known[bearer];
+      if (identity === undefined) {
+        return Promise.reject(new UnauthorisedError('The bearer token was rejected.'));
+      }
+      return Promise.resolve(identity);
+    },
+  };
+};
+
+/** Principals by oid; an identity it does not know signs in as an onboarding principal. */
+export class FakeDirectory implements PrincipalDirectoryLike {
+  readonly principals = new Map<string, PrincipalRef>();
+  readonly signIns: VerifiedIdentity[] = [];
+
+  constructor(entries: [oid: string, principal: PrincipalRef][] = []) {
+    for (const [oid, principal] of entries) this.principals.set(oid, principal);
+  }
+
+  signIn(identity: VerifiedIdentity): Promise<PrincipalRef> {
+    this.signIns.push(identity);
+    const known = this.principals.get(identity.oid);
+    if (known !== undefined) return Promise.resolve(known);
+    const created = fakePrincipal({
+      id: newUlid(),
+      upn: identity.upn,
+      status: 'onboarding',
+      slackUserId: null,
+    });
+    this.principals.set(identity.oid, created);
+    return Promise.resolve(created);
+  }
+
+  bySlackUserId(slackUserId: string): Promise<PrincipalRef | null> {
+    const found = [...this.principals.values()].find((p) => p.slackUserId === slackUserId);
+    return Promise.resolve(found ?? null);
+  }
+
+  byUpn(upn: string): Promise<PrincipalRef | null> {
+    const found = [...this.principals.values()].find(
+      (p) => p.upn.toLowerCase() === upn.toLowerCase(),
+    );
+    return Promise.resolve(found ?? null);
+  }
+
+  list(): Promise<PrincipalRef[]> {
+    return Promise.resolve([...this.principals.values()]);
+  }
+}
+
+export const fakeHealth = (overrides: Partial<PrincipalHealth> = {}): PrincipalHealth => ({
+  principalId: TEST_PRINCIPAL_ID,
+  upn: TEST_UPN,
+  status: 'active',
+  watchers: [{ watcher: 'graph-mail', lastRunAgeMinutes: 3 }],
+  breakers: [],
+  costTodayGbp: 1.5,
+  costWeekGbp: 7.25,
+  ...overrides,
 });
+
+export class FakeAdminStore implements AdminStoreLike {
+  constructor(private readonly directory: PrincipalDirectoryLike) {}
+
+  async principals() {
+    const all = await this.directory.list();
+    return all.map((p) => ({
+      id: p.id,
+      upn: p.upn,
+      status: p.status,
+      createdAt: p.createdAt.toISOString(),
+    }));
+  }
+
+  async health(): Promise<PrincipalHealth[]> {
+    const all = await this.directory.list();
+    return all.map((p) => fakeHealth({ principalId: p.id, upn: p.upn, status: p.status }));
+  }
+}
 
 export interface SignOptions {
   issuer?: string;
@@ -739,7 +848,12 @@ export interface FakeDepsOverrides {
   writer?: LedgerWriterLike;
   status?: StatusSource;
   auth?: TokenVerifier;
+  /** The signed-in principal's Slack id. Null leaves every Slack user unknown. */
   allowedSlackUserId?: string | null;
+  /** The principal the test token signs in as. */
+  principal?: PrincipalRef;
+  directory?: FakeDirectory;
+  graph?: GraphConsentDeps;
   /** Omit the Slack surface, as a process with no bot token has. */
   withoutSlackSurface?: boolean;
   now?: () => string;
@@ -747,6 +861,9 @@ export interface FakeDepsOverrides {
 
 export interface FakeDeps {
   deps: ApiDeps;
+  /** The server around `deps`: every principal the directory knows gets these same deps. */
+  server: ServerDeps;
+  directory: FakeDirectory;
   control: FakeSystemControl;
   ledger: FakeLedgerReader;
   writer: FakeLedgerWriter;
@@ -794,8 +911,20 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
   const ontology = new FakeOntology();
   const slackFailures: string[] = [];
 
+  const config = overrides.config ?? testConfig();
+  const principal =
+    overrides.principal ??
+    fakePrincipal(
+      overrides.allowedSlackUserId === undefined
+        ? {}
+        : { slackUserId: overrides.allowedSlackUserId },
+    );
+  const directory = overrides.directory ?? new FakeDirectory([[TEST_OID, principal]]);
+
   const deps: ApiDeps = {
-    config: overrides.config ?? testConfig(),
+    config,
+    principalId: principal.id,
+    actor: 'user:dom',
     control: overrides.control ?? control,
     ledger: overrides.ledger ?? ledger,
     writer: overrides.writer ?? writer,
@@ -820,14 +949,6 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
       return Promise.resolve(`job-${String(chased.length)}`);
     },
     status: overrides.status ?? status,
-    auth: overrides.auth ?? fakeVerifier('good-token'),
-    slack: {
-      signingSecret: TEST_SIGNING_SECRET,
-      allowedUserId:
-        overrides.allowedSlackUserId === undefined
-          ? TEST_SLACK_USER_ID
-          : overrides.allowedSlackUserId,
-    },
     slackSurface: overrides.withoutSlackSurface === true ? null : slack.surface,
     onAlertSlackFailure: (_error, alertId) => {
       slackFailures.push(alertId);
@@ -836,12 +957,29 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
       feed.notify(event);
     },
     subscribe: (listener) => feed.subscribe(listener),
+    ...(overrides.now === undefined ? {} : { now: overrides.now }),
+  };
+
+  const server: ServerDeps = {
+    config,
+    auth: overrides.auth ?? fakeVerifier('good-token'),
+    directory,
+    depsFor: () => deps,
+    admin: new FakeAdminStore(directory),
+    readiness: async () => {
+      const state = await deps.control.read();
+      return { paused: state.paused, mode: state.mode };
+    },
+    slack: { signingSecret: TEST_SIGNING_SECRET, fallbackUserId: null },
     ingestSecret: TEST_INGEST_SECRET,
+    ...(overrides.graph === undefined ? {} : { graph: overrides.graph }),
     ...(overrides.now === undefined ? {} : { now: overrides.now }),
   };
 
   return {
     deps,
+    server,
+    directory,
     control,
     ledger,
     writer,
@@ -861,5 +999,25 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     enqueued,
     chased,
     briefRequests,
+  };
+};
+
+/**
+ * A tRPC context for a direct caller: the harness's principal, signed in
+ * with `roles`, unless a test names another principal.
+ */
+export const fakeContext = (
+  harness: FakeDeps,
+  options: { roles?: LanceRole[]; principal?: PrincipalRef } = {},
+): ApiContext => {
+  const principal = options.principal ?? fakePrincipal({ id: harness.deps.principalId });
+  return {
+    server: harness.server,
+    caller: {
+      identity: fakeIdentity({ upn: principal.upn, roles: options.roles ?? ['Lance.User'] }),
+      principal,
+    },
+    deps: harness.deps,
+    upn: principal.upn,
   };
 };

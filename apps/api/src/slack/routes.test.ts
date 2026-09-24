@@ -63,7 +63,7 @@ const slashText = async (text: string, userId = TEST_SLACK_USER_ID): Promise<str
 
 beforeEach(() => {
   harness = fakeDeps();
-  server = buildServer(harness.deps);
+  server = buildServer(harness.server);
 });
 
 afterEach(async () => {
@@ -156,7 +156,7 @@ describe('/lance pause', () => {
 
   it('refuses everyone when no Slack user id is configured', async () => {
     const unconfigured = fakeDeps({ allowedSlackUserId: null });
-    const other = buildServer(unconfigured.deps);
+    const other = buildServer(unconfigured.server);
     try {
       const response = await other.inject({
         method: 'POST',

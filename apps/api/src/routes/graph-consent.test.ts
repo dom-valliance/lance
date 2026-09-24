@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ApiDeps, GraphTokenStoreLike } from '../deps.js';
+import type { ServerDeps, GraphTokenStoreLike } from '../deps.js';
 import { buildServer } from '../server.js';
 import { fakeDeps, type FakeDeps } from '../test-fakes.js';
 import { graphConsentConfigurationError } from './graph-consent.js';
@@ -62,8 +62,8 @@ beforeEach(() => {
   harness = fakeDeps();
   tokenStore = new FakeGraphTokenStore();
   tokenRequests = [];
-  const deps: ApiDeps = {
-    ...harness.deps,
+  const deps: ServerDeps = {
+    ...harness.server,
     graph: {
       tenantId: TENANT,
       clientId: CLIENT,
@@ -269,7 +269,7 @@ describe('GET /auth/graph/callback', () => {
 
 describe('an api that was not given the Entra app credentials', () => {
   it('answers 503 rather than half-running the flow', async () => {
-    const bare = buildServer(fakeDeps().deps);
+    const bare = buildServer(fakeDeps().server);
 
     const connect = await bare.inject({
       method: 'GET',

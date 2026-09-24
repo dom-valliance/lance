@@ -1,9 +1,9 @@
 import { nowIso, SystemModeSchema, UlidSchema } from '@lance/shared';
 import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { DOM_ACTOR, type ApiDeps, resumeAndRequeue } from '../deps.js';
+import { resumeAndRequeue, type ApiDeps, type ServerDeps } from '../deps.js';
 import { renderStatus } from '../status.js';
-import { handleInteraction } from './interactions.js';
+import { handleInteraction, InteractionUserSchema } from './interactions.js';
 import { verifySlackSignature } from './verify.js';
 
 /**
@@ -103,7 +103,7 @@ const handleMode = async (
       `"${rest.trim()}" is not a mode. Use /lance mode live or /lance mode dry_run.`,
     );
   }
-  const result = await deps.control.setMode(parsed.data, { actor: DOM_ACTOR });
+  const result = await deps.control.setMode(parsed.data, { actor: deps.actor });
   const opening = result.changed
     ? `${displayName} is now in ${parsed.data} mode.`
     : `${displayName} was already in ${parsed.data} mode.`;
@@ -159,7 +159,7 @@ const handlePause = async (
 ): Promise<SlackReply> => {
   const result = await deps.control.pause({
     reason: reason.length > 0 ? reason : 'paused from Slack',
-    actor: DOM_ACTOR,
+    actor: deps.actor,
   });
 
   const opening = result.changed
@@ -188,19 +188,34 @@ const handleResume = async (deps: ApiDeps, displayName: string): Promise<SlackRe
 };
 
 /**
- * Only Dom may work the kill switch from Slack. The allowlist is one Slack
- * user id from `principals.slack_user_id`; an unset id refuses everyone, which
- * is the safe default.
+ * The dependencies of the active principal a Slack user works for, or null
+ * for a Slack user Lance does not know, which refuses them everything. The
+ * user resolves through `principals.slack_user_id`, or through
+ * `SLACK_ALLOWED_USER_ID` to the principal in DOM_EMAIL for a row recorded
+ * before its Slack id was. Package 5.4 replaces both with `/lance login`.
  */
-const mayControl = (deps: ApiDeps, userId: string): boolean =>
-  deps.slack.allowedUserId !== null && deps.slack.allowedUserId === userId;
+export const slackPrincipalDeps = async (
+  server: Pick<ServerDeps, 'directory' | 'slack' | 'config' | 'depsFor'>,
+  slackUserId: string,
+): Promise<ApiDeps | null> => {
+  let principal = await server.directory.bySlackUserId(slackUserId);
+  if (
+    principal === null &&
+    server.slack.fallbackUserId !== null &&
+    server.slack.fallbackUserId === slackUserId
+  ) {
+    principal = await server.directory.byUpn(server.config.dom.email);
+  }
+  if (principal?.status !== 'active') return null;
+  return server.depsFor(principal);
+};
 
 export const slackRoutes =
-  (deps: ApiDeps): FastifyPluginAsync =>
+  (server: ServerDeps): FastifyPluginAsync =>
   // eslint-disable-next-line @typescript-eslint/require-await
   async (fastify: FastifyInstance): Promise<void> => {
-    const clock = deps.now ?? nowIso;
-    const displayName = deps.config.agentDisplayName;
+    const clock = server.now ?? nowIso;
+    const displayName = server.config.agentDisplayName;
 
     const keepRaw = (
       _request: FastifyRequest,
@@ -218,7 +233,7 @@ export const slackRoutes =
 
     fastify.addHook('preHandler', async (request, reply) => {
       const verification = verifySlackSignature({
-        signingSecret: deps.slack.signingSecret,
+        signingSecret: server.slack.signingSecret,
         timestamp: header(request, 'x-slack-request-timestamp'),
         body: rawBody(request),
         signature: header(request, 'x-slack-signature'),
@@ -240,32 +255,33 @@ export const slackRoutes =
       }
 
       const { verb, rest } = splitCommand(parsed.data.text);
+      const deps = await slackPrincipalDeps(server, parsed.data.user_id);
 
       switch (verb) {
         case 'status':
-          return mayControl(deps, parsed.data.user_id)
+          return deps !== null
             ? handleStatus(deps)
             : ephemeral(
                 `${displayName} status is available to Dom only; it includes cursor ages and spend.`,
               );
         case 'pause':
-          return mayControl(deps, parsed.data.user_id)
+          return deps !== null
             ? handlePause(deps, rest, displayName)
             : ephemeral(
                 `You are not authorised to pause ${displayName} from Slack. Ask Dom, or use the kill switch in Settings.`,
               );
         case 'resume':
-          return mayControl(deps, parsed.data.user_id)
+          return deps !== null
             ? handleResume(deps, displayName)
             : ephemeral(
                 `You are not authorised to resume ${displayName} from Slack. Ask Dom, or use the kill switch in Settings.`,
               );
         case 'mode':
-          return mayControl(deps, parsed.data.user_id)
+          return deps !== null
             ? handleMode(deps, rest, displayName)
             : ephemeral(`Only Dom may change or read the mode of ${displayName} from Slack.`);
         case 'brief':
-          if (!mayControl(deps, parsed.data.user_id)) {
+          if (deps === null) {
             return ephemeral(`Only Dom may ask ${displayName} for a brief from Slack.`);
           }
           await deps.enqueueBrief();
@@ -275,7 +291,7 @@ export const slackRoutes =
         case 'task':
           return ephemeral(laterPhase('task', 'No task has been created.'));
         case 'chase':
-          return mayControl(deps, parsed.data.user_id)
+          return deps !== null
             ? handleChase(deps, rest, displayName)
             : ephemeral(`Only Dom may ask ${displayName} to chase a commitment from Slack.`);
         default:
@@ -316,7 +332,9 @@ export const slackRoutes =
         'Handling a Slack interaction',
       );
 
-      const outcome = await handleInteraction(deps, payload);
+      const user = InteractionUserSchema.safeParse(payload);
+      const deps = user.success ? await slackPrincipalDeps(server, user.data.user.id) : null;
+      const outcome = await handleInteraction(deps, payload, displayName);
       // Slack reads an empty 200 as "accepted, nothing to show"; the card
       // itself has already been redrawn through chat.update.
       return outcome.kind === 'empty' ? reply.code(200).send('') : reply.send(outcome.body);

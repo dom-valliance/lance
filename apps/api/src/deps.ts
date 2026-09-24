@@ -14,7 +14,14 @@ import type {
   ResumeResult,
   RunState,
 } from '@lance/ledger';
-import type { Config, LedgerEventInputCandidate, Proposal, SystemMode } from '@lance/shared';
+import type {
+  Config,
+  LanceRole,
+  LedgerEventInputCandidate,
+  Proposal,
+  SystemMode,
+} from '@lance/shared';
+import type { PRINCIPAL_STATUS_VALUES } from '@lance/db';
 import type { AgentsStoreLike } from './agents/store.js';
 import type { AlertStoreLike } from './alerts/store.js';
 import type { BriefStoreLike } from './briefs/store.js';
@@ -88,19 +95,62 @@ export interface OntologyLike {
   getNode(id: string): Promise<OntologyNodeLike | null>;
 }
 
-/** Turns a bearer token into the caller's UPN, or throws `UnauthorisedError`. */
+/** Who a verified Entra token says is calling (ADR 0020). */
+export interface VerifiedIdentity {
+  /** The Entra object id, `oid`: the stable key a principal is bound to. */
+  oid: string;
+  upn: string;
+  /** The Lance app roles in the token's `roles` claim; empty when it holds neither. */
+  roles: LanceRole[];
+}
+
+/** Turns a bearer token into the caller's identity, or throws `UnauthorisedError`. */
 export interface TokenVerifier {
-  verify(bearer: string): Promise<{ upn: string }>;
+  verify(bearer: string): Promise<VerifiedIdentity>;
+}
+
+export type PrincipalStatus = (typeof PRINCIPAL_STATUS_VALUES)[number];
+
+/** The slice of a `principals` row the api routes on. */
+export interface PrincipalRef {
+  id: string;
+  upn: string;
+  status: PrincipalStatus;
+  slackUserId: string | null;
+  createdAt: Date;
+}
+
+/** Enough of a principal to build its dependencies: the scope and the ledger actor. */
+export type PrincipalKey = Pick<PrincipalRef, 'id' | 'upn'>;
+
+/** The identity behind a request, once `requireEntra` has resolved it. */
+export interface Caller {
+  identity: VerifiedIdentity;
+  principal: PrincipalRef;
+}
+
+/**
+ * The lookup from an identity to a principal. `signIn` is the first-sign-in
+ * path of ADR 0020: it finds the principal bound to the token's `oid`,
+ * binds the `oid` to an unbound row carrying the token's UPN, or creates an
+ * `onboarding` principal, and records a ledger event for either write.
+ */
+export interface PrincipalDirectoryLike {
+  signIn(identity: VerifiedIdentity): Promise<PrincipalRef>;
+  bySlackUserId(slackUserId: string): Promise<PrincipalRef | null>;
+  byUpn(upn: string): Promise<PrincipalRef | null>;
+  list(): Promise<PrincipalRef[]>;
 }
 
 export interface SlackDeps {
   signingSecret: string;
   /**
-   * The principal's Slack user id, from `principals.slack_user_id`. Only this user may
-   * pause or resume from Slack. Null refuses every such command, which is
-   * the safe default before the id is recorded.
+   * `SLACK_ALLOWED_USER_ID`, for a principal row recorded before its Slack
+   * id was. A Slack user with this id acts for the principal whose UPN is
+   * `config.dom.email`. Null when unset. Retired by package 5.4, where
+   * `/lance login` proves each binding.
    */
-  allowedUserId: string | null;
+  fallbackUserId: string | null;
 }
 
 /**
@@ -123,8 +173,17 @@ export interface GraphConsentDeps {
   tokenStore: GraphTokenStoreLike;
 }
 
+/**
+ * Everything one principal's requests run over (ADR 0015): each store reads
+ * and writes through a handle scoped to that principal. `depsFor` in
+ * `ServerDeps` builds one per principal and reuses it.
+ */
 export interface ApiDeps {
   config: Config;
+  /** The principal every store here is scoped to. */
+  principalId: string;
+  /** The ledger actor for what this principal does by hand, `user:<name>`. */
+  actor: string;
   control: SystemControlLike;
   ledger: LedgerReaderLike;
   writer: LedgerWriterLike;
@@ -157,8 +216,6 @@ export interface ApiDeps {
   /** `/lance brief`: the worker regenerates the morning brief now. */
   enqueueBrief: () => Promise<string>;
   status: StatusSource;
-  auth: TokenVerifier;
-  slack: SlackDeps;
   /**
    * How Lance speaks in its own channel (ADR 0012). Null when
    * `SLACK_BOT_TOKEN` is absent, so a local run answers interactions
@@ -174,6 +231,50 @@ export interface ApiDeps {
   notify: (event: FeedEvent) => void;
   /** Registers one such client. Returns the function that removes it. */
   subscribe: (listener: FeedListener) => () => void;
+  /** Injected in tests. Returns an ISO-8601 instant with an explicit offset. */
+  now?: () => string;
+}
+
+/** Health for one principal, as a `Lance.Admin` sees it (ADR 0024). No content. */
+export interface PrincipalHealth {
+  principalId: string;
+  upn: string;
+  status: PrincipalStatus;
+  watchers: { watcher: string; lastRunAgeMinutes: number }[];
+  breakers: { connector: string; state: 'open' }[];
+  costTodayGbp: number;
+  costWeekGbp: number;
+}
+
+/** A principal as the admin list shows it (ADR 0024). */
+export interface AdminPrincipalView {
+  id: string;
+  upn: string;
+  status: PrincipalStatus;
+  createdAt: string;
+}
+
+/** The reads behind the admin procedures, each computed in the principal's own scope. */
+export interface AdminStoreLike {
+  principals(): Promise<AdminPrincipalView[]>;
+  health(): Promise<PrincipalHealth[]>;
+}
+
+/**
+ * What the server itself needs, beyond any one principal: the token check,
+ * the identity lookup, the per-principal dependency cache and the secrets
+ * of the unauthenticated routes.
+ */
+export interface ServerDeps {
+  config: Config;
+  auth: TokenVerifier;
+  directory: PrincipalDirectoryLike;
+  /** One principal's dependencies, built on first use and reused after. */
+  depsFor: (principal: PrincipalKey) => ApiDeps;
+  admin: AdminStoreLike;
+  /** The global `system_state` row, for the readiness probe. */
+  readiness: () => Promise<{ paused: boolean; mode: SystemMode }>;
+  slack: SlackDeps;
   /** Shared secret for `POST /ingest/agent-log` (spec 7.1, agent-logs). */
   ingestSecret: string;
   /**
@@ -186,7 +287,7 @@ export interface ApiDeps {
   now?: () => string;
 }
 
-/** The ledger actor for everything Dom triggers, in Slack or in the api. */
+/** The ledger actor Dom's own actions carried before actors came from the principal. */
 export const DOM_ACTOR = 'user:dom';
 
 /**
@@ -195,9 +296,9 @@ export const DOM_ACTOR = 'user:dom';
  * proposal that nothing then executes.
  */
 export async function resumeAndRequeue(
-  deps: Pick<ApiDeps, 'control' | 'enqueueExecute'>,
+  deps: Pick<ApiDeps, 'control' | 'enqueueExecute' | 'actor'>,
 ): Promise<ResumeResult> {
-  const result = await deps.control.resume({ actor: DOM_ACTOR });
+  const result = await deps.control.resume({ actor: deps.actor });
   for (const proposalId of result.releasedProposalIds) {
     await deps.enqueueExecute(proposalId);
   }

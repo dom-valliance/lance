@@ -1,17 +1,20 @@
+import { hasLanceAccess } from '@lance/shared';
 import type { FastifyRequest, onRequestHookHandler } from 'fastify';
-import type { ApiDeps } from '../deps.js';
-import { UnauthorisedError } from '../errors.js';
+import type { Caller, ServerDeps } from '../deps.js';
+import { ForbiddenError, UnauthorisedError } from '../errors.js';
 
 /**
- * `onRequest` guard for `/admin/*` and every tRPC route. It verifies the
- * Entra bearer once and hangs the UPN on the request so handlers and the
- * tRPC context do not verify it again.
+ * `onRequest` guard for `/admin/*`, `/auth/graph/connect` and every tRPC
+ * route (ADR 0020). It verifies the Entra bearer once, requires a Lance app
+ * role, resolves the caller's principal from the token's `oid` (binding or
+ * creating one on a first sign-in) and hangs both on the request, so
+ * handlers and the tRPC context do not repeat the work.
  */
 
 declare module 'fastify' {
   interface FastifyRequest {
-    /** Set by `requireEntra` once the bearer token has verified. */
-    entraUpn?: string;
+    /** Set by `requireEntra` once the bearer token has verified and the principal resolved. */
+    caller?: Caller;
   }
 }
 
@@ -34,20 +37,56 @@ export const bearerToken = (request: FastifyRequest): string => {
   return match[1].trim();
 };
 
-export const requireEntra =
-  (deps: ApiDeps): onRequestHookHandler =>
-  async (request): Promise<void> => {
-    const { upn } = await deps.auth.verify(bearerToken(request));
-    request.entraUpn = upn;
-  };
-
-/** The verified UPN, for a handler that runs behind `requireEntra`. */
-export const verifiedUpn = (request: FastifyRequest): string => {
-  const upn = request.entraUpn;
-  if (upn === undefined) {
-    throw new Error(
-      'No verified UPN on the request. Register requireEntra as an onRequest hook on this route.',
+/** Verifies the bearer, requires a Lance role and resolves the principal. */
+export const authenticate = async (
+  server: Pick<ServerDeps, 'auth' | 'directory'>,
+  request: FastifyRequest,
+): Promise<Caller> => {
+  const identity = await server.auth.verify(bearerToken(request));
+  if (!hasLanceAccess(identity.roles)) {
+    throw new ForbiddenError(
+      'This account holds neither Lance app role. Ask a Lance admin to add you to the Lance Users group, then sign in again.',
     );
   }
-  return upn;
+  const principal = await server.directory.signIn(identity);
+  return { identity, principal };
+};
+
+export const requireEntra =
+  (server: Pick<ServerDeps, 'auth' | 'directory'>): onRequestHookHandler =>
+  async (request): Promise<void> => {
+    request.caller = await authenticate(server, request);
+  };
+
+/** The resolved caller, for a handler that runs behind `requireEntra`. */
+export const verifiedCaller = (request: FastifyRequest): Caller => {
+  const caller = request.caller;
+  if (caller === undefined) {
+    throw new Error(
+      'No verified caller on the request. Register requireEntra as an onRequest hook on this route.',
+    );
+  }
+  return caller;
+};
+
+/**
+ * Refuses a principal who may not use Lance yet or any more. Onboarding
+ * reaches only the placeholder page (package 5.5 builds the checklist); a
+ * paused or offboarded principal reaches nothing.
+ */
+export const requireActive = (caller: Caller): Caller => {
+  switch (caller.principal.status) {
+    case 'active':
+      return caller;
+    case 'onboarding':
+      throw new ForbiddenError(
+        'Onboarding for this account is not open yet. Nothing else in Lance is available until it is.',
+      );
+    case 'paused':
+      throw new ForbiddenError(
+        'This Lance account is paused. Ask a Lance admin to restore it once your access is confirmed.',
+      );
+    case 'offboarded':
+      throw new ForbiddenError('This Lance account has been offboarded. Ask a Lance admin.');
+  }
 };

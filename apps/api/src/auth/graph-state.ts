@@ -1,6 +1,8 @@
 /**
  * The short-lived link between `/auth/graph/connect` and
- * `/auth/graph/callback`: one PKCE code verifier per `state` value.
+ * `/auth/graph/callback`: one PKCE code verifier per `state` value, and
+ * the principal who started the consent, so the callback, which arrives
+ * without a bearer, records the connection under that principal alone.
  *
  * In memory on purpose. The pair is worthless once the callback has run,
  * and a consent that does not complete inside ten minutes should fail and
@@ -12,14 +14,21 @@
 /** How long a consent attempt may stay open. */
 export const CONSENT_STATE_TTL_MS = 10 * 60 * 1000;
 
+export interface ClaimedConsent {
+  codeVerifier: string;
+  /** Who started the consent: the scope the callback records it in. */
+  principal: { id: string; upn: string };
+}
+
 export interface ConsentStateStore {
-  /** Remembers the verifier for `state`. */
-  issue(state: string, codeVerifier: string): void;
+  /** Remembers the verifier and the principal for `state`. */
+  issue(state: string, codeVerifier: string, principal: ClaimedConsent['principal']): void;
   /**
-   * The verifier for `state`, or null when it is unknown or older than
-   * the time to live. One use only: a replayed callback finds nothing.
+   * The verifier and principal for `state`, or null when it is unknown or
+   * older than the time to live. One use only: a replayed callback finds
+   * nothing.
    */
-  claim(state: string): string | null;
+  claim(state: string): ClaimedConsent | null;
   /** Open attempts, after pruning. For tests and diagnostics. */
   size(): number;
 }
@@ -30,8 +39,7 @@ export interface ConsentStateStoreOptions {
   now?: () => number;
 }
 
-interface PendingConsent {
-  codeVerifier: string;
+interface PendingConsent extends ClaimedConsent {
   issuedAt: number;
 }
 
@@ -48,17 +56,17 @@ export function createConsentStateStore(options: ConsentStateStoreOptions = {}):
   };
 
   return {
-    issue(state: string, codeVerifier: string): void {
+    issue(state: string, codeVerifier: string, principal: ClaimedConsent['principal']): void {
       prune();
-      pending.set(state, { codeVerifier, issuedAt: now() });
+      pending.set(state, { codeVerifier, principal, issuedAt: now() });
     },
 
-    claim(state: string): string | null {
+    claim(state: string): ClaimedConsent | null {
       prune();
       const entry = pending.get(state);
       if (entry === undefined) return null;
       pending.delete(state);
-      return entry.codeVerifier;
+      return { codeVerifier: entry.codeVerifier, principal: entry.principal };
     },
 
     size(): number {

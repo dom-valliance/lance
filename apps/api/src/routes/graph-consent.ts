@@ -10,9 +10,9 @@ import { newUlid, nowIso } from '@lance/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { createConsentStateStore } from '../auth/graph-state.js';
-import { requireEntra } from '../auth/require-entra.js';
-import { DOM_ACTOR, type ApiDeps, type GraphConsentDeps } from '../deps.js';
-import { BadRequestError, HttpError } from '../errors.js';
+import { requireActive, requireEntra, verifiedCaller } from '../auth/require-entra.js';
+import type { GraphConsentDeps, ServerDeps } from '../deps.js';
+import { BadRequestError, ForbiddenError, HttpError } from '../errors.js';
 
 /**
  * The delegated Graph consent flow (spec 4.1, docs/runbooks/entra-setup.md
@@ -21,7 +21,10 @@ import { BadRequestError, HttpError } from '../errors.js';
  * api swaps the code for the first token pair, stores the refresh token
  * and records the connection in the ledger.
  *
- * `connect` sits behind the Entra guard so only Dom can start a consent.
+ * `connect` sits behind the Entra guard, so only an active principal can
+ * start a consent, and the state remembers which one did. The token store
+ * is still the one secret until package 5.2 makes it per principal, so
+ * until then only the principal in DOM_EMAIL may connect.
  * `callback` cannot: Entra sends the browser there with no bearer token.
  * Its protection is the `state` value, which only a `connect` in the last
  * ten minutes can have issued and which is good for one use.
@@ -50,9 +53,9 @@ export const graphConsentConfigurationError = (): HttpError =>
     'The Microsoft Graph consent flow is not configured on this api. Set PUBLIC_API_URL, ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET and KEY_VAULT_URL, then restart the container.',
   );
 
-const graphDeps = (deps: ApiDeps): GraphConsentDeps => {
-  if (deps.graph === undefined) throw graphConsentConfigurationError();
-  return deps.graph;
+const graphDeps = (server: ServerDeps): GraphConsentDeps => {
+  if (server.graph === undefined) throw graphConsentConfigurationError();
+  return server.graph;
 };
 
 /** The page Dom sees when the consent has landed. */
@@ -78,17 +81,26 @@ export const connectedPage = (agentDisplayName: string): string =>
 `;
 
 export const graphConsentRoutes =
-  (deps: ApiDeps): FastifyPluginAsync =>
+  (server: ServerDeps): FastifyPluginAsync =>
   // eslint-disable-next-line @typescript-eslint/require-await
   async (fastify): Promise<void> => {
     // One store per registered plugin instance, so a test gets a fresh one.
     const states = createConsentStateStore();
 
-    fastify.get('/auth/graph/connect', { onRequest: requireEntra(deps) }, (_request, reply) => {
-      const graph = graphDeps(deps);
+    fastify.get('/auth/graph/connect', { onRequest: requireEntra(server) }, (request, reply) => {
+      const caller = requireActive(verifiedCaller(request));
+      if (caller.principal.upn.toLowerCase() !== server.config.dom.email.toLowerCase()) {
+        throw new ForbiddenError(
+          `Lance holds one Microsoft 365 connection for now, and it belongs to ${server.config.dom.email}. Connections for other accounts are not open yet.`,
+        );
+      }
+      const graph = graphDeps(server);
       const state = generateState();
       const codeVerifier = generateCodeVerifier();
-      states.issue(state, codeVerifier);
+      states.issue(state, codeVerifier, {
+        id: caller.principal.id,
+        upn: caller.principal.upn,
+      });
 
       return reply.redirect(
         buildAuthorizeUrl({
@@ -103,7 +115,7 @@ export const graphConsentRoutes =
     });
 
     fastify.get('/auth/graph/callback', async (request, reply) => {
-      const graph = graphDeps(deps);
+      const graph = graphDeps(server);
 
       const parsed = CallbackQuerySchema.safeParse(request.query);
       if (!parsed.success) {
@@ -125,8 +137,8 @@ export const graphConsentRoutes =
         );
       }
 
-      const codeVerifier = states.claim(query.state);
-      if (codeVerifier === null) {
+      const claimed = states.claim(query.state);
+      if (claimed === null) {
         throw new BadRequestError(
           'The consent state does not match a request made in the last ten minutes, or it has already been used. Start again at /auth/graph/connect.',
         );
@@ -149,7 +161,7 @@ export const graphConsentRoutes =
           clientSecret: graph.clientSecret,
           redirectUri: redirectUri(graph),
           code: query.code,
-          codeVerifier,
+          codeVerifier: claimed.codeVerifier,
         });
       } catch (error) {
         if (isConnectorError(error) && !error.retryable) {
@@ -162,9 +174,10 @@ export const graphConsentRoutes =
 
       await graph.tokenStore.setRefreshToken(tokens.refreshToken);
 
+      const deps = server.depsFor(claimed.principal);
       await deps.writer.append({
-        ts: (deps.now ?? nowIso)(),
-        actor: DOM_ACTOR,
+        ts: (server.now ?? nowIso)(),
+        actor: deps.actor,
         kind: 'state_changed',
         sourceSystem: 'graph',
         correlationId: newUlid(),
@@ -174,6 +187,6 @@ export const graphConsentRoutes =
       return reply
         .code(200)
         .type('text/html; charset=utf-8')
-        .send(connectedPage(deps.config.agentDisplayName));
+        .send(connectedPage(server.config.agentDisplayName));
     });
   };

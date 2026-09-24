@@ -1,8 +1,8 @@
 import { hashRecord, idempotencyKey, newUlid } from '@lance/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import type { ApiDeps } from '../deps.js';
-import { UnauthorisedError } from '../errors.js';
+import type { ServerDeps } from '../deps.js';
+import { HttpError, UnauthorisedError } from '../errors.js';
 import { constantTimeEquals } from '../secure-compare.js';
 
 /**
@@ -44,12 +44,12 @@ export const agentLogActor = (agent: string): string => {
 };
 
 export const ingestRoutes =
-  (deps: ApiDeps): FastifyPluginAsync =>
+  (server: ServerDeps): FastifyPluginAsync =>
   // eslint-disable-next-line @typescript-eslint/require-await
   async (fastify): Promise<void> => {
     fastify.post('/ingest/agent-log', async (request, reply) => {
       const supplied = request.headers[INGEST_SECRET_HEADER];
-      if (typeof supplied !== 'string' || !constantTimeEquals(supplied, deps.ingestSecret)) {
+      if (typeof supplied !== 'string' || !constantTimeEquals(supplied, server.ingestSecret)) {
         throw new UnauthorisedError(
           `The ${INGEST_SECRET_HEADER} header is missing or wrong. Send the shared ingest secret for this environment.`,
         );
@@ -65,6 +65,17 @@ export const ingestRoutes =
           })),
         });
       }
+
+      // The agents covered by this webhook are Lance's own and the inbox
+      // agent (spec 16, Q2), which work for the principal in DOM_EMAIL.
+      const owner = await server.directory.byUpn(server.config.dom.email);
+      if (owner?.status !== 'active') {
+        throw new HttpError(
+          503,
+          `No active principal has the UPN ${server.config.dom.email}, so an agent log has nobody to be recorded for. Check DOM_EMAIL and the principals table.`,
+        );
+      }
+      const deps = server.depsFor(owner);
 
       const log = parsed.data;
       const hash = hashRecord(log);

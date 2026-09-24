@@ -47,7 +47,7 @@ const readFirstEvent = async (url: string): Promise<string> => {
 
 beforeEach(async () => {
   harness = fakeDeps();
-  server = buildServer(harness.deps);
+  server = buildServer(harness.server);
   await server.listen({ port: 0, host: '127.0.0.1' });
   const address = server.server.address() as AddressInfo;
   origin = `http://127.0.0.1:${String(address.port)}`;

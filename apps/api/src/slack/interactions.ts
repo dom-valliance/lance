@@ -12,7 +12,7 @@ import { ProposalTransitionError } from '@lance/ledger';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { ackAlert, muteAlert } from '../alerts/service.js';
-import { DOM_ACTOR, type ApiDeps } from '../deps.js';
+import type { ApiDeps } from '../deps.js';
 
 /**
  * Slack's interactivity payloads (spec 9.1): the four buttons on a proposal
@@ -74,37 +74,33 @@ const ViewSubmissionSchema = z.object({
   }),
 });
 
-const InteractionUserSchema = z.object({ user: z.object({ id: z.string().min(1) }) });
-
-/**
- * Only Dom works Lance's buttons. The allowlist is one Slack user id from
- * `principals.slack_user_id`; an unset id refuses everyone, which is the safe
- * default before the id is recorded.
- */
-const mayDecide = (deps: ApiDeps, userId: string): boolean =>
-  deps.slack.allowedUserId !== null && deps.slack.allowedUserId === userId;
+export const InteractionUserSchema = z.object({ user: z.object({ id: z.string().min(1) }) });
 
 const refusal = (displayName: string): InteractionOutcome =>
   ephemeral(
-    `You are not authorised to act on ${displayName}'s proposals. They are Dom's to decide.`,
+    `You are not authorised to act on ${displayName}'s proposals from this Slack account: it is not linked to an active Lance user.`,
   );
 
 const laterPhase = (what: string): InteractionOutcome =>
   ephemeral(`${what} arrives in a later phase. Nothing has changed.`);
 
+/**
+ * `deps` are those of the principal the pressing Slack user resolves to
+ * (`slackPrincipalDeps` in ./routes.ts), or null when Lance does not know
+ * them, which refuses every button and modal.
+ */
 export async function handleInteraction(
-  deps: ApiDeps,
+  deps: ApiDeps | null,
   payload: unknown,
+  displayName: string,
 ): Promise<InteractionOutcome> {
-  const displayName = deps.config.agentDisplayName;
-
   const identified = InteractionUserSchema.safeParse(payload);
   if (!identified.success) {
     return ephemeral(
       'That interaction did not name the Slack user who sent it, so it was ignored.',
     );
   }
-  if (!mayDecide(deps, identified.data.user.id)) {
+  if (deps === null) {
     return refusal(displayName);
   }
 
@@ -177,7 +173,7 @@ async function decide(
   }
 
   try {
-    await deps.decide({ proposalId, actor: DOM_ACTOR, ...shape });
+    await deps.decide({ proposalId, actor: deps.actor, ...shape });
   } catch (error) {
     if (error instanceof ProposalTransitionError) return ephemeral(error.message);
     throw error;
@@ -213,8 +209,8 @@ async function actOnAlert(
 
   try {
     await (which === 'ack'
-      ? ackAlert(deps, { id: alertId, actor: DOM_ACTOR })
-      : muteAlert(deps, { id: alertId, hours: MUTE_HOURS, actor: DOM_ACTOR }));
+      ? ackAlert(deps, { id: alertId, actor: deps.actor })
+      : muteAlert(deps, { id: alertId, hours: MUTE_HOURS, actor: deps.actor }));
   } catch (error) {
     if (error instanceof TRPCError) return ephemeral(error.message);
     throw error;

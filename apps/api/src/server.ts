@@ -8,7 +8,7 @@ import Fastify, {
   type FastifyServerOptions,
 } from 'fastify';
 import { requireEntra } from './auth/require-entra.js';
-import type { ApiDeps } from './deps.js';
+import type { ServerDeps } from './deps.js';
 import { adminRoutes } from './routes/admin.js';
 import { eventsRoutes } from './routes/events.js';
 import { graphConsentRoutes } from './routes/graph-consent.js';
@@ -77,7 +77,7 @@ export const loggerOptions = (config: Config): LoggerOptions => {
 
 /** Admin and tRPC, both behind one Entra check. */
 const protectedRoutes =
-  (deps: ApiDeps): FastifyPluginAsync =>
+  (deps: ServerDeps): FastifyPluginAsync =>
   async (fastify): Promise<void> => {
     fastify.addHook('onRequest', requireEntra(deps));
     await fastify.register(adminRoutes(deps));
@@ -90,7 +90,7 @@ const protectedRoutes =
     } satisfies FastifyTRPCPluginOptions<AppRouter>);
   };
 
-export const buildServer = (deps: ApiDeps): FastifyInstance => {
+export const buildServer = (deps: ServerDeps): FastifyInstance => {
   const fastify = Fastify({ logger: loggerOptions(deps.config) });
 
   fastify.setErrorHandler((error: FastifyError, request, reply) => {

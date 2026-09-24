@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { ApiDeps } from '../deps.js';
+import type { ServerDeps } from '../deps.js';
 
 /**
  * Container Apps probes. `live` answers without touching Postgres so a
@@ -7,14 +7,14 @@ import type { ApiDeps } from '../deps.js';
  * the one row every other route depends on.
  */
 export const healthRoutes =
-  (deps: ApiDeps): FastifyPluginAsync =>
+  (server: ServerDeps): FastifyPluginAsync =>
   // eslint-disable-next-line @typescript-eslint/require-await
   async (fastify): Promise<void> => {
     fastify.get('/health/live', () => ({ ok: true }));
 
     fastify.get('/health/ready', async (request, reply) => {
       try {
-        const state = await deps.control.read();
+        const state = await server.readiness();
         return { ok: true, paused: state.paused, mode: state.mode };
       } catch (error) {
         request.log.error({ err: error }, 'Readiness probe could not read system_state');

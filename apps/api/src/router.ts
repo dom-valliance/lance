@@ -45,7 +45,7 @@ import {
 import { listLedger, MAX_PAGE_SIZE as MAX_LEDGER_PAGE_SIZE } from './ledger/service.js';
 import { listProposals, proposalSummary } from './proposals/service.js';
 import { listTasks } from './tasks/service.js';
-import { procedure, router } from './trpc.js';
+import { adminProcedure, procedure, router, signedInProcedure } from './trpc.js';
 
 /**
  * The tRPC surface `apps/web` calls. `AppRouter` is exported as a type
@@ -217,6 +217,26 @@ export const BriefListInputSchema = z
 export type BriefListInput = z.infer<typeof BriefListInputSchema>;
 
 export const appRouter = router({
+  /**
+   * Who is signed in and whether Lance is open to them yet. The one
+   * procedure an onboarding principal may call; the web app reads it to
+   * decide between the app and the onboarding placeholder.
+   */
+  me: signedInProcedure.query(({ ctx }) => ({
+    principalId: ctx.caller.principal.id,
+    upn: ctx.caller.principal.upn,
+    status: ctx.caller.principal.status,
+    roles: ctx.caller.identity.roles,
+  })),
+  /**
+   * Health, never content (ADR 0024). Each principal's figures are read in
+   * that principal's own scope; nothing here returns a proposal, a brief, a
+   * commitment, a ledger payload or graph evidence.
+   */
+  admin: router({
+    principals: adminProcedure.query(({ ctx }) => ctx.server.admin.principals()),
+    health: adminProcedure.query(({ ctx }) => ctx.server.admin.health()),
+  }),
   systemState: router({
     get: procedure.query(({ ctx }) => ctx.deps.control.read()),
     /** The same payload as `GET /admin/status`: pause, mode, cursors, cost. */

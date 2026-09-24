@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import type { ApiDeps } from '../deps.js';
-import { bearerToken } from '../auth/require-entra.js';
+import type { ServerDeps } from '../deps.js';
+import { authenticate, requireActive } from '../auth/require-entra.js';
 
 /**
  * `GET /events`: the live update stream the web app subscribes to
@@ -17,13 +17,16 @@ import { bearerToken } from '../auth/require-entra.js';
 export const HEARTBEAT_MS = 25_000;
 
 export const eventsRoutes =
-  (deps: ApiDeps): FastifyPluginAsync =>
+  (server: ServerDeps): FastifyPluginAsync =>
   // eslint-disable-next-line @typescript-eslint/require-await
   async (fastify: FastifyInstance): Promise<void> => {
     fastify.get('/events', async (request, reply) => {
       // Verified before the response is hijacked, so a rejection still
       // goes through the error handler as an ordinary 401.
-      await deps.auth.verify(bearerToken(request));
+      // The stream is the caller's principal's own feed, so nobody hears
+      // about another principal's proposals or alerts.
+      const caller = requireActive(await authenticate(server, request));
+      const deps = server.depsFor(caller.principal);
 
       reply.hijack();
       const stream = reply.raw;

@@ -11,12 +11,21 @@ import {
 } from '../test-fakes.js';
 import {
   handleInteraction,
+  InteractionUserSchema,
   MUTE_HOURS,
   SNOOZE_HOURS,
   type InteractionOutcome,
 } from './interactions.js';
+import { slackPrincipalDeps } from './routes.js';
 
 let harness: FakeDeps;
+
+/** Resolves the pressing Slack user as the route does, then hands over. */
+const interact = async (h: FakeDeps, payload: unknown): Promise<InteractionOutcome> => {
+  const user = InteractionUserSchema.safeParse(payload);
+  const deps = user.success ? await slackPrincipalDeps(h.server, user.data.user.id) : null;
+  return handleInteraction(deps, payload, h.server.config.agentDisplayName);
+};
 const PROPOSAL_ID = '01K5S9V6QW3SWCCPVB0N0E301A';
 
 const blockAction = (actionId: string, overrides: Record<string, unknown> = {}): unknown => ({
@@ -41,7 +50,7 @@ beforeEach(() => {
 
 describe('a proposal card button', () => {
   it('approves the proposal the button names and answers with an empty 200', async () => {
-    const outcome = await handleInteraction(harness.deps, blockAction(ACTION.proposalApprove));
+    const outcome = await interact(harness, blockAction(ACTION.proposalApprove));
 
     expect(outcome).toEqual({ kind: 'empty' });
     expect(harness.decider.requests).toEqual([
@@ -50,7 +59,7 @@ describe('a proposal card button', () => {
   });
 
   it('snoozes for the four hours the button label promises', async () => {
-    await handleInteraction(harness.deps, blockAction(ACTION.proposalSnooze));
+    await interact(harness, blockAction(ACTION.proposalSnooze));
 
     expect(harness.decider.requests[0]).toEqual({
       proposalId: PROPOSAL_ID,
@@ -62,7 +71,7 @@ describe('a proposal card button', () => {
   });
 
   it('opens the edit modal pre-filled from the payload rather than deciding', async () => {
-    const outcome = await handleInteraction(harness.deps, blockAction(ACTION.proposalEdit));
+    const outcome = await interact(harness, blockAction(ACTION.proposalEdit));
 
     expect(outcome).toEqual({ kind: 'empty' });
     expect(harness.decider.requests).toHaveLength(0);
@@ -72,28 +81,28 @@ describe('a proposal card button', () => {
   });
 
   it('opens the reject modal rather than deciding', async () => {
-    await handleInteraction(harness.deps, blockAction(ACTION.proposalReject));
+    await interact(harness, blockAction(ACTION.proposalReject));
 
     expect(harness.decider.requests).toHaveLength(0);
     expect(JSON.stringify(harness.slack.views[0]?.view)).toContain(CALLBACK.proposalReject);
   });
 
   it('says undo arrives in a later phase', async () => {
-    const outcome = await handleInteraction(harness.deps, blockAction(ACTION.executedUndo));
+    const outcome = await interact(harness, blockAction(ACTION.executedUndo));
 
     expect(text(outcome)).toBe('Undo arrives in a later phase. Nothing has changed.');
     expect(harness.decider.requests).toHaveLength(0);
   });
 
   it('names an action id it does not answer', async () => {
-    const outcome = await handleInteraction(harness.deps, blockAction('proposal:teleport'));
+    const outcome = await interact(harness, blockAction('proposal:teleport'));
 
     expect(text(outcome)).toContain('proposal:teleport');
   });
 
   it('refuses a button with a value that is not a proposal id', async () => {
-    const outcome = await handleInteraction(
-      harness.deps,
+    const outcome = await interact(
+      harness,
       blockAction(ACTION.proposalApprove, { actions: [{ action_id: ACTION.proposalApprove }] }),
     );
 
@@ -106,7 +115,7 @@ describe('a proposal card button', () => {
       'Cannot approve proposal 01K5: it is rejected, and approve applies to pending or held.',
     );
 
-    const outcome = await handleInteraction(harness.deps, blockAction(ACTION.proposalApprove));
+    const outcome = await interact(harness, blockAction(ACTION.proposalApprove));
 
     expect(text(outcome)).toContain('it is rejected');
   });
@@ -117,7 +126,7 @@ describe('an alert card button', () => {
     blockAction(actionId, { actions: [{ action_id: actionId, value: id }] });
 
   it('acknowledges the alert the button names, as Dom', async () => {
-    const outcome = await handleInteraction(harness.deps, alertAction(ACTION.alertAck));
+    const outcome = await interact(harness, alertAction(ACTION.alertAck));
 
     expect(outcome).toEqual({ kind: 'empty' });
     expect(harness.alerts.rows[0]?.status).toBe('acked');
@@ -126,7 +135,7 @@ describe('an alert card button', () => {
   });
 
   it('mutes for the twenty-four hours the button label promises', async () => {
-    await handleInteraction(harness.deps, alertAction(ACTION.alertMute));
+    await interact(harness, alertAction(ACTION.alertMute));
 
     const mutedUntil = harness.alerts.rows[0]?.mutedUntil?.getTime() ?? 0;
     const lastSeen = harness.alerts.rows[0]?.updatedAt.getTime() ?? 0;
@@ -139,14 +148,14 @@ describe('an alert card button', () => {
   it('explains a refused change instead of failing the request', async () => {
     harness.alerts.rows = [fakeAlert({ status: 'resolved' })];
 
-    const outcome = await handleInteraction(harness.deps, alertAction(ACTION.alertAck));
+    const outcome = await interact(harness, alertAction(ACTION.alertAck));
 
     expect(text(outcome)).toContain('it cannot be acknowledged');
   });
 
   it('refuses a button with a value that is not an alert id', async () => {
-    const outcome = await handleInteraction(
-      harness.deps,
+    const outcome = await interact(
+      harness,
       blockAction(ACTION.alertMute, { actions: [{ action_id: ACTION.alertMute }] }),
     );
 
@@ -155,9 +164,9 @@ describe('an alert card button', () => {
   });
 });
 
-describe('a Slack user other than Dom', () => {
+describe('a Slack user Lance does not know', () => {
   it('is refused and decides nothing', async () => {
-    const outcome = await handleInteraction(harness.deps, {
+    const outcome = await interact(harness, {
       ...(blockAction(ACTION.proposalApprove) as object),
       user: { id: 'U0STRANGER' },
     });
@@ -167,10 +176,10 @@ describe('a Slack user other than Dom', () => {
     expect(harness.slack.views).toHaveLength(0);
   });
 
-  it('is refused when no allowlisted Slack user id is configured', async () => {
+  it('is refused when the principal has no Slack user id recorded', async () => {
     const unset = fakeDeps({ allowedSlackUserId: null });
 
-    const outcome = await handleInteraction(unset.deps, blockAction(ACTION.proposalApprove));
+    const outcome = await interact(unset, blockAction(ACTION.proposalApprove));
 
     expect(text(outcome)).toContain('not authorised');
     expect(unset.decider.requests).toHaveLength(0);
@@ -179,7 +188,7 @@ describe('a Slack user other than Dom', () => {
 
 describe('a submitted modal', () => {
   it('applies the edited fields and clears the edit modal', async () => {
-    const outcome = await handleInteraction(harness.deps, {
+    const outcome = await interact(harness, {
       type: 'view_submission',
       user: { id: TEST_SLACK_USER_ID },
       view: {
@@ -204,7 +213,7 @@ describe('a submitted modal', () => {
   });
 
   it('applies the reason code and note from the reject modal', async () => {
-    const outcome = await handleInteraction(harness.deps, {
+    const outcome = await interact(harness, {
       type: 'view_submission',
       user: { id: TEST_SLACK_USER_ID },
       view: {
@@ -232,7 +241,7 @@ describe('a submitted modal', () => {
   });
 
   it('names a callback id it does not handle', async () => {
-    const outcome = await handleInteraction(harness.deps, {
+    const outcome = await interact(harness, {
       type: 'view_submission',
       user: { id: TEST_SLACK_USER_ID },
       view: { callback_id: 'some_other_modal', private_metadata: '', state: { values: {} } },
@@ -247,7 +256,7 @@ describe('without a Slack bot token', () => {
     const tokenless = fakeDeps({ withoutSlackSurface: true });
     tokenless.proposals.rows = [fakeProposal({ id: PROPOSAL_ID })];
 
-    const outcome = await handleInteraction(tokenless.deps, blockAction(ACTION.proposalEdit));
+    const outcome = await interact(tokenless, blockAction(ACTION.proposalEdit));
 
     expect(text(outcome)).toContain('no Slack bot token');
   });

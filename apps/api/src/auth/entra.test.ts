@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { TokenVerifier } from '../deps.js';
 import { UnauthorisedError } from '../errors.js';
-import { createTestJwks, TEST_UPN, type TestJwks } from '../test-fakes.js';
+import { createTestJwks, TEST_OID, TEST_UPN, type TestJwks } from '../test-fakes.js';
 import { createEntraVerifier, entraIssuer } from './entra.js';
 
 const TENANT_ID = '11111111-2222-3333-4444-555555555555';
@@ -16,7 +16,6 @@ beforeAll(async () => {
   verifier = createEntraVerifier({
     tenantId: TENANT_ID,
     clientId: CLIENT_ID,
-    allowedUpn: TEST_UPN,
     jwks: keys.jwks,
   });
 });
@@ -32,19 +31,48 @@ const rejectionMessage = async (token: string): Promise<string> => {
 };
 
 describe('createEntraVerifier', () => {
-  it('accepts a token signed by the tenant keys for the allowlisted user', async () => {
-    const token = await keys.sign({ preferred_username: TEST_UPN });
-    await expect(verifier.verify(token)).resolves.toEqual({ upn: TEST_UPN });
+  it('returns the object id, the UPN and the Lance roles of a token signed by the tenant keys', async () => {
+    const token = await keys.sign({
+      oid: TEST_OID,
+      preferred_username: TEST_UPN,
+      roles: ['Lance.User', 'Lance.Admin'],
+    });
+    await expect(verifier.verify(token)).resolves.toEqual({
+      oid: TEST_OID,
+      upn: TEST_UPN,
+      roles: ['Lance.User', 'Lance.Admin'],
+    });
   });
 
-  it('matches the allowlisted UPN case-insensitively', async () => {
-    const token = await keys.sign({ preferred_username: 'Dom@Valliance.AI' });
-    await expect(verifier.verify(token)).resolves.toEqual({ upn: 'Dom@Valliance.AI' });
+  it('accepts any UPN in the tenant and leaves the role decision to the route', async () => {
+    const token = await keys.sign({
+      oid: 'a-stranger',
+      preferred_username: 'someone.else@valliance.ai',
+    });
+    await expect(verifier.verify(token)).resolves.toEqual({
+      oid: 'a-stranger',
+      upn: 'someone.else@valliance.ai',
+      roles: [],
+    });
+  });
+
+  it('keeps only the Lance roles from the roles claim', async () => {
+    const token = await keys.sign({
+      oid: TEST_OID,
+      preferred_username: TEST_UPN,
+      roles: ['Other.Role', 'Lance.User'],
+    });
+    await expect(verifier.verify(token)).resolves.toMatchObject({ roles: ['Lance.User'] });
   });
 
   it('falls back to the upn claim when preferred_username is absent', async () => {
-    const token = await keys.sign({ upn: TEST_UPN });
-    await expect(verifier.verify(token)).resolves.toEqual({ upn: TEST_UPN });
+    const token = await keys.sign({ oid: TEST_OID, upn: TEST_UPN });
+    await expect(verifier.verify(token)).resolves.toMatchObject({ upn: TEST_UPN });
+  });
+
+  it('rejects a token carrying no oid claim', async () => {
+    const token = await keys.sign({ preferred_username: TEST_UPN });
+    await expect(rejectionMessage(token)).resolves.toContain('no oid claim');
   });
 
   it('does not accept the unverified email claim on its own', async () => {
@@ -81,11 +109,6 @@ describe('createEntraVerifier', () => {
     await expect(rejectionMessage(token)).resolves.toContain('expired');
   });
 
-  it('rejects a token for a user who is not on the allowlist', async () => {
-    const token = await keys.sign({ preferred_username: 'someone.else@valliance.ai' });
-    await expect(rejectionMessage(token)).resolves.toContain('not on the Lance allowlist');
-  });
-
   it('rejects a token carrying no identity claim', async () => {
     const token = await keys.sign({ oid: 'an-object-id' });
     await expect(rejectionMessage(token)).resolves.toContain('cannot tell who is calling');
@@ -103,7 +126,10 @@ describe('createEntraVerifier', () => {
   });
 
   it('never echoes the token back in a rejection', async () => {
-    const token = await keys.sign({ preferred_username: 'someone.else@valliance.ai' });
+    const token = await keys.sign(
+      { preferred_username: TEST_UPN },
+      { audience: 'another-client-id' },
+    );
     const message = await rejectionMessage(token);
     expect(message).not.toContain(token);
   });

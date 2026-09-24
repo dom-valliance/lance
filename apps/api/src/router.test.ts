@@ -4,7 +4,9 @@ import { actorFromUpn } from './actor.js';
 import { appRouter } from './router.js';
 import {
   fakeBrief,
+  fakeContext,
   fakeDeps,
+  fakePrincipal,
   fakeProposal,
   fakeSnapshot,
   TEST_COMMITMENT_ID,
@@ -57,7 +59,7 @@ let caller: ReturnType<typeof createCaller>;
 beforeEach(() => {
   harness = fakeDeps();
   harness.proposals.rows = [fakeProposal({ id: PROPOSAL_ID, correlationId: CORRELATION_ID })];
-  caller = createCaller({ deps: harness.deps, upn: TEST_UPN });
+  caller = createCaller(fakeContext(harness));
 });
 
 describe('actorFromUpn', () => {
@@ -495,5 +497,90 @@ describe('briefs.regenerate', () => {
   it('queues a morning brief on the worker rather than building one itself', async () => {
     expect(await caller.briefs.regenerate()).toEqual({ enqueued: true, jobId: 'job-brief' });
     expect(harness.briefRequests).toHaveLength(1);
+  });
+});
+
+/** Every procedure path in the router, `admin.health` style. */
+const procedurePaths = Object.keys(appRouter._def.procedures);
+
+/** Calls a procedure by its path with no input, as a client that ignores the schema would. */
+const callPath = (target: unknown, path: string): Promise<unknown> => {
+  const procedureFn = path
+    .split('.')
+    .reduce<unknown>((node, key) => (node as Record<string, unknown>)[key], target);
+  return (procedureFn as (input?: unknown) => Promise<unknown>)();
+};
+
+const codeOf = async (work: Promise<unknown>): Promise<string> => {
+  try {
+    await work;
+  } catch (error) {
+    return (error as { code?: string }).code ?? 'unknown';
+  }
+  return 'succeeded';
+};
+
+describe('me', () => {
+  it('names the signed-in principal, their status and their roles', async () => {
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.User', 'Lance.Admin'] }));
+    await expect(admin.me()).resolves.toEqual({
+      principalId: harness.deps.principalId,
+      upn: TEST_UPN,
+      status: 'active',
+      roles: ['Lance.User', 'Lance.Admin'],
+    });
+  });
+});
+
+describe('an onboarding principal', () => {
+  const onboarding = (): ReturnType<typeof createCaller> =>
+    createCaller(
+      fakeContext(harness, {
+        principal: fakePrincipal({ status: 'onboarding', upn: 'new.person@valliance.ai' }),
+      }),
+    );
+
+  it('reaches me, which says onboarding', async () => {
+    await expect(onboarding().me()).resolves.toMatchObject({ status: 'onboarding' });
+  });
+
+  it('is refused by every other procedure with FORBIDDEN', async () => {
+    const codes = await Promise.all(
+      procedurePaths
+        .filter((path) => path !== 'me')
+        .map(async (path) => [path, await codeOf(callPath(onboarding(), path))] as const),
+    );
+    expect(codes.filter(([, code]) => code !== 'FORBIDDEN')).toEqual([]);
+    expect([harness.control.pauseCalls, harness.control.modeCalls, harness.enqueued]).toEqual([
+      [],
+      [],
+      [],
+    ]);
+  });
+});
+
+describe('the admin router', () => {
+  const adminPaths = procedurePaths.filter((path) => path.startsWith('admin.'));
+
+  it('covers the principals list and the health read', () => {
+    expect(adminPaths.sort()).toEqual(['admin.health', 'admin.principals']);
+  });
+
+  it('refuses a Lance.User without Lance.Admin on every admin procedure', async () => {
+    const codes = await Promise.all(adminPaths.map((path) => codeOf(callPath(caller, path))));
+    expect(codes).toEqual(adminPaths.map(() => 'FORBIDDEN'));
+  });
+
+  it('lets a Lance.Admin list principals and read their health', async () => {
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    await expect(admin.admin.principals()).resolves.toEqual([
+      {
+        id: harness.deps.principalId,
+        upn: TEST_UPN,
+        status: 'active',
+        createdAt: '2026-09-20T09:00:00.000Z',
+      },
+    ]);
+    await expect(admin.admin.health()).resolves.toHaveLength(1);
   });
 });

@@ -1,6 +1,6 @@
 import { createSlackSurface, type SlackSurface } from '@lance/connectors';
 import { KeyVaultTokenStore } from '@lance/connectors/graph';
-import { createDb, waitForSinglePrincipal, scopedDb, type Db } from '@lance/db';
+import { createDb, scopedDb, systemState, SYSTEM_STATE_ID, type Db } from '@lance/db';
 import {
   countProposals,
   decideProposal,
@@ -15,15 +15,26 @@ import { OntologyRepository } from '@lance/ontology';
 import { getConfig, readSecret, type Config } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { pathToFileURL } from 'node:url';
+import { eq } from 'drizzle-orm';
+import { actorFromUpn } from './actor.js';
+import { createAdminStore } from './admin/store.js';
 import { createAgentsStore } from './agents/store.js';
 import { createAlertStore } from './alerts/store.js';
 import { createEntraVerifier } from './auth/entra.js';
 import { createBriefStore } from './briefs/store.js';
 import { createCommitmentStore } from './commitments/store.js';
 import { createTaskStore } from './tasks/store.js';
-import type { ApiDeps, GraphConsentDeps, SlackDeps, TokenVerifier } from './deps.js';
+import type {
+  ApiDeps,
+  GraphConsentDeps,
+  PrincipalKey,
+  ServerDeps,
+  SlackDeps,
+  TokenVerifier,
+} from './deps.js';
 import { createFeed } from './events.js';
 import { createExecuteQueue, type ExecuteQueue } from './executeQueue.js';
+import { createPrincipalDirectory } from './principals/directory.js';
 import { applyDecision, type DecideDeps } from './proposals/decide.js';
 import { buildServer } from './server.js';
 import { createDbStatusSource } from './status.js';
@@ -37,16 +48,12 @@ const DEFAULT_PORT = 3001;
 /** Container Apps routes to the container's own interface, not to loopback. */
 const HOST = '0.0.0.0';
 
-export interface RuntimeOptions {
+export interface PrincipalRuntimeOptions {
   config: Config;
+  /** Scoped to `principal`; every store reads and writes through it. */
   db: Db;
   /** The principal `db` is scoped to; the ontology reads through the same scope. */
-  principalId: string;
-  auth: TokenVerifier;
-  slack: SlackDeps;
-  ingestSecret: string;
-  /** Omitted by a process that does not run the Graph consent flow. */
-  graph?: GraphConsentDeps;
+  principal: PrincipalKey;
   /** Null, the default, when no bot token is configured: cards are skipped. */
   slackSurface?: SlackSurface | null;
   /** Defaults to pg-boss over the same pool; passed in so `main` can stop it. */
@@ -54,10 +61,11 @@ export interface RuntimeOptions {
 }
 
 /**
- * Assembles the real `SystemControl`, `LedgerReader`, `LedgerWriter`,
- * proposal reads, decision service and status source over `db`.
+ * Assembles one principal's `SystemControl`, `LedgerReader`,
+ * `LedgerWriter`, proposal reads, decision service and status source over
+ * `db`, which is scoped to that principal.
  */
-export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
+export const createApiDeps = (options: PrincipalRuntimeOptions): ApiDeps => {
   const control = new SystemControl(options.db);
   const feed = createFeed();
   const executeQueue = options.executeQueue ?? createExecuteQueue(options.db);
@@ -79,6 +87,8 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
 
   return {
     config: options.config,
+    principalId: options.principal.id,
+    actor: actorFromUpn(options.principal.upn),
     control,
     ledger: new LedgerReader(options.db),
     writer: new LedgerWriter(options.db),
@@ -97,7 +107,7 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
     agents: createAgentsStore(options.db),
     ontology: new OntologyRepository(
       options.db,
-      { principalId: options.principalId },
+      { principalId: options.principal.id },
       { principalName: options.config.dom.name },
     ),
     enqueueChase: (commitmentId) => executeQueue.enqueueChase(commitmentId),
@@ -106,8 +116,6 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
       usdToGbp: options.config.cost.usdToGbp,
       timeZone: options.config.timeZone,
     }),
-    auth: options.auth,
-    slack: options.slack,
     slackSurface,
     onAlertSlackFailure: (error, alertId) => {
       console.warn(
@@ -119,6 +127,79 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
       feed.notify(event);
     },
     subscribe: (listener) => feed.subscribe(listener),
+  };
+};
+
+/**
+ * The per-principal dependency cache: `build` runs once per principal, and
+ * every later request for the same principal gets the same object, so its
+ * live feed is shared by that principal's connections and nobody else's.
+ */
+export const createDepsCache = (
+  build: (principal: PrincipalKey) => ApiDeps,
+): ((principal: PrincipalKey) => ApiDeps) => {
+  const cache = new Map<string, ApiDeps>();
+  return (principal) => {
+    const cached = cache.get(principal.id);
+    if (cached !== undefined) return cached;
+    const built = build(principal);
+    cache.set(principal.id, built);
+    return built;
+  };
+};
+
+export interface ServerRuntimeOptions {
+  config: Config;
+  /** Unscoped. Each principal's stores get a handle scoped from it. */
+  root: Db;
+  auth: TokenVerifier;
+  slack: SlackDeps;
+  ingestSecret: string;
+  /** Omitted by a process that does not run the Graph consent flow. */
+  graph?: GraphConsentDeps;
+  /** Null, the default, when no bot token is configured: cards are skipped. */
+  slackSurface?: SlackSurface | null;
+  /**
+   * One queue for every principal: pg-boss's tables carry no principal. The
+   * job payloads gain a principal id with package 5.3.
+   */
+  executeQueue?: ExecuteQueue;
+}
+
+/** Everything `buildServer` needs, over the real database. */
+export const createServerDeps = (options: ServerRuntimeOptions): ServerDeps => {
+  const executeQueue = options.executeQueue ?? createExecuteQueue(options.root);
+  const slackSurface = options.slackSurface ?? null;
+  const directory = createPrincipalDirectory(options.root);
+  return {
+    config: options.config,
+    auth: options.auth,
+    directory,
+    depsFor: createDepsCache((principal) =>
+      createApiDeps({
+        config: options.config,
+        db: scopedDb(options.root, { principalId: principal.id }),
+        principal,
+        executeQueue,
+        slackSurface,
+      }),
+    ),
+    admin: createAdminStore(options.root, directory, {
+      usdToGbp: options.config.cost.usdToGbp,
+      timeZone: options.config.timeZone,
+    }),
+    readiness: async () => {
+      const rows = await options.root
+        .select({ paused: systemState.paused, mode: systemState.mode })
+        .from(systemState)
+        .where(eq(systemState.id, SYSTEM_STATE_ID));
+      const row = rows[0];
+      if (row === undefined) {
+        throw new Error('system_state has no row. Run the migration job, which seeds it.');
+      }
+      return row;
+    },
+    slack: options.slack,
     ingestSecret: options.ingestSecret,
     ...(options.graph === undefined ? {} : { graph: options.graph }),
   };
@@ -150,6 +231,9 @@ const requiredEnv = (name: string): string => {
   return value;
 };
 
+const nonEmpty = (value: string | undefined): string | null =>
+  value === undefined || value === '' ? null : value;
+
 const port = (): number => {
   const raw = process.env['PORT'];
   if (raw === undefined || raw === '') return DEFAULT_PORT;
@@ -169,31 +253,19 @@ export const main = async (): Promise<void> => {
   });
   const tenantId = requiredEnv('ENTRA_TENANT_ID');
   const clientId = requiredEnv('ENTRA_CLIENT_ID');
-  const allowedUpn = requiredEnv('ALLOWED_UPN');
 
-  // One principal in Phase 4 (ADR 0015): every store below reads and writes
-  // through a handle scoped to it, so row-level security holds the line.
+  // The principal is resolved per request from the token's oid (ADR 0020),
+  // and each principal's stores read and write through a handle scoped to
+  // them, so row-level security holds the line between principals.
   const root = createDb();
-  const principal = await waitForSinglePrincipal(root, allowedUpn, {
-    waitSeconds: config.database.startupWaitSeconds,
-    log: (message) => {
-      console.warn(message);
-    },
-  });
-  const db = scopedDb(root, { principalId: principal.id });
-  const executeQueue = createExecuteQueue(db);
+  const executeQueue = createExecuteQueue(root);
 
-  const deps = createApiDeps({
+  const deps = createServerDeps({
     config,
-    db,
-    principalId: principal.id,
+    root,
     executeQueue,
     slackSurface: slackSurfaceFromEnv(config.slack.channelId),
-    auth: createEntraVerifier({
-      tenantId,
-      clientId,
-      allowedUpn,
-    }),
+    auth: createEntraVerifier({ tenantId, clientId }),
     graph: {
       tenantId,
       clientId,
@@ -203,9 +275,8 @@ export const main = async (): Promise<void> => {
     },
     slack: {
       signingSecret: readSecret('SLACK_SIGNING_SECRET'),
-      // The principal's own Slack id; the environment variable covers a row
-      // recorded before the id was known.
-      allowedUserId: principal.slackUserId ?? process.env['SLACK_ALLOWED_USER_ID'] ?? null,
+      // Covers a principal row recorded before its Slack id was known.
+      fallbackUserId: nonEmpty(process.env['SLACK_ALLOWED_USER_ID']),
     },
     ingestSecret: readSecret('AGENT_LOG_INGEST_SECRET'),
   });
@@ -217,7 +288,7 @@ export const main = async (): Promise<void> => {
     void server
       .close()
       .then(() => executeQueue.stop())
-      .then(() => db.$client.end())
+      .then(() => root.$client.end())
       .then(() => telemetry.shutdown())
       .then(() => process.exit(0));
   };

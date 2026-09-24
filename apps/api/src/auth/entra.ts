@@ -1,11 +1,15 @@
 import { createRemoteJWKSet, errors as joseErrors, jwtVerify, type JWTVerifyGetKey } from 'jose';
-import type { TokenVerifier } from '../deps.js';
+import { lanceRolesFrom } from '@lance/shared';
+import type { TokenVerifier, VerifiedIdentity } from '../deps.js';
 import { UnauthorisedError } from '../errors.js';
 
 /**
- * Entra ID bearer verification (spec 4.1). Single tenant, one allowlisted
- * UPN, delegated tokens only. The signature comes from the tenant's JWKS
+ * Entra ID bearer verification (spec 4.1, ADR 0020). Single tenant,
+ * delegated tokens only. The signature comes from the tenant's JWKS
  * endpoint; tests inject a local key set instead so no network call is made.
+ *
+ * The verifier says who is calling and which Lance roles they hold; whether
+ * that is enough for a route is `requireEntra`'s decision.
  *
  * No error message ever contains the token or any part of it.
  */
@@ -13,8 +17,6 @@ import { UnauthorisedError } from '../errors.js';
 export interface EntraVerifierOptions {
   tenantId: string;
   clientId: string;
-  /** The one UPN allowed to sign in. Compared case-insensitively. */
-  allowedUpn: string;
   /** Injected in tests. Defaults to the tenant's remote JWKS. */
   jwks?: JWTVerifyGetKey;
 }
@@ -73,10 +75,9 @@ const rejection = (error: unknown): UnauthorisedError => {
 export const createEntraVerifier = (options: EntraVerifierOptions): TokenVerifier => {
   const keys = options.jwks ?? createRemoteJWKSet(jwksUrl(options.tenantId));
   const issuer = entraIssuer(options.tenantId);
-  const allowedUpn = options.allowedUpn.toLowerCase();
 
   return {
-    async verify(bearer: string): Promise<{ upn: string }> {
+    async verify(bearer: string): Promise<VerifiedIdentity> {
       if (bearer.length === 0) {
         throw new UnauthorisedError(
           'No bearer token. Send an Entra ID token in the Authorization header as "Bearer <token>".',
@@ -103,13 +104,14 @@ export const createEntraVerifier = (options: EntraVerifierOptions): TokenVerifie
           'The bearer token carries no preferred_username, upn or email claim, so Lance cannot tell who is calling.',
         );
       }
-      if (upn.toLowerCase() !== allowedUpn) {
+      const oid = payload['oid'];
+      if (typeof oid !== 'string' || oid.length === 0) {
         throw new UnauthorisedError(
-          'This account is not on the Lance allowlist. Sign in as the allowlisted user.',
+          'The bearer token carries no oid claim, so Lance cannot tell which Entra account is calling. Send the id token Entra issued at sign-in.',
         );
       }
 
-      return { upn };
+      return { oid, upn, roles: lanceRolesFrom(payload['roles']) };
     },
   };
 };
