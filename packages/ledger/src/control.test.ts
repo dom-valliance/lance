@@ -17,7 +17,13 @@ import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { eq } from 'drizzle-orm';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { SystemControl, type PauseResult, type ResumeResult } from './control.js';
+import {
+  ModeChangeRefusedError,
+  SystemControl,
+  liveModeOpensAt,
+  type PauseResult,
+  type ResumeResult,
+} from './control.js';
 
 /**
  * The kill switch against a real container (spec 4.3, non-negotiable 7).
@@ -365,6 +371,88 @@ describe('SystemControl.setMode', () => {
     const event = await eventById(result.eventId);
     expect(event.payload?.['from']).toBe('live');
     expect(event.payload?.['to']).toBe('live');
+  });
+});
+
+describe('SystemControl.setMode for a newly onboarded principal (multi-user M3)', () => {
+  const NEWCOMER_ID = '01K5S9V6QW3SWCCPVB0N0E3N09';
+  const ONBOARDING_ID = '01K5S9V6QW3SWCCPVB0N0E3N0A';
+  // Monday 28 September 2026, 10:00 in London.
+  const ACTIVATED_AT = new Date('2026-09-28T09:00:00.000Z');
+
+  const controlAt = (principalId: string, now: string): SystemControl =>
+    new SystemControl(scopedDb(appRoot, { principalId }), { now: () => new Date(now) });
+
+  const modeOf = async (principalId: string): Promise<string> => {
+    const rows = await migratorDb
+      .select({ mode: principalState.mode })
+      .from(principalState)
+      .where(eq(principalState.principalId, principalId));
+    return rows[0]?.mode ?? 'missing';
+  };
+
+  beforeAll(async () => {
+    await migratorDb.insert(principals).values([
+      {
+        id: NEWCOMER_ID,
+        upn: 'newcomer@example.test',
+        status: 'active',
+        activatedAt: ACTIVATED_AT,
+      },
+      { id: ONBOARDING_ID, upn: 'still.onboarding@example.test', status: 'onboarding' },
+    ]);
+    for (const principalId of [NEWCOMER_ID, ONBOARDING_ID]) {
+      await scopedDb(migratorDb, { principalId }).insert(principalState).values({});
+    }
+  });
+
+  it('opens live at London midnight five working days after activation', () => {
+    expect(liveModeOpensAt(ACTIVATED_AT).toISOString()).toBe('2026-10-04T23:00:00.000Z');
+  });
+
+  it('refuses live inside the five working days and names the date it opens', async () => {
+    const early = controlAt(NEWCOMER_ID, '2026-10-02T16:00:00.000Z');
+
+    const refusal = await early
+      .setMode('live', { actor: 'user:newcomer' })
+      .catch((e: unknown) => e);
+
+    expect(refusal).toBeInstanceOf(ModeChangeRefusedError);
+    expect((refusal as Error).message).toContain('Live mode opens on Monday 5 October 2026');
+    expect((refusal as Error).message).toContain('Monday 28 September 2026');
+    expect(await modeOf(NEWCOMER_ID)).toBe('dry_run');
+  });
+
+  it('allows live once the five working days have passed', async () => {
+    const later = controlAt(NEWCOMER_ID, '2026-10-05T07:00:00.000Z');
+
+    const result = await later.setMode('live', { actor: 'user:newcomer' });
+
+    expect(result.changed).toBe(true);
+    expect(await modeOf(NEWCOMER_ID)).toBe('live');
+  });
+
+  it('always allows a switch back to dry run', async () => {
+    const early = controlAt(NEWCOMER_ID, '2026-09-29T09:00:00.000Z');
+    await early.setMode('dry_run', { actor: 'user:newcomer' });
+    expect(await modeOf(NEWCOMER_ID)).toBe('dry_run');
+  });
+
+  it('refuses live to a principal who is still onboarding', async () => {
+    const onboarding = controlAt(ONBOARDING_ID, '2027-01-04T09:00:00.000Z');
+
+    await expect(onboarding.setMode('live', { actor: 'user:onboarding' })).rejects.toThrow(
+      'Finish the onboarding checklist first',
+    );
+    expect(await modeOf(ONBOARDING_ID)).toBe('dry_run');
+  });
+
+  it('exempts the seed principal, who was never onboarded and has no activation time', async () => {
+    const dom = controlAt(SEED_PRINCIPAL_ID, '2026-09-28T09:00:00.000Z');
+    await dom.setMode('dry_run', { actor: DOM });
+    const result = await dom.setMode('live', { actor: DOM });
+    expect(await dom.read()).toMatchObject({ mode: 'live' });
+    expect(result.eventId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
   });
 });
 

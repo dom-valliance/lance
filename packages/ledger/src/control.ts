@@ -1,13 +1,14 @@
 import {
   SYSTEM_STATE_ID,
   principalState,
+  principals,
   proposals,
   systemState,
   type Db,
   type PrincipalState,
   type SystemState,
 } from '@lance/db';
-import { newUlid, nowIso, type SystemMode } from '@lance/shared';
+import { addWorkingDays, formatLongDate, newUlid, nowIso, type SystemMode } from '@lance/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { LedgerReader } from './reader.js';
 import { LedgerWriter, type DbExecutor } from './writer.js';
@@ -100,6 +101,41 @@ export function effectiveRunState(own: PrincipalState, global: SystemState): Run
   };
 }
 
+/**
+ * A newly onboarded principal runs in dry run for this many working days
+ * before live opens to them (docs/plans/multi-user.md M3 and Q7), the same
+ * rule every new watcher followed in Phase 1.
+ */
+export const DRY_RUN_WORKING_DAYS = 5;
+
+/** Working days are counted, and the opening date named, in London (the brief's rule, not the principal's zone). */
+const DRY_RUN_TIME_ZONE = 'Europe/London';
+
+/** When live mode opens to a principal activated at `activatedAt`: London midnight five working days on. */
+export function liveModeOpensAt(activatedAt: Date): Date {
+  return addWorkingDays(activatedAt, DRY_RUN_WORKING_DAYS, DRY_RUN_TIME_ZONE);
+}
+
+/**
+ * A mode change the principal may not make yet. The message is written for
+ * the principal and is what Slack and Settings show them.
+ */
+export class ModeChangeRefusedError extends Error {
+  override readonly name = 'ModeChangeRefusedError';
+  constructor(
+    message: string,
+    /** When live opens, or null when it waits on something other than time. */
+    readonly opensAt: Date | null,
+  ) {
+    super(message);
+  }
+}
+
+export interface SystemControlOptions {
+  /** Injected in tests. */
+  now?: () => Date;
+}
+
 /** Proposal statuses that are waiting for the executor and can be held. */
 const HOLDABLE_STATUSES = ['approved', 'edited'] as const;
 export type HoldableStatus = (typeof HOLDABLE_STATUSES)[number];
@@ -160,9 +196,15 @@ export class SystemControl {
   private readonly writer: LedgerWriter;
   private readonly reader: LedgerReader;
 
-  constructor(private readonly db: Db) {
+  private readonly now: () => Date;
+
+  constructor(
+    private readonly db: Db,
+    options: SystemControlOptions = {},
+  ) {
     this.writer = new LedgerWriter(db);
     this.reader = new LedgerReader(db);
+    this.now = options.now ?? (() => new Date());
   }
 
   async read(): Promise<RunState> {
@@ -506,6 +548,7 @@ export class SystemControl {
   ): Promise<{ changed: boolean; eventId: string }> {
     return this.db.transaction(async (tx) => {
       const current = await this.readOwn(tx);
+      if (mode === 'live' && current.mode !== 'live') await this.assertLiveOpen(tx, current);
       const ts = nowIso();
       if (current.mode !== mode) {
         await tx
@@ -526,6 +569,35 @@ export class SystemControl {
       );
       return { changed: current.mode !== mode, eventId: event.id };
     });
+  }
+
+  /**
+   * Refuses live for a principal still onboarding, and for one activated
+   * less than five working days ago (docs/plans/multi-user.md M3). The
+   * activation time is on the principal's own row, which any scope reads
+   * and only the onboarding completion writes. Dom's is null because he
+   * was never onboarded (his row predates onboarding), so he is exempt.
+   */
+  private async assertLiveOpen(tx: DbExecutor, current: PrincipalState): Promise<void> {
+    const rows = await tx
+      .select({ status: principals.status, activatedAt: principals.activatedAt })
+      .from(principals)
+      .where(eq(principals.id, current.principalId))
+      .limit(1);
+    const principal = rows[0];
+    if (principal?.status === 'onboarding') {
+      throw new ModeChangeRefusedError(
+        'Live mode opens five working days after onboarding is complete. Finish the onboarding checklist first; until then everything stays in dry run.',
+        null,
+      );
+    }
+    if (principal?.activatedAt === null || principal?.activatedAt === undefined) return;
+    const opensAt = liveModeOpensAt(principal.activatedAt);
+    if (this.now().getTime() >= opensAt.getTime()) return;
+    throw new ModeChangeRefusedError(
+      `Live mode opens on ${formatLongDate(opensAt, DRY_RUN_TIME_ZONE)}. A new principal runs in dry run for ${String(DRY_RUN_WORKING_DAYS)} working days after onboarding, which finished on ${formatLongDate(principal.activatedAt, DRY_RUN_TIME_ZONE)}. Nothing was changed; switch to live on or after that date.`,
+      opensAt,
+    );
   }
 
   /**
