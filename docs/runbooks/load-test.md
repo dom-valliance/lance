@@ -162,3 +162,57 @@ The morning brief is safe whichever is chosen: it has its own queue, runs eight 
 One replica is enough for thirty principals. The worker process, harness included, used 12 per cent of one core, 204 MB and at most ten Postgres connections, with an event-loop delay p99 of 108 ms; Postgres spent about ten seconds on the worker's statements in the hour. The constraint is model capacity and queue concurrency, which a second replica does not fix in the right way: each replica runs its own fair-share limiter, so two replicas would put up to eight model calls in flight for the one Anthropic organisation and split fair share per replica, and every queue would run two jobs at once without the per-principal guard option A needs.
 
 Keep `maxReplicas: 1` in `infra/modules/containerapps.bicep`. Raise throughput inside the one process (options A and B above). Revisit replicas when the worker's CPU passes about 60 per cent of its allocation at the morning peak, and then only after the limiter is shared across processes (a Postgres-backed semaphore), with a scale rule on the pg-boss backlog (the KEDA `postgresql` scaler on the count of `created` jobs) and `maxReplicas: 2`. The refresh-token advisory lock from package 5.2 already makes a second replica safe for Graph token rotation.
+
+## After ADR 0034
+
+One run on 24 September 2026, same machine, seed and scenario as above, at `1fd06c1`: bulk mail filed without model triage (ADR 0034) and load-test option A, with `watcher-graph-mail` and `triage` each running `MODEL_QUEUE_CONCURRENCY` (default 4) jobs at once and never two of one principal's (pg-boss `localGroupConcurrency: 1`, the principal as each job's group). The limiter is unchanged: `MODEL_CONCURRENCY` 4, a burst of 6, 12 runs a minute per principal. The window ran its full 60 minutes. The warm-up, with an instant model, drained in 149 s against about 19 minutes before.
+
+### Against the targets
+
+| Target | Before | Final | After ADR 0034 | Verdict |
+|---|---|---|---|---|
+| Every brief stored by 06:35 | 12 of 30; last 06:41:55 | 30 of 30; last 06:32:10 | 30 of 30; last 06:32:18; p50 06:31:06 | **Pass** |
+| Every brief posted | 30, last 06:41:55 | 30 | 30, last 06:32:18 | **Pass** |
+| Posted within the push budget (3 an hour) | 1 unsolicited post per principal | 1 per principal | 0 per principal | **Pass**. The one card per principal of earlier runs did not appear; the cause was not established in this run |
+| Queue latency p95 under 60 s, all jobs | 2,278 s | 1,397 s (33 minutes) | 1,007 s | **Fail** |
+| Same, queues that do not wait on the model | 676 s brief-morning | 104 s brief-morning; every other under 41 s | 96 s brief-morning; every other under 40 s; `bulk-mail` 1.6 s | **Fail** only for brief-morning, as before |
+| Failed or retried jobs | none | none | none | **Pass** |
+
+### The model-bound queues, seconds
+
+| Queue | Jobs | Unfinished at the end | Latency p50 / p95 / p99 | Job run p50 | Before: unfinished, p95 |
+|---|---|---|---|---|---|
+| `watcher-graph-mail` | 120 | 100 | 1,140 / 3,379 / 3,540 | 701 | 107, 3,540 |
+| `triage` | 687 | 53 | 705 / 1,217 / 1,375 | 17 | 419, 3,075 |
+| `bulk-mail` | 103 | 0 | 0.6 / 1.6 / 1.8 | 0.0 | new |
+
+### The model limiter
+
+| | After (before this change) | After ADR 0034 |
+|---|---|---|
+| Model runs in the 60 minutes | 1,069: 602 mail labels, 167 triage, 30 planner, 90 each of commitments, debrief draft and critic | 1,878: 942 mail labels, 636 triage, 30 planner, 90 each of commitments, debrief draft and critic |
+| Model calls, counting triage's two turns and the planner's three | about 1,400 | about 2,570 |
+| Slots in use, on average | about 2 of 4 | about 3.9 of 4 (2,570 calls at the 5.5 s mean is 14,100 slot-seconds in 3,600 s) |
+| Median principal's mean wait for a slot | 0.4 s | 7.3 s |
+| Worst-served principal's mean wait | 4.0 s | 10.2 s (principal 4, p95 19.0 s) |
+
+Postgres: active sessions peak 8, sessions peak 12, the worker pool at its ten, clients waiting for a connection peak 36 and mean 1.79 (26 and 1.13 before). The worker used 12 per cent of one core, an event-loop delay p99 of 111 ms and 209 MB at peak. Nothing needs an index; the heaviest statement is still pg-boss's fetch at 0.01 ms a call.
+
+### What it shows
+
+Option A did what the table above predicted: the limiter's four slots are now busy almost all the hour, and the same hour carried 1.8 times the model runs, 636 triage runs against 167. Queue latency still fails, because the jobs now wait at the limiter instead of in the queue: 2,570 calls at 5.5 s is the whole hour of four slots, so the morning still cannot clear in it.
+
+The bypass filed 103 threads in the window with no model call, each in under two seconds. The harness's labeller draws one of the eight labels at random for each message, so only about a quarter of its mail is bulk; the share of a real Monday's mail that is Newsletters or Notifications decides how much triage the bypass saves in production.
+
+The mail watcher is now the worst queue. Each poll labels 45 messages one after another, and each label waits about 7 s for a slot, so a poll runs for about 12 minutes (701 s, against 258 s before). With four mail jobs in flight only four principals have their mail labelled at once: 20 of the 120 polls finished, and ten principals' mail was not labelled within the hour.
+
+### What to change next
+
+Not measured; each needs its own run.
+
+1. Raise the mail watcher's team size to the number of active principals (30 here), leaving triage at 4. A mail job waiting at the limiter holds no connection and no slot, and the fair-share limiter already hands slots to principals in turn, so every principal's labelling would progress together instead of four at a time. Split `MODEL_QUEUE_CONCURRENCY` into one setting per queue to do it.
+2. Option C's batched labelling: labels were half the runs and about 37 per cent of the slot time. Ten messages a Haiku call would take about a third of the morning's model time away. It needs its own ADR (spec 7.1 allows one label call per message) and a label eval.
+3. Option B: `MODEL_CONCURRENCY` above 4, if the Anthropic organisation's rate limits allow it. At 8 the same work takes about 30 minutes.
+4. Option D still stands: queue latency p95 under 60 s is met by every queue that does not wait on the model except brief-morning (96 s), so the acceptance row should measure those queues and give the model backlog a target of its own.
+
+One thing this run cannot show: every principal here is in dry run, so the bulk proposals were held and nothing reached the `execute` queue. In live mode each bulk message adds two approved proposals to `execute`, which runs one job at a time at pg-boss's default fetch interval. Its order matters (the category before the move, because the move gives the message a new id), so speed it up with a faster poll rather than more concurrency.
