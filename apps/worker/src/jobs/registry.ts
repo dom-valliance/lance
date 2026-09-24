@@ -67,6 +67,8 @@ export interface JobDeclaration {
 /** Runs the reconciler on a timer, so a principal whose status changes gains or loses schedules within a minute. */
 export const RECONCILE_QUEUE = 'jobs-reconcile';
 export const ORGANISATION_BUDGET_QUEUE = 'organisation-budget-guard';
+/** The nightly Lance role check (ADR 0020): pauses a principal who has lost both roles. */
+export const ROLE_CHECK_QUEUE = 'role-check';
 export const EXPIRY_QUEUE = 'expire-proposals';
 export const ALERT_DELIVERY_QUEUE = 'alerts-deliver';
 export const DIGEST_QUEUE = 'dry-run-digest';
@@ -101,6 +103,13 @@ export const SYSTEM_JOBS: readonly JobDeclaration[] = [
     slug: ORGANISATION_BUDGET_QUEUE,
     title: 'Organisation model spend against its ceiling',
     schedules: ['*/15 * * * *'],
+    locked: true,
+    scope: 'organisation',
+  }),
+  declare({
+    slug: ROLE_CHECK_QUEUE,
+    title: 'Pause principals who no longer hold a Lance role',
+    schedules: ['30 2 * * *'],
     locked: true,
     scope: 'organisation',
   }),

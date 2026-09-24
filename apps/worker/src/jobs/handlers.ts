@@ -26,6 +26,7 @@ import { runTriage } from '../triage/run.js';
 import { createAgentLogsDetector } from '../watchers/agent-logs/index.js';
 import { runWatcher } from '../watchers/runner.js';
 import type { PrincipalContext } from './context.js';
+import { runRoleCheck, type RoleCheckCredentials } from '../roles/roleCheck.js';
 import { runOrganisationBudgetGuard } from './organisationBudget.js';
 import type { ReconcileResult } from './reconcile.js';
 import {
@@ -34,6 +35,7 @@ import {
   EXPIRY_QUEUE,
   ORGANISATION_BUDGET_QUEUE,
   RECONCILE_QUEUE,
+  ROLE_CHECK_QUEUE,
   SYSTEM_JOBS,
 } from './registry.js';
 import { PrincipalPayloadSchema, workForPrincipal, type PrincipalContexts } from './scoped.js';
@@ -81,6 +83,12 @@ export interface HandlerDeps {
   adminDb: Db;
   root: Db;
   webUrl: string | null;
+  /**
+   * The app's own Entra client credentials for the nightly role check;
+   * null in a process without them, such as a local run, where the check
+   * skips with a log line.
+   */
+  roleCheckCredentials: RoleCheckCredentials | null;
 }
 
 type PrincipalHandler = (context: PrincipalContext) => Promise<void>;
@@ -202,6 +210,30 @@ function organisationHandlers(deps: HandlerDeps): Map<string, (data: unknown) =>
             'job schedules reconciled',
           );
         }
+      },
+    ],
+    [
+      ROLE_CHECK_QUEUE,
+      async () => {
+        if (deps.roleCheckCredentials === null) {
+          console.info(
+            { queue: ROLE_CHECK_QUEUE },
+            'role check skipped: ENTRA_TENANT_ID, ENTRA_CLIENT_ID or ENTRA_CLIENT_SECRET is not set',
+          );
+          return;
+        }
+        const result = await runRoleCheck({
+          root: deps.root,
+          credentials: deps.roleCheckCredentials,
+        });
+        console.info(
+          {
+            paused: result.paused.map((principal) => principal.principalId),
+            unbound: result.unbound,
+            alerted: result.alerted,
+          },
+          'role check finished',
+        );
       },
     ],
     [

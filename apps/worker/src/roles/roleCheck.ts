@@ -27,8 +27,8 @@ import { raiseAlert } from '../alerts/raise.js';
  *   Application.Read.All       GET /servicePrincipals(appId=...)/appRoleAssignedTo
  *   GroupMember.ReadBasic.All  GET /groups/{id}/transitiveMembers
  *
- * Not yet registered as a scheduled job: the scheduler is being rewritten
- * into a registry (package 5.3), and the lead wires `runRoleCheck` into it.
+ * Scheduled as the locked organisation job `role-check`, nightly at 02:30
+ * London, in `apps/worker/src/jobs/registry.ts` (ADR 0025).
  */
 
 export const ROLE_CHECK_ACTOR = 'system:role-check';

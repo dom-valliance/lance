@@ -64,15 +64,20 @@ describe('the job registry', () => {
       'expire-proposals',
       'jobs-reconcile',
       'organisation-budget-guard',
+      'role-check',
     ]);
   });
 
-  it('runs only the reconciler and the organisation budget once for the organisation', () => {
+  it('runs only the reconciler, the organisation budget and the role check once for the organisation', () => {
     expect(
       SYSTEM_JOBS.filter((declared) => declared.scope === 'organisation').map(
         (declared) => declared.slug,
       ),
-    ).toEqual(['jobs-reconcile', 'organisation-budget-guard']);
+    ).toEqual(['jobs-reconcile', 'organisation-budget-guard', 'role-check']);
+  });
+
+  it('runs the role check nightly at 02:30', () => {
+    expect(job('role-check').schedules).toEqual(['30 2 * * *']);
   });
 
   it('declares every watcher and detector at the cadence it ran on before the registry', () => {

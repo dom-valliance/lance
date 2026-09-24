@@ -1,16 +1,26 @@
 import { createAnthropicClient, sdkModelRunner } from '@lance/agents';
 import { createDb, scopedDb, waitForPrincipalByUpn } from '@lance/db';
-import { getConfig, nowIso } from '@lance/shared';
+import { getConfig, nowIso, readSecret } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { bootWorker } from './jobs/boot.js';
 import { singleOwnerConnectors, WORKER_VERSION } from './jobs/connectors.js';
 import { ensureSeedRules } from './policy/rules.js';
+import type { RoleCheckCredentials } from './roles/roleCheck.js';
 import { createBoss } from './scheduler/boss.js';
 
 const env = (name: string): string | undefined => {
   const value = process.env[name];
   return value === undefined || value === '' ? undefined : value;
 };
+
+/** The Entra app credentials the worker already reads for Graph, or null when any is absent. */
+function roleCheckCredentials(): RoleCheckCredentials | null {
+  const tenantId = env('ENTRA_TENANT_ID');
+  const clientId = env('ENTRA_CLIENT_ID');
+  if (tenantId === undefined || clientId === undefined || env('ENTRA_CLIENT_SECRET') === undefined)
+    return null;
+  return { tenantId, clientId, clientSecret: readSecret('ENTRA_CLIENT_SECRET') };
+}
 
 /**
  * The worker's composition root (ADR 0025). It runs every active
@@ -53,6 +63,7 @@ async function main(): Promise<void> {
     modelRunner,
     connectorsFor: singleOwnerConnectors(config),
     webUrl: env('PUBLIC_WEB_URL') ?? null,
+    roleCheckCredentials: roleCheckCredentials(),
   });
 
   console.info(

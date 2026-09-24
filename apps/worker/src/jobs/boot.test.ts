@@ -173,6 +173,7 @@ beforeAll(async () => {
     connectorsFor: () => Promise.resolve(null),
     buildWatchers: ({ principal }) => [fakeWatcher(principal.id)],
     webUrl: null,
+    roleCheckCredentials: null,
     organisationBudgetTtlMs: 0,
   });
 }, 180_000);
@@ -298,6 +299,18 @@ describe('per-principal jobs', () => {
       expect(JSON.stringify(logged?.[0])).toContain('not in the principals table');
     } finally {
       error.mockRestore();
+    }
+  }, 30_000);
+
+  it('skips the role check with a log line when the Entra credentials are absent', async () => {
+    const info = vi.spyOn(console, 'info');
+    try {
+      await boss.send('role-check', {});
+      await waitFor(() =>
+        info.mock.calls.some((call) => String(call[1]).includes('role check skipped')),
+      );
+    } finally {
+      info.mockRestore();
     }
   }, 30_000);
 

@@ -3,6 +3,7 @@ import { principals, scopedDb, type Db, type Principal } from '@lance/db';
 import type { Config } from '@lance/shared';
 import { eq } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
+import type { RoleCheckCredentials } from '../roles/roleCheck.js';
 import { startBoss } from '../scheduler/boss.js';
 import type { ConnectorLookup } from './connectors.js';
 import { buildPrincipalContext, type PrincipalContext, type SharedDeps } from './context.js';
@@ -28,6 +29,8 @@ export interface BootOptions {
   connectorsFor: ConnectorLookup;
   buildWatchers?: SharedDeps['buildWatchers'];
   webUrl: string | null;
+  /** For the nightly role check; null skips it (a local run without Entra credentials). */
+  roleCheckCredentials: RoleCheckCredentials | null;
   /** How long the organisation budget is cached between model runs; 30 seconds by default. */
   organisationBudgetTtlMs?: number;
 }
@@ -84,6 +87,7 @@ export async function bootWorker(options: BootOptions): Promise<BootedWorker> {
     adminDb: scopedDb(root, { principalId: options.admin.id }),
     root,
     webUrl: options.webUrl,
+    roleCheckCredentials: options.roleCheckCredentials,
   });
   const initial = await reconcile();
   // Every active principal's context is built now rather than at their
