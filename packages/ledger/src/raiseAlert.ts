@@ -58,6 +58,9 @@ export async function raiseAlert(db: Db, input: RaiseAlertInput): Promise<RaiseA
       .set({
         lastSeen: at,
         count: sql`${alerts.count} + 1`,
+        // Title and body both carry figures that change between sightings,
+        // an age or a count, so a repeat refreshes both.
+        title: input.title,
         body: input.body,
         severity: input.severity,
         updatedAt: at,
