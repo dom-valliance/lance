@@ -17,6 +17,12 @@ param postgresAdministratorPassword = readEnvironmentVariable('LANCE_PG_ADMIN_PA
 param useBootstrapImage = false
 param containerImageTag = readEnvironmentVariable('LANCE_IMAGE_TAG')
 
+// The secrets already in the static vault, comma separated, so the template creates a
+// placeholder only for a missing one and never writes over a real value (ADR 0022).
+// scripts/deploy.sh reads them from the control plane and exports the list; unset,
+// the deployment refuses to start. An empty value means a vault with no secrets yet.
+param existingStaticSecretNames = split(readEnvironmentVariable('LANCE_EXISTING_SECRETS'), ',')
+
 // Dom's Slack user id in the Valliance workspace. Not a secret.
 param slackAllowedUserId = 'U0BN7JN7BAN'
 

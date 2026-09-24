@@ -18,8 +18,11 @@ param logAnalyticsWorkspaceName string
 @description('Application Insights connection string for the OpenTelemetry exporter.')
 param applicationInsightsConnectionString string
 
-@description('Key Vault URI, including the trailing slash.')
+@description('URI of the static Key Vault, including the trailing slash.')
 param keyVaultUri string
+
+@description('URI of the principal vault (ADR 0022), including the trailing slash. The api writes and the worker reads per-principal credentials there.')
+param principalKeyVaultUri string
 
 @description('Login server of the container registry.')
 param registryLoginServer string
@@ -53,92 +56,28 @@ param databaseName string = 'lance'
 var bootstrapImage = 'mcr.microsoft.com/k8se/quickstart:latest'
 var bootstrapPort = 80
 
-// Secret name to environment variable name. The secret names match the table in
-// modules/keyvault.bicep and the rotation runbook.
-var webSecretBindings = [
-  {
-    secretName: 'auth-secret'
-    envName: 'AUTH_SECRET'
-  }
-  {
-    secretName: 'entra-tenant-id'
-    envName: 'ENTRA_TENANT_ID'
-  }
-  {
-    secretName: 'entra-client-id'
-    envName: 'ENTRA_CLIENT_ID'
-  }
-  {
-    secretName: 'entra-client-secret'
-    envName: 'ENTRA_CLIENT_SECRET'
-  }
-  // allowed-upn is no longer bound: sign-in is decided by Entra app roles
-  // (ADR 0020). The secret stays in the vault; this template never deletes one.
-]
-
-var apiSecretBindings = [
-  {
-    secretName: 'entra-tenant-id'
-    envName: 'ENTRA_TENANT_ID'
-  }
-  {
-    secretName: 'entra-client-id'
-    envName: 'ENTRA_CLIENT_ID'
-  }
-  {
-    secretName: 'entra-client-secret'
-    envName: 'ENTRA_CLIENT_SECRET'
-  }
-  {
-    secretName: 'slack-bot-token'
-    envName: 'SLACK_BOT_TOKEN'
-  }
-  {
-    secretName: 'slack-signing-secret'
-    envName: 'SLACK_SIGNING_SECRET'
-  }
-  {
-    secretName: 'agent-log-ingest-secret'
-    envName: 'AGENT_LOG_INGEST_SECRET'
-  }
-]
-
-var workerSecretBindings = [
-  {
-    // Proposal cards, execution updates and the dry-run digest (ADR 0012).
-    secretName: 'slack-bot-token'
-    envName: 'SLACK_BOT_TOKEN'
-  }
-  {
-    secretName: 'entra-tenant-id'
-    envName: 'ENTRA_TENANT_ID'
-  }
-  {
-    secretName: 'entra-client-id'
-    envName: 'ENTRA_CLIENT_ID'
-  }
-  {
-    secretName: 'anthropic-api-key'
-    envName: 'ANTHROPIC_API_KEY'
-  }
-  {
-    secretName: 'notion-token'
-    envName: 'NOTION_TOKEN'
-  }
-  {
-    secretName: 'jamie-api-key'
-    envName: 'JAMIE_API_KEY'
-  }
-  // graph-refresh-token is deliberately not bound. The worker reads and
-  // rotates it through the Key Vault SDK over KEY_VAULT_URL, and a bound
-  // copy made Container Apps restart the worker at every half-hourly
-  // secret sync that followed a rotation.
-  {
-    // Also the role check's client credentials for Graph (ADR 0020).
-    secretName: 'entra-client-secret'
-    envName: 'ENTRA_CLIENT_SECRET'
-  }
-]
+// Secret name to environment variable name, per app, from the one table in
+// infra/secrets.json. modules/keyvault.bicep grants each app Key Vault Secrets User
+// on exactly the secrets bound here, so a binding without its grant cannot exist.
+// graph-refresh-token has no env name: the worker reads it through the Key Vault
+// SDK (a bound copy made Container Apps restart the worker at every half-hourly
+// secret sync that followed a rotation). allowed-upn is retired (ADR 0020) and in
+// no app's list; the template never deletes a secret.
+var secretTable = loadJsonContent('../secrets.json').secrets
+var bindingsFor = {
+  web: map(filter(secretTable, secret => contains(secret.bind, 'web')), secret => {
+    secretName: secret.name
+    envName: secret.env
+  })
+  api: map(filter(secretTable, secret => contains(secret.bind, 'api')), secret => {
+    secretName: secret.name
+    envName: secret.env
+  })
+  worker: map(filter(secretTable, secret => contains(secret.bind, 'worker')), secret => {
+    secretName: secret.name
+    envName: secret.env
+  })
+}
 
 var apps = [
   {
@@ -150,7 +89,7 @@ var apps = [
     targetPort: 3000
     minReplicas: 1
     maxReplicas: 2
-    bindings: webSecretBindings
+    bindings: bindingsFor.web
     // Auth.js builds callback URLs from AUTH_URL; without it the container's
     // bind address (0.0.0.0:3000) leaks into the sign-in redirect. The value is
     // computed in the loop body because it needs the environment's domain.
@@ -172,7 +111,7 @@ var apps = [
     needsAuthUrl: false
     minReplicas: 1
     maxReplicas: 2
-    bindings: apiSecretBindings
+    bindings: bindingsFor.api
   }
   {
     // Single replica in v1. pg-boss locks jobs, so a second replica is safe later
@@ -185,7 +124,7 @@ var apps = [
     targetPort: 0
     minReplicas: 1
     maxReplicas: 1
-    bindings: workerSecretBindings
+    bindings: bindingsFor.worker
     needsAuthUrl: false
   }
 ]
@@ -402,11 +341,22 @@ resource containerApps 'Microsoft.App/containerApps@2025-01-01' = [
                   ]
                 : [
                     {
-                      // The api writes and the worker rotates graph-refresh-token here (ADR 0008 scope).
+                      // Per-principal credentials (ADR 0022): the api sets them at
+                      // onboarding and consent, the worker reads and rotates them.
+                      name: 'PRINCIPAL_KEY_VAULT_URL'
+                      value: principalKeyVaultUri
+                    }
+                  ],
+              app.repository == 'lance-worker'
+                ? [
+                    {
+                      // The static vault, for the one-time copy of Dom's legacy
+                      // graph-refresh-token into the principal vault.
                       name: 'KEY_VAULT_URL'
                       value: keyVaultUri
                     }
-                  ],
+                  ]
+                : [],
               useBootstrapImage
                 ? []
                 : map(app.bindings, binding => {
