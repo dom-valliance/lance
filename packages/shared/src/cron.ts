@@ -28,7 +28,7 @@ export function assertCron(expression: string): void {
     CronExpressionParser.parse(expression, { tz: 'UTC' });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`"${expression}" is not a valid cron expression: ${reason}`);
+    throw new Error(`"${expression}" is not a valid cron expression: ${reason}`, { cause: error });
   }
 }
 
