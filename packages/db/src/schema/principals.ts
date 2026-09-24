@@ -4,10 +4,13 @@ import { principalStatus } from '../enums.js';
 import { createdAt, ulid, ulidCheck, updatedAt } from './columns.js';
 
 /**
- * The people Lance acts for (ADR 0015). Not under row-level security: it
- * is the lookup that turns an Entra object id, a UPN or a Slack user id
- * into the principal whose scope a session then takes. Dom's row reuses
- * his `users` id.
+ * The people Lance acts for (ADR 0015). It is the lookup that turns an
+ * Entra object id, a UPN or a Slack user id into the principal whose scope
+ * a session then takes, so every session reads every row. Row-level
+ * security (migration 0011, not forced) limits what `lance_app` may write
+ * to a first sign-in: an `onboarding` insert, or binding a missing
+ * `entra_oid`; an admin scope may change a status. Dom's row reuses his
+ * `users` id.
  */
 export const principals = pgTable(
   'principals',

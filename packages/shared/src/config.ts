@@ -570,13 +570,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       'Dom Selvon',
       'must be a non-empty name',
     ),
-    // ALLOWED_UPN is the same address in every environment, so it doubles as the default.
+    // Dom's UPN is the same address in every environment.
     email: readField(
       errors,
       env,
       'DOM_EMAIL',
       z.string().min(3),
-      env['ALLOWED_UPN'] && env['ALLOWED_UPN'] !== '' ? env['ALLOWED_UPN'] : 'dom@valliance.ai',
+      'dom@valliance.ai',
       'must be an email address',
     ),
   };

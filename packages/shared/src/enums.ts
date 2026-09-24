@@ -109,6 +109,7 @@ export const ALERT_KINDS = [
   'risk_language_in_client_mail',
   'auto_rule_demoted',
   'proposal_expiring',
+  'principal_access_revoked',
 ] as const;
 export const AlertKindSchema = z.enum(ALERT_KINDS);
 export type AlertKind = z.infer<typeof AlertKindSchema>;

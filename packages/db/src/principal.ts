@@ -30,7 +30,7 @@ export async function resolveSinglePrincipal(db: Db, upn: string): Promise<Princ
   if (principal.upn.toLowerCase() !== upn.toLowerCase()) {
     throw new Error(
       `The active principal is ${principal.upn} but this process is configured for ${upn}. ` +
-        'Correct ALLOWED_UPN or DOM_EMAIL, or the principal row, so the two agree.',
+        'Correct DOM_EMAIL, or the principal row, so the two agree.',
     );
   }
   return principal;

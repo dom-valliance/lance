@@ -272,13 +272,13 @@ describe('getConfig', () => {
 });
 
 describe('dom identity', () => {
-  it('defaults the email to ALLOWED_UPN and the name to Dom Selvon', () => {
+  it("defaults the email to Dom's UPN and the name to Dom Selvon, whatever ALLOWED_UPN says", () => {
     const config = loadConfig({
       NODE_ENV: 'test',
       DATABASE_URL: 'postgres://postgres:postgres@localhost:5432/lance',
-      ALLOWED_UPN: 'dom@example.test',
+      ALLOWED_UPN: 'someone.else@example.test',
     });
-    expect(config.dom).toEqual({ name: 'Dom Selvon', email: 'dom@example.test' });
+    expect(config.dom).toEqual({ name: 'Dom Selvon', email: 'dom@valliance.ai' });
   });
 
   it('takes DOM_EMAIL and DOM_NAME when set', () => {

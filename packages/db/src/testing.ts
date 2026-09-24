@@ -39,13 +39,13 @@ const TEST_APP_ROLE = 'lance_test_app';
 const TEST_APP_PASSWORD = 'lance_test_app';
 
 /**
- * A migrated test database's handle, seeded and scoped to the seed
- * principal (ADR 0015), which is how the apps see the database. It logs in
- * as a member of lance_app rather than as the container's superuser, who
- * would bypass row-level security, so a suite that passes has passed under
- * the same policies the apps run under.
+ * A migrated test database's unscoped handle, seeded, logged in as a member
+ * of lance_app rather than as the container's superuser, who would bypass
+ * row-level security. For code under test that scopes handles itself, as
+ * the api's per-principal dependency cache does; everything else takes
+ * `openSeededTestDb`.
  */
-export async function openSeededTestDb(connectionString: string): Promise<Db> {
+export async function openAppTestDb(connectionString: string): Promise<Db> {
   const root = createDb({ connectionString, password: 'postgres' });
   try {
     await seed(root);
@@ -63,8 +63,17 @@ export async function openSeededTestDb(connectionString: string): Promise<Db> {
   const url = new URL(connectionString);
   url.username = TEST_APP_ROLE;
   url.password = TEST_APP_PASSWORD;
-  const app = createDb({ connectionString: url.toString(), password: TEST_APP_PASSWORD });
-  return scopedDb(app, { principalId: SEED_PRINCIPAL_ID });
+  return createDb({ connectionString: url.toString(), password: TEST_APP_PASSWORD });
+}
+
+/**
+ * A migrated test database's handle, seeded and scoped to the seed
+ * principal (ADR 0015), which is how the apps see the database. It logs in
+ * as a member of lance_app, so a suite that passes has passed under the
+ * same policies the apps run under.
+ */
+export async function openSeededTestDb(connectionString: string): Promise<Db> {
+  return scopedDb(await openAppTestDb(connectionString), { principalId: SEED_PRINCIPAL_ID });
 }
 
 /**

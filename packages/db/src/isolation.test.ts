@@ -18,7 +18,7 @@ import { startPostgresContainer } from './testing.js';
 
 const OTHER_PRINCIPAL_ID = '01K5S9V6QW3SWCCPVB0N0E3Q7H';
 
-/** Tables that deliberately carry no principal. */
+/** Tables that deliberately carry no principal. principals has policies but is not forced (migration 0011). */
 const UNSCOPED_TABLES = ['principals', 'system_state', 'users'];
 
 /**
@@ -307,7 +307,7 @@ describe('organisation rows in policy_rules', () => {
 });
 
 describe('the principal lookup', () => {
-  it('lets the apps read principals and write none', async () => {
+  it('lets the apps read principals and refuses an insert or update outside first sign-in', async () => {
     const seeded = scopedDb(appDb, { principalId: SEED_PRINCIPAL_ID });
     const read = await seeded.$client.query('SELECT count(*)::int AS n FROM principals');
     expect(read.rows[0]).toEqual({ n: 2 });
