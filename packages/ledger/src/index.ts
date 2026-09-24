@@ -37,3 +37,5 @@ export type {
   ProposalFilter,
   ProposalRow,
 } from './proposalView.js';
+export { raiseAlert } from './raiseAlert.js';
+export type { RaiseAlertInput, RaiseAlertResult } from './raiseAlert.js';

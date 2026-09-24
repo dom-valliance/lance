@@ -110,6 +110,9 @@ export const ALERT_KINDS = [
   'auto_rule_demoted',
   'proposal_expiring',
   'principal_access_revoked',
+  // A Slack user pressed a button on a proposal that is not their
+  // principal's (ADR 0023). Raised in the proposal owner's scope.
+  'foreign_decision_attempt',
 ] as const;
 export const AlertKindSchema = z.enum(ALERT_KINDS);
 export type AlertKind = z.infer<typeof AlertKindSchema>;
