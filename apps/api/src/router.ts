@@ -55,6 +55,9 @@ import { adminProcedure, procedure, router, signedInProcedure } from './trpc.js'
 
 const TimestampSchema = z.string().datetime({ offset: true });
 
+/** A `/lance login` token; its shape and MAC are checked by the link service. */
+const SlackLinkTokenSchema = z.string().min(1).max(256);
+
 /** Mirrors `LedgerQuery` from `@lance/ledger`, validated at the boundary. */
 export const LedgerQueryInputSchema = z
   .object({
@@ -233,6 +236,23 @@ export const appRouter = router({
    * that principal's own scope; nothing here returns a proposal, a brief, a
    * commitment, a ledger payload or graph evidence.
    */
+  /**
+   * The web app's `/link/slack` page (ADR 0021). Open to an onboarding
+   * principal, since linking Slack is one of their onboarding steps; the
+   * service refuses a paused or offboarded one. The token is the one
+   * `/lance login` put in the link, and nothing else travels with it.
+   */
+  slackLink: router({
+    preview: signedInProcedure
+      .input(z.object({ token: SlackLinkTokenSchema }))
+      .query(({ ctx, input }) => ctx.server.slack.links.preview(input.token, ctx.caller.principal)),
+    confirm: signedInProcedure
+      .input(z.object({ token: SlackLinkTokenSchema }))
+      .mutation(({ ctx, input }) => ctx.server.slack.links.confirm(input.token, ctx.caller)),
+    current: signedInProcedure.query(({ ctx }) =>
+      ctx.server.slack.links.current(ctx.caller.principal),
+    ),
+  }),
   admin: router({
     principals: adminProcedure.query(({ ctx }) => ctx.server.admin.principals()),
     health: adminProcedure.query(({ ctx }) => ctx.server.admin.health()),

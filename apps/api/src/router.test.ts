@@ -544,10 +544,28 @@ describe('an onboarding principal', () => {
     await expect(onboarding().me()).resolves.toMatchObject({ status: 'onboarding' });
   });
 
+  it('reaches the Slack link procedures, since linking Slack is an onboarding step', async () => {
+    harness.links.confirmResult = {
+      status: 'linked',
+      slackUserId: 'U0NEW',
+      slackTeamId: 'T0VALLIANCE',
+      channel: { status: 'ready', channelId: 'G0NEW', name: 'lance-new', created: true },
+      warnings: [],
+    };
+    await expect(onboarding().slackLink.current()).resolves.toBeNull();
+    await expect(onboarding().slackLink.preview({ token: 'v1.token' })).resolves.toEqual({
+      status: 'invalid',
+    });
+    await expect(onboarding().slackLink.confirm({ token: 'v1.token' })).resolves.toMatchObject({
+      status: 'linked',
+    });
+    expect(harness.links.confirmed[0]?.caller.principal.status).toBe('onboarding');
+  });
+
   it('is refused by every other procedure with FORBIDDEN', async () => {
     const codes = await Promise.all(
       procedurePaths
-        .filter((path) => path !== 'me')
+        .filter((path) => path !== 'me' && !path.startsWith('slackLink.'))
         .map(async (path) => [path, await codeOf(callPath(onboarding(), path))] as const),
     );
     expect(codes.filter(([, code]) => code !== 'FORBIDDEN')).toEqual([]);

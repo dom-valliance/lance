@@ -1,9 +1,15 @@
-import { nowIso, SystemModeSchema, toLondon, UlidSchema } from '@lance/shared';
+import { isLanceAdmin, nowIso, SystemModeSchema, toLondon, UlidSchema } from '@lance/shared';
 import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { resumeAndRequeue, type ApiDeps, type ServerDeps } from '../deps.js';
+import { actorFromUpn } from '../actor.js';
+import { resumeAndRequeue, type ApiDeps, type PrincipalRef, type ServerDeps } from '../deps.js';
 import { renderStatus } from '../status.js';
-import { handleInteraction, InteractionUserSchema } from './interactions.js';
+import {
+  handleInteraction,
+  InteractionUserSchema,
+  loginPrompt,
+  type InteractionActor,
+} from './interactions.js';
 import { verifySlackSignature } from './verify.js';
 
 /**
@@ -17,6 +23,12 @@ import { verifySlackSignature } from './verify.js';
  * leaves `request.body` as the raw string. Fastify encapsulates content
  * type parsers per plugin scope, so the rest of the api keeps the default
  * JSON parser and no raw-body plugin is needed.
+ *
+ * Every signed request is also checked against the replay store (ADR
+ * 0021), and every command and interaction resolves its principal from the
+ * signed Slack user id through `slack_links`. A user with no link gets the
+ * login prompt and nothing else; `/lance login` is the one command they
+ * can run.
  */
 
 const EPHEMERAL = 'ephemeral' as const;
@@ -32,8 +44,11 @@ const SlashCommandSchema = z.object({
   command: z.string().min(1),
   text: z.string().default(''),
   user_id: z.string().min(1),
+  team_id: z.string().min(1).optional(),
   channel_id: z.string().min(1),
 });
+
+type SlashCommand = z.infer<typeof SlashCommandSchema>;
 
 const UrlVerificationSchema = z.object({
   type: z.literal('url_verification'),
@@ -80,7 +95,7 @@ const laterPhase = (command: string, nothing: string): string =>
   `The ${command} command arrives in a later phase. ${nothing}`;
 
 const usage = (): string =>
-  'Usage: /lance status | pause [reason | all | <job>] | resume [all | <job>] | jobs | mode [live|dry_run] | brief | task <text> | chase <commitment id>';
+  'Usage: /lance login | status | pause [reason | all | <job>] | resume [all | <job>] | jobs | mode [live|dry_run] | brief | task <text> | chase <commitment id>';
 
 /** A job slug as the registry writes them: lower case words joined by hyphens or underscores. */
 const JOB_SLUG = /^[a-z0-9]+(?:[-_][a-z0-9]+)+$/;
@@ -156,14 +171,13 @@ const handleJobToggle = async (
 };
 
 /**
- * Whether the resolved principal may pause or resume every principal.
- * Slack requests carry no Entra token, so the `Lance.Admin` role is not
- * known here; until package 5.4 brings the role to Slack, only the
- * principal whose UPN is `config.dom.email` may. tRPC's `admin.pauseAll`
- * checks the role itself.
+ * Whether the resolved principal may pause or resume every principal. A
+ * Slack request carries no Entra token, so the check reads the Lance roles
+ * recorded from the principal's last verified token, at their Slack link
+ * or their last sign-in. tRPC's `admin.pauseAll` checks the token itself.
  */
-const mayControlOrganisation = (deps: ApiDeps): boolean =>
-  deps.upn.toLowerCase() === deps.config.dom.email.toLowerCase();
+const mayControlOrganisation = (principal: PrincipalRef): boolean =>
+  isLanceAdmin(principal.lanceRoles);
 
 /** `/lance pause all` sets the global row (ADR 0015), which pauses every principal. */
 const handlePauseAll = async (deps: ApiDeps, displayName: string): Promise<SlackReply> => {
@@ -299,26 +313,98 @@ const handleResume = async (deps: ApiDeps, displayName: string): Promise<SlackRe
 };
 
 /**
- * The dependencies of the active principal a Slack user works for, or null
- * for a Slack user Lance does not know, which refuses them everything. The
- * user resolves through `principals.slack_user_id`, or through
- * `SLACK_ALLOWED_USER_ID` to the principal in DOM_EMAIL for a row recorded
- * before its Slack id was. Package 5.4 replaces both with `/lance login`.
+ * The principal a Slack user acts for (ADR 0021): the one their active
+ * link names, or, while Dom has not linked, the principal in DOM_EMAIL for
+ * the Slack id in `SLACK_ALLOWED_USER_ID`. Once that principal has a link
+ * the fallback is ignored, whoever sends it.
  */
-export const slackPrincipalDeps = async (
+export const resolveSlackUser = async (
+  server: Pick<ServerDeps, 'directory' | 'slack' | 'config'>,
+  slackUserId: string,
+  slackTeamId: string | null,
+): Promise<PrincipalRef | null> => {
+  const linked = await server.directory.bySlackUserId(slackUserId, slackTeamId);
+  if (linked !== null) return linked;
+  if (server.slack.fallbackUserId === null || server.slack.fallbackUserId !== slackUserId) {
+    return null;
+  }
+  const dom = await server.directory.byUpn(server.config.dom.email);
+  return dom !== null && dom.slackUserId === null ? dom : null;
+};
+
+/** A resolved Slack user and their dependencies, for an active principal only. */
+export interface SlackActor {
+  principal: PrincipalRef;
+  deps: ApiDeps;
+}
+
+export const slackActor = async (
   server: Pick<ServerDeps, 'directory' | 'slack' | 'config' | 'depsFor'>,
   slackUserId: string,
-): Promise<ApiDeps | null> => {
-  let principal = await server.directory.bySlackUserId(slackUserId);
-  if (
-    principal === null &&
-    server.slack.fallbackUserId !== null &&
-    server.slack.fallbackUserId === slackUserId
-  ) {
-    principal = await server.directory.byUpn(server.config.dom.email);
-  }
+  slackTeamId: string | null,
+): Promise<SlackActor | null> => {
+  const principal = await resolveSlackUser(server, slackUserId, slackTeamId);
   if (principal?.status !== 'active') return null;
-  return server.depsFor(principal);
+  return { principal, deps: server.depsFor(principal) };
+};
+
+/**
+ * The principal whose channel a card is in (ADR 0023). Before Dom links,
+ * `dom-claude-agent` is recorded on no principal and still carries his
+ * cards, so it maps to the principal in DOM_EMAIL.
+ */
+export const slackChannelOwner =
+  (server: Pick<ServerDeps, 'directory' | 'config' | 'depsFor'>) =>
+  async (channelId: string): Promise<{ principal: PrincipalRef; deps: ApiDeps } | null> => {
+    const owner =
+      (await server.directory.bySlackChannelId(channelId)) ??
+      (channelId === server.config.slack.channelId
+        ? await server.directory.byUpn(server.config.dom.email)
+        : null);
+    return owner === null ? null : { principal: owner, deps: server.depsFor(owner) };
+  };
+
+/**
+ * `/lance login` (ADR 0021): an ephemeral, single-use link to the web app,
+ * where the person signs in with Entra and confirms the binding. The
+ * request is recorded in the ledger of the principal the Slack user already
+ * acts for, or of the organisation's admin for someone not linked yet.
+ */
+const handleLogin = async (
+  server: ServerDeps,
+  command: SlashCommand,
+  resolved: PrincipalRef | null,
+): Promise<SlackReply> => {
+  const displayName = server.config.agentDisplayName;
+  if (command.team_id === undefined) {
+    return ephemeral(
+      'Slack did not say which workspace this came from, so no link was issued. Run /lance login again.',
+    );
+  }
+  const recordFor = resolved ?? (await server.directory.byUpn(server.config.dom.email));
+  if (recordFor === null) {
+    return ephemeral(
+      `${displayName} has no principal for ${server.config.dom.email} to record the request under, so no link was issued. Ask a Lance admin to check DOM_EMAIL.`,
+    );
+  }
+  const issued = await server.slack.links.issue({
+    slackUserId: command.user_id,
+    slackTeamId: command.team_id,
+    recordFor,
+    actor: resolved === null ? 'system:slack-login' : actorFromUpn(resolved.upn),
+  });
+  if (issued.status === 'unconfigured') {
+    return ephemeral(
+      `${displayName} cannot issue a link: PUBLIC_WEB_URL is not set on the api. Ask a Lance admin.`,
+    );
+  }
+  const opening =
+    resolved === null
+      ? `Link this Slack account to ${displayName}:`
+      : `This Slack account is linked to ${displayName} as ${resolved.upn}. To link it again, or to retry your channel:`;
+  return ephemeral(
+    `${opening} <${issued.url}|open the link page> and sign in with your Valliance Microsoft account. The link works once, for you alone, and expires at ${toLondon(issued.expiresAt)}.`,
+  );
 };
 
 export const slackRoutes =
@@ -343,11 +429,13 @@ export const slackRoutes =
     );
 
     fastify.addHook('preHandler', async (request, reply) => {
+      const timestamp = header(request, 'x-slack-request-timestamp');
+      const signature = header(request, 'x-slack-signature');
       const verification = verifySlackSignature({
         signingSecret: server.slack.signingSecret,
-        timestamp: header(request, 'x-slack-request-timestamp'),
+        timestamp,
         body: rawBody(request),
-        signature: header(request, 'x-slack-signature'),
+        signature,
         now: new Date(clock()),
       });
 
@@ -356,6 +444,15 @@ export const slackRoutes =
         await reply
           .code(401)
           .send({ error: `Slack signature verification failed: ${verification.reason}.` });
+        return;
+      }
+
+      if (!(await server.slack.replay.claim(signature, Number(timestamp)))) {
+        request.log.warn('Rejected a replayed Slack request');
+        await reply.code(401).send({
+          error:
+            'This Slack request was already received once inside the replay window, so the repeat was refused.',
+        });
       }
     });
 
@@ -366,67 +463,57 @@ export const slackRoutes =
       }
 
       const { verb, rest } = splitCommand(parsed.data.text);
-      const deps = await slackPrincipalDeps(server, parsed.data.user_id);
+      const resolved = await resolveSlackUser(
+        server,
+        parsed.data.user_id,
+        parsed.data.team_id ?? null,
+      );
+      if (verb === 'login') return handleLogin(server, parsed.data, resolved);
+      if (resolved === null) return ephemeral(loginPrompt(displayName));
+      if (resolved.status !== 'active') {
+        return ephemeral(
+          `Your ${displayName} account is ${resolved.status}, so nothing but /lance login works from Slack yet.`,
+        );
+      }
+      const principal = resolved;
+      const deps = server.depsFor(principal);
 
       switch (verb) {
         case 'status':
-          return deps !== null
-            ? handleStatus(deps)
-            : ephemeral(
-                `${displayName} status is available to Dom only; it includes cursor ages and spend.`,
-              );
+          return handleStatus(deps);
         case 'pause': {
-          if (deps === null) {
-            return ephemeral(
-              `You are not authorised to pause ${displayName} from Slack. Ask Dom, or use the kill switch in Settings.`,
-            );
-          }
           const target = pauseTarget(rest);
           if (target.kind === 'job') return handleJobToggle(deps, target.slug, false);
           if (target.kind === 'self') return handlePause(deps, target.reason, displayName);
-          return mayControlOrganisation(deps)
+          return mayControlOrganisation(principal)
             ? handlePauseAll(deps, displayName)
             : ephemeral(
-                `Only an admin may pause ${displayName} for everyone. /lance pause pauses you alone.`,
+                `Only a Lance admin may pause ${displayName} for everyone. /lance pause pauses you alone.`,
               );
         }
         case 'resume': {
-          if (deps === null) {
-            return ephemeral(
-              `You are not authorised to resume ${displayName} from Slack. Ask Dom, or use the kill switch in Settings.`,
-            );
-          }
           const target = pauseTarget(rest);
           if (target.kind === 'job') return handleJobToggle(deps, target.slug, true);
           if (target.kind === 'self') return handleResume(deps, displayName);
-          return mayControlOrganisation(deps)
+          return mayControlOrganisation(principal)
             ? handleResumeAll(deps, displayName)
             : ephemeral(
-                `Only an admin may resume ${displayName} for everyone. /lance resume resumes you alone.`,
+                `Only a Lance admin may resume ${displayName} for everyone. /lance resume resumes you alone.`,
               );
         }
         case 'jobs':
-          return deps !== null
-            ? handleJobs(deps, displayName)
-            : ephemeral(`Only Dom may list the jobs of ${displayName} from Slack.`);
+          return handleJobs(deps, displayName);
         case 'mode':
-          return deps !== null
-            ? handleMode(deps, rest, displayName)
-            : ephemeral(`Only Dom may change or read the mode of ${displayName} from Slack.`);
+          return handleMode(deps, rest, displayName);
         case 'brief':
-          if (deps === null) {
-            return ephemeral(`Only Dom may ask ${displayName} for a brief from Slack.`);
-          }
           await deps.enqueueBrief();
           return ephemeral(
-            `${displayName} is regenerating the morning brief; it will post in the channel shortly.`,
+            `${displayName} is regenerating the morning brief; it will post in your channel shortly.`,
           );
         case 'task':
           return ephemeral(laterPhase('task', 'No task has been created.'));
         case 'chase':
-          return deps !== null
-            ? handleChase(deps, rest, displayName)
-            : ephemeral(`Only Dom may ask ${displayName} to chase a commitment from Slack.`);
+          return handleChase(deps, rest, displayName);
         default:
           return ephemeral(usage());
       }
@@ -466,8 +553,17 @@ export const slackRoutes =
       );
 
       const user = InteractionUserSchema.safeParse(payload);
-      const deps = user.success ? await slackPrincipalDeps(server, user.data.user.id) : null;
-      const outcome = await handleInteraction(deps, payload, displayName);
+      let actor: InteractionActor | null = null;
+      if (user.success) {
+        const slackUserId = user.data.user.id;
+        const teamId = user.data.team?.id ?? user.data.user.team_id ?? null;
+        const resolved = await slackActor(server, slackUserId, teamId);
+        actor =
+          resolved === null
+            ? null
+            : { ...resolved, slackUserId, channelOwner: slackChannelOwner(server) };
+      }
+      const outcome = await handleInteraction(actor, payload, displayName);
       // Slack reads an empty 200 as "accepted, nothing to show"; the card
       // itself has already been redrawn through chat.update.
       return outcome.kind === 'empty' ? reply.code(200).send('') : reply.send(outcome.body);

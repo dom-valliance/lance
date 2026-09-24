@@ -1,4 +1,8 @@
-import { createSlackSurface, type SlackSurface } from '@lance/connectors';
+import {
+  createSlackChannelProvisioner,
+  createSlackSurface,
+  type SlackSurface,
+} from '@lance/connectors';
 import { KeyVaultTokenStore } from '@lance/connectors/graph';
 import { createDb, scopedDb, systemState, SYSTEM_STATE_ID, type Db } from '@lance/db';
 import {
@@ -9,10 +13,11 @@ import {
   pendingProposalSummary,
   LedgerReader,
   LedgerWriter,
+  raiseAlert,
   SystemControl,
 } from '@lance/ledger';
 import { OntologyRepository } from '@lance/ontology';
-import { getConfig, readSecret, type Config } from '@lance/shared';
+import { deliveryChannelFor, getConfig, readSecret, type Config } from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { pathToFileURL } from 'node:url';
 import { eq } from 'drizzle-orm';
@@ -32,12 +37,14 @@ import type {
   SlackDeps,
   TokenVerifier,
 } from './deps.js';
-import { createFeed } from './events.js';
+import { createFeed, type Feed } from './events.js';
 import { createJobsService } from './jobs/service.js';
 import { createExecuteQueue, type ExecuteQueue } from './executeQueue.js';
 import { createPrincipalDirectory } from './principals/directory.js';
 import { applyDecision, type DecideDeps } from './proposals/decide.js';
 import { buildServer } from './server.js';
+import { createSlackLinks, type ChannelProvisionerLike } from './slack/links.js';
+import { createReplayGuard, type ReplayGuardLike } from './slack/replay.js';
 import { createDbStatusSource } from './status.js';
 
 /**
@@ -55,8 +62,14 @@ export interface PrincipalRuntimeOptions {
   db: Db;
   /** The principal `db` is scoped to; the ontology reads through the same scope. */
   principal: PrincipalKey;
-  /** Null, the default, when no bot token is configured: cards are skipped. */
+  /**
+   * Pinned to the principal's own channel (ADR 0023). Null, the default,
+   * when no bot token is configured or the principal has no channel yet:
+   * card redraws and modals are then skipped and say so.
+   */
   slackSurface?: SlackSurface | null;
+  /** The principal's live feed; kept across rebuilds so connected clients stay subscribed. */
+  feed?: Feed;
   /** Defaults to pg-boss over the same pool; passed in so `main` can stop it. */
   executeQueue?: ExecuteQueue;
 }
@@ -68,7 +81,7 @@ export interface PrincipalRuntimeOptions {
  */
 export const createApiDeps = (options: PrincipalRuntimeOptions): ApiDeps => {
   const control = new SystemControl(options.db);
-  const feed = createFeed();
+  const feed = options.feed ?? createFeed();
   const executeQueue = options.executeQueue ?? createExecuteQueue(options.db);
   const slackSurface = options.slackSurface ?? null;
 
@@ -106,6 +119,7 @@ export const createApiDeps = (options: PrincipalRuntimeOptions): ApiDeps => {
     tasks: createTaskStore(options.db),
     briefs: createBriefStore(options.db),
     alerts: createAlertStore(options.db),
+    raiseAlert: (input) => raiseAlert(options.db, input),
     agents: createAgentsStore(options.db),
     ontology: new OntologyRepository(
       options.db,
@@ -141,16 +155,24 @@ export const createApiDeps = (options: PrincipalRuntimeOptions): ApiDeps => {
  * The per-principal dependency cache: `build` runs once per principal, and
  * every later request for the same principal gets the same object, so its
  * live feed is shared by that principal's connections and nobody else's.
+ * A principal whose Slack channel changed, which happens once, at their
+ * first link, is built again so their surface posts to the new channel;
+ * `build` is handed the feed of the earlier build, so connected clients
+ * keep receiving.
  */
 export const createDepsCache = (
-  build: (principal: PrincipalKey) => ApiDeps,
+  build: (principal: PrincipalKey, feed: Feed | undefined) => ApiDeps,
 ): ((principal: PrincipalKey) => ApiDeps) => {
-  const cache = new Map<string, ApiDeps>();
+  const cache = new Map<string, { channel: string | null; deps: ApiDeps; feed: Feed }>();
   return (principal) => {
     const cached = cache.get(principal.id);
-    if (cached !== undefined) return cached;
-    const built = build(principal);
-    cache.set(principal.id, built);
+    const channel = principal.slackChannelId;
+    if (cached !== undefined && (channel === undefined || cached.channel === channel)) {
+      return cached.deps;
+    }
+    const feed = cached?.feed ?? createFeed();
+    const built = build(principal, feed);
+    cache.set(principal.id, { channel: channel ?? null, deps: built, feed });
     return built;
   };
 };
@@ -160,12 +182,21 @@ export interface ServerRuntimeOptions {
   /** Unscoped. Each principal's stores get a handle scoped from it. */
   root: Db;
   auth: TokenVerifier;
-  slack: SlackDeps;
+  slack: Pick<SlackDeps, 'signingSecret' | 'fallbackUserId'>;
   ingestSecret: string;
   /** Omitted by a process that does not run the Graph consent flow. */
   graph?: GraphConsentDeps;
-  /** Null, the default, when no bot token is configured: cards are skipped. */
-  slackSurface?: SlackSurface | null;
+  /**
+   * Builds the surface for one channel. Omitted, the default, when no bot
+   * token is configured: cards are skipped and channels are not created.
+   */
+  slackSurfaceFor?: (channelId: string) => SlackSurface;
+  /** Creates a principal's private channel on their first link (ADR 0023). */
+  slackProvisioner?: ChannelProvisionerLike | null;
+  /** `PUBLIC_WEB_URL`, where `/lance login` links point. Null leaves the command unconfigured. */
+  webUrl?: string | null;
+  /** Defaults to the Postgres nonce store over `root`. */
+  replay?: ReplayGuardLike;
   /**
    * One queue for every principal: pg-boss's tables carry no principal, so
    * every job payload names the principal it is for (ADR 0025).
@@ -176,19 +207,28 @@ export interface ServerRuntimeOptions {
 /** Everything `buildServer` needs, over the real database. */
 export const createServerDeps = (options: ServerRuntimeOptions): ServerDeps => {
   const executeQueue = options.executeQueue ?? createExecuteQueue(options.root);
-  const slackSurface = options.slackSurface ?? null;
   const directory = createPrincipalDirectory(options.root);
+  const surfaceFor = (principal: PrincipalKey): SlackSurface | null => {
+    const channel = deliveryChannelFor(
+      { upn: principal.upn, slackChannelId: principal.slackChannelId ?? null },
+      options.config,
+    );
+    return channel === null || options.slackSurfaceFor === undefined
+      ? null
+      : options.slackSurfaceFor(channel);
+  };
   return {
     config: options.config,
     auth: options.auth,
     directory,
-    depsFor: createDepsCache((principal) =>
+    depsFor: createDepsCache((principal, feed) =>
       createApiDeps({
         config: options.config,
         db: scopedDb(options.root, { principalId: principal.id }),
         principal,
         executeQueue,
-        slackSurface,
+        slackSurface: surfaceFor(principal),
+        ...(feed === undefined ? {} : { feed }),
       }),
     ),
     admin: createAdminStore(options.root, directory, {
@@ -206,21 +246,31 @@ export const createServerDeps = (options: ServerRuntimeOptions): ServerDeps => {
       }
       return row;
     },
-    slack: options.slack,
+    slack: {
+      ...options.slack,
+      links: createSlackLinks({
+        root: options.root,
+        config: options.config,
+        signingSecret: options.slack.signingSecret,
+        webUrl: options.webUrl ?? null,
+        provisioner: options.slackProvisioner ?? null,
+      }),
+      replay: options.replay ?? createReplayGuard(options.root),
+    },
     ingestSecret: options.ingestSecret,
     ...(options.graph === undefined ? {} : { graph: options.graph }),
   };
 };
 
 /**
- * Lance's own Slack channel (ADR 0012), or null when no bot token is set.
- * A local api then still answers every route; only the card update and the
- * modals are unavailable, and both say so.
+ * The bot token, or null when none is set. A local api then still answers
+ * every route; only the card update, the modals and channel creation are
+ * unavailable, and each says so.
  */
-const slackSurfaceFromEnv = (channelId: string): SlackSurface | null => {
+const slackTokenFromEnv = (): string | null => {
   const token = process.env['SLACK_BOT_TOKEN'];
   if (token === undefined || token === '') return null;
-  return createSlackSurface({ token: readSecret('SLACK_BOT_TOKEN'), channelId });
+  return readSecret('SLACK_BOT_TOKEN');
 };
 
 /**
@@ -267,11 +317,19 @@ export const main = async (): Promise<void> => {
   const root = createDb();
   const executeQueue = createExecuteQueue(root);
 
+  const slackToken = slackTokenFromEnv();
   const deps = createServerDeps({
     config,
     root,
     executeQueue,
-    slackSurface: slackSurfaceFromEnv(config.slack.channelId),
+    ...(slackToken === null
+      ? {}
+      : {
+          slackSurfaceFor: (channelId: string) =>
+            createSlackSurface({ token: slackToken, channelId }),
+          slackProvisioner: createSlackChannelProvisioner({ token: slackToken }),
+        }),
+    webUrl: nonEmpty(process.env['PUBLIC_WEB_URL']),
     auth: createEntraVerifier({ tenantId, clientId }),
     graph: {
       tenantId,
@@ -282,7 +340,7 @@ export const main = async (): Promise<void> => {
     },
     slack: {
       signingSecret: readSecret('SLACK_SIGNING_SECRET'),
-      // Covers a principal row recorded before its Slack id was known.
+      // Dom's Slack id until he has linked through /lance login (ADR 0021).
       fallbackUserId: nonEmpty(process.env['SLACK_ALLOWED_USER_ID']),
     },
     ingestSecret: readSecret('AGENT_LOG_INGEST_SECRET'),

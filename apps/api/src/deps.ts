@@ -1,6 +1,8 @@
 import type { SlackSurface } from '@lance/connectors';
 import type {
   AppendResult,
+  RaiseAlertInput,
+  RaiseAlertResult,
   DecisionResult,
   CostCeiling,
   InterruptionBudget,
@@ -28,6 +30,7 @@ import type { BriefStoreLike } from './briefs/store.js';
 import type { CommitmentStoreLike } from './commitments/store.js';
 import type { FeedEvent, FeedListener } from './events.js';
 import type { JobsServiceLike } from './jobs/service.js';
+import type { ReplayGuardLike } from './slack/replay.js';
 import type { DecisionRequest } from './proposals/decide.js';
 import type { StatusSource } from './status.js';
 import type { TaskStoreLike } from './tasks/store.js';
@@ -121,12 +124,27 @@ export interface PrincipalRef {
   id: string;
   upn: string;
   status: PrincipalStatus;
+  /** The Slack user of the principal's active link (ADR 0021); null until they link. */
   slackUserId: string | null;
+  /** The principal's private channel (ADR 0023); null until their first link. */
+  slackChannelId: string | null;
+  /**
+   * The Lance roles their last verified Entra token carried, recorded at
+   * each sign-in and at the Slack link. What a Slack request, which carries
+   * no token, is gated on.
+   */
+  lanceRoles: LanceRole[];
   createdAt: Date;
 }
 
-/** Enough of a principal to build its dependencies: the scope and the ledger actor. */
-export type PrincipalKey = Pick<PrincipalRef, 'id' | 'upn'>;
+/**
+ * Enough of a principal to build its dependencies: the scope, the ledger
+ * actor and, when the caller has it, the channel its Slack surface posts
+ * to. A key without the channel reuses whatever was built for the
+ * principal before; one with it rebuilds when the channel has changed.
+ */
+export type PrincipalKey = Pick<PrincipalRef, 'id' | 'upn'> &
+  Partial<Pick<PrincipalRef, 'slackChannelId'>>;
 
 /** The identity behind a request, once `requireEntra` has resolved it. */
 export interface Caller {
@@ -142,7 +160,14 @@ export interface Caller {
  */
 export interface PrincipalDirectoryLike {
   signIn(identity: VerifiedIdentity): Promise<PrincipalRef>;
-  bySlackUserId(slackUserId: string): Promise<PrincipalRef | null>;
+  /**
+   * The principal a Slack user acts for, through their active row in
+   * `slack_links` (ADR 0021), or null when they have not linked. A team id,
+   * when the request carries one, must match the link's.
+   */
+  bySlackUserId(slackUserId: string, slackTeamId?: string | null): Promise<PrincipalRef | null>;
+  /** The principal whose private channel this is (ADR 0023), or null. */
+  bySlackChannelId(channelId: string): Promise<PrincipalRef | null>;
   byUpn(upn: string): Promise<PrincipalRef | null>;
   list(): Promise<PrincipalRef[]>;
 }
@@ -150,12 +175,91 @@ export interface PrincipalDirectoryLike {
 export interface SlackDeps {
   signingSecret: string;
   /**
-   * `SLACK_ALLOWED_USER_ID`, for a principal row recorded before its Slack
-   * id was. A Slack user with this id acts for the principal whose UPN is
-   * `config.dom.email`. Null when unset. Retired by package 5.4, where
-   * `/lance login` proves each binding.
+   * `SLACK_ALLOWED_USER_ID`: until Dom has linked through `/lance login`, a
+   * Slack user with this id acts for the principal whose UPN is
+   * `config.dom.email`. Ignored once that principal has a link, and retired
+   * once Dom has linked (docs/runbooks/slack-app-setup.md). Null when unset.
    */
   fallbackUserId: string | null;
+  /** `/lance login` and the web route it links to (ADR 0021). */
+  links: SlackLinksLike;
+  /** Refuses a signed request seen before inside the replay window. */
+  replay: ReplayGuardLike;
+}
+
+/** A `/lance login` link, to answer in Slack. */
+export type SlackLinkIssue =
+  | { status: 'issued'; url: string; expiresAt: string }
+  /** `PUBLIC_WEB_URL` is not set on the api, so there is nowhere to link to. */
+  | { status: 'unconfigured' };
+
+/** Why a link cannot be used. The web page words each one itself. */
+export type SlackLinkRefusal =
+  /** Malformed, tampered with, or naming no nonce Lance issued. */
+  | 'invalid'
+  | 'expired'
+  | 'used'
+  /** The Slack user is linked, or was, to another principal. */
+  | 'taken'
+  /** The signed-in principal is paused or offboarded. */
+  | 'inactive';
+
+/** What the link page shows before the person confirms. */
+export type SlackLinkPreview =
+  | {
+      status: 'ready';
+      slackUserId: string;
+      slackTeamId: string;
+      /** From Slack's profile when the bot token can read it; null otherwise. */
+      slackName: string | null;
+      expiresAt: string;
+      /** True when this Slack user is already linked to the signed-in principal. */
+      alreadyLinked: boolean;
+    }
+  | { status: SlackLinkRefusal };
+
+/** The principal's private channel after a link. */
+export type SlackChannelOutcome =
+  | { status: 'ready'; channelId: string; name: string | null; created: boolean }
+  /** No bot token on the api, so no channel could be made. The link stands. */
+  | { status: 'unavailable'; reason: string }
+  | { status: 'failed'; reason: string };
+
+export type SlackLinkOutcome =
+  | {
+      status: 'linked';
+      slackUserId: string;
+      slackTeamId: string;
+      channel: SlackChannelOutcome;
+      /** Things the person should know that did not stop the link, such as a directory mismatch. */
+      warnings: string[];
+    }
+  | { status: SlackLinkRefusal };
+
+/** The signed-in principal's link as it stands, for the page after a reload. */
+export interface SlackLinkState {
+  slackUserId: string;
+  slackTeamId: string;
+  linkedAt: string;
+  channelId: string | null;
+}
+
+export interface SlackLinksLike {
+  /**
+   * Stores a nonce and returns the link. `recordFor` is the principal whose
+   * ledger records the request: the one the Slack user already acts for,
+   * or the organisation's admin for a user not linked yet.
+   */
+  issue(input: {
+    slackUserId: string;
+    slackTeamId: string;
+    recordFor: PrincipalKey;
+    actor: string;
+  }): Promise<SlackLinkIssue>;
+  preview(token: string, principal: PrincipalRef): Promise<SlackLinkPreview>;
+  /** Consumes the token and binds its Slack user to the caller's principal. */
+  confirm(token: string, caller: Caller): Promise<SlackLinkOutcome>;
+  current(principal: PrincipalRef): Promise<SlackLinkState | null>;
 }
 
 /**
@@ -189,11 +293,7 @@ export interface ApiDeps {
   principalId: string;
   /** The ledger actor for what this principal does by hand, `user:<name>`. */
   actor: string;
-  /**
-   * The principal's UPN. Slack requests carry no Entra roles, so until the
-   * roles reach Slack (package 5.4) `/lance pause all` compares this with
-   * `config.dom.email`; tRPC checks the `Lance.Admin` role instead.
-   */
+  /** The principal's UPN. */
   upn: string;
   control: SystemControlLike;
   ledger: LedgerReaderLike;
@@ -215,6 +315,8 @@ export interface ApiDeps {
   briefs: BriefStoreLike;
   /** Reads and the three status writes behind the Alerts page. */
   alerts: AlertStoreLike;
+  /** Raises an alert in this principal's scope, as the worker does (spec 11). */
+  raiseAlert: (input: Omit<RaiseAlertInput, 'now'>) => Promise<RaiseAlertResult>;
   /** Cursors, agent runs and pushes behind the Agents page. */
   agents: AgentsStoreLike;
   /** Person nodes, for the owner and counterparty of a commitment. */
@@ -230,9 +332,10 @@ export interface ApiDeps {
   jobs: JobsServiceLike;
   status: StatusSource;
   /**
-   * How Lance speaks in its own channel (ADR 0012). Null when
-   * `SLACK_BOT_TOKEN` is absent, so a local run answers interactions
-   * without a token instead of failing at construction.
+   * How Lance speaks in this principal's channel (ADR 0012, ADR 0023). Null
+   * when `SLACK_BOT_TOKEN` is absent, so a local run answers interactions
+   * without a token instead of failing at construction, and null for a
+   * principal with no channel yet.
    */
   slackSurface: SlackSurface | null;
   /**

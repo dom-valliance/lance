@@ -3,6 +3,8 @@ import type { Alert, Commitment } from '@lance/db';
 import type {
   DecisionResult,
   CostCeiling,
+  RaiseAlertInput,
+  RaiseAlertResult,
   InterruptionBudget,
   LedgerCountQuery,
   LedgerEventRow,
@@ -27,7 +29,13 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWTVerifyG
 import type {
   AdminStoreLike,
   ApiDeps,
+  Caller,
   GraphConsentDeps,
+  SlackLinkIssue,
+  SlackLinkOutcome,
+  SlackLinkPreview,
+  SlackLinksLike,
+  SlackLinkState,
   LedgerReaderLike,
   PrincipalDirectoryLike,
   PrincipalHealth,
@@ -75,6 +83,9 @@ export const TEST_UPN = 'dom@valliance.ai';
 export const TEST_SIGNING_SECRET = 'slack-signing-secret-for-tests';
 export const TEST_INGEST_SECRET = 'ingest-secret-for-tests';
 export const TEST_SLACK_USER_ID = 'U0DOM';
+export const TEST_SLACK_TEAM_ID = 'T0VALLIANCE';
+/** Dom's channel, `dom-claude-agent`, the config default. */
+export const TEST_CHANNEL_ID = 'C0BU7P278N5';
 /** The seed principal's id, `SEED_PRINCIPAL_ID` in `@lance/db`. */
 export const TEST_PRINCIPAL_ID = '01K5S9V6QW3SWCCPVB0N0E300H';
 export const TEST_OID = '19fb2afd-6814-4600-8697-eb798ec5691f';
@@ -84,6 +95,8 @@ export const fakePrincipal = (overrides: Partial<PrincipalRef> = {}): PrincipalR
   upn: TEST_UPN,
   status: 'active',
   slackUserId: TEST_SLACK_USER_ID,
+  slackChannelId: TEST_CHANNEL_ID,
+  lanceRoles: ['Lance.User', 'Lance.Admin'],
   createdAt: new Date('2026-09-20T09:00:00.000Z'),
   ...overrides,
 });
@@ -796,13 +809,21 @@ export class FakeDirectory implements PrincipalDirectoryLike {
       upn: identity.upn,
       status: 'onboarding',
       slackUserId: null,
+      slackChannelId: null,
+      lanceRoles: identity.roles,
     });
     this.principals.set(identity.oid, created);
     return Promise.resolve(created);
   }
 
+  /** A principal's `slackUserId` stands for their active link, as the database keeps it. */
   bySlackUserId(slackUserId: string): Promise<PrincipalRef | null> {
     const found = [...this.principals.values()].find((p) => p.slackUserId === slackUserId);
+    return Promise.resolve(found ?? null);
+  }
+
+  bySlackChannelId(channelId: string): Promise<PrincipalRef | null> {
+    const found = [...this.principals.values()].find((p) => p.slackChannelId === channelId);
     return Promise.resolve(found ?? null);
   }
 
@@ -815,6 +836,49 @@ export class FakeDirectory implements PrincipalDirectoryLike {
 
   list(): Promise<PrincipalRef[]> {
     return Promise.resolve([...this.principals.values()]);
+  }
+}
+
+/** Every link request and decision recorded; outcomes set by the test. */
+export class FakeSlackLinks implements SlackLinksLike {
+  readonly issued: Parameters<SlackLinksLike['issue']>[0][] = [];
+  readonly confirmed: { token: string; caller: Caller }[] = [];
+  issueResult: SlackLinkIssue = {
+    status: 'issued',
+    url: 'https://web.example.test/link/slack?state=v1.token',
+    expiresAt: '2026-09-24T10:05:00.000Z',
+  };
+  previewResult: SlackLinkPreview = { status: 'invalid' };
+  confirmResult: SlackLinkOutcome = { status: 'invalid' };
+  currentResult: SlackLinkState | null = null;
+
+  issue(input: Parameters<SlackLinksLike['issue']>[0]): Promise<SlackLinkIssue> {
+    this.issued.push(input);
+    return Promise.resolve(this.issueResult);
+  }
+
+  preview(): Promise<SlackLinkPreview> {
+    return Promise.resolve(this.previewResult);
+  }
+
+  confirm(token: string, caller: Caller): Promise<SlackLinkOutcome> {
+    this.confirmed.push({ token, caller });
+    return Promise.resolve(this.confirmResult);
+  }
+
+  current(): Promise<SlackLinkState | null> {
+    return Promise.resolve(this.currentResult);
+  }
+}
+
+/** The replay rule in memory: a signature is accepted once. */
+export class FakeReplayGuard {
+  readonly seen = new Set<string>();
+
+  claim(signature: string): Promise<boolean> {
+    if (this.seen.has(signature)) return Promise.resolve(false);
+    this.seen.add(signature);
+    return Promise.resolve(true);
   }
 }
 
@@ -934,6 +998,10 @@ export interface FakeDeps {
   /** One entry per `/lance brief` request. */
   briefRequests: number[];
   jobs: FakeJobs;
+  /** Alerts raised through `deps.raiseAlert`, in order. */
+  raised: Omit<RaiseAlertInput, 'now'>[];
+  links: FakeSlackLinks;
+  replay: FakeReplayGuard;
 }
 
 export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
@@ -958,6 +1026,9 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
   const ontology = new FakeOntology();
   const slackFailures: string[] = [];
   const jobs = new FakeJobs();
+  const raised: Omit<RaiseAlertInput, 'now'>[] = [];
+  const links = new FakeSlackLinks();
+  const replay = new FakeReplayGuard();
 
   const config = overrides.config ?? testConfig();
   const principal =
@@ -987,6 +1058,16 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     tasks,
     briefs,
     alerts,
+    raiseAlert: (input): Promise<RaiseAlertResult> => {
+      raised.push(input);
+      return Promise.resolve({
+        alertId: newUlid(),
+        count: 1,
+        created: true,
+        reopened: false,
+        eventId: newUlid(),
+      });
+    },
     agents,
     ontology,
     enqueueBrief: () => {
@@ -1020,7 +1101,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
       const state = await deps.control.read();
       return { paused: state.paused, mode: state.mode };
     },
-    slack: { signingSecret: TEST_SIGNING_SECRET, fallbackUserId: null },
+    slack: { signingSecret: TEST_SIGNING_SECRET, fallbackUserId: null, links, replay },
     ingestSecret: TEST_INGEST_SECRET,
     ...(overrides.graph === undefined ? {} : { graph: overrides.graph }),
     ...(overrides.now === undefined ? {} : { now: overrides.now }),
@@ -1050,6 +1131,9 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     chased,
     briefRequests,
     jobs,
+    raised,
+    links,
+    replay,
   };
 };
 

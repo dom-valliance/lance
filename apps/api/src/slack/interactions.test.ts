@@ -1,11 +1,17 @@
 import { ACTION, CALLBACK } from '@lance/connectors';
 import { ProposalTransitionError } from '@lance/ledger';
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { ApiDeps, ServerDeps } from '../deps.js';
 import {
   fakeAlert,
   fakeDeps,
+  fakePrincipal,
   fakeProposal,
+  FakeDirectory,
   TEST_ALERT_ID,
+  TEST_CHANNEL_ID,
+  TEST_OID,
+  TEST_PRINCIPAL_ID,
   TEST_SLACK_USER_ID,
   type FakeDeps,
 } from '../test-fakes.js';
@@ -16,22 +22,31 @@ import {
   SNOOZE_HOURS,
   type InteractionOutcome,
 } from './interactions.js';
-import { slackPrincipalDeps } from './routes.js';
+import { slackActor, slackChannelOwner } from './routes.js';
 
 let harness: FakeDeps;
 
 /** Resolves the pressing Slack user as the route does, then hands over. */
-const interact = async (h: FakeDeps, payload: unknown): Promise<InteractionOutcome> => {
+const interactWith = async (server: ServerDeps, payload: unknown): Promise<InteractionOutcome> => {
   const user = InteractionUserSchema.safeParse(payload);
-  const deps = user.success ? await slackPrincipalDeps(h.server, user.data.user.id) : null;
-  return handleInteraction(deps, payload, h.server.config.agentDisplayName);
+  const resolved = user.success ? await slackActor(server, user.data.user.id, null) : null;
+  const actor =
+    resolved === null || !user.success
+      ? null
+      : { ...resolved, slackUserId: user.data.user.id, channelOwner: slackChannelOwner(server) };
+  return handleInteraction(actor, payload, server.config.agentDisplayName);
 };
+
+const interact = (h: FakeDeps, payload: unknown): Promise<InteractionOutcome> =>
+  interactWith(h.server, payload);
 const PROPOSAL_ID = '01K5S9V6QW3SWCCPVB0N0E301A';
 
 const blockAction = (actionId: string, overrides: Record<string, unknown> = {}): unknown => ({
   type: 'block_actions',
   user: { id: TEST_SLACK_USER_ID },
   trigger_id: 'T-1',
+  channel: { id: TEST_CHANNEL_ID },
+  container: { channel_id: TEST_CHANNEL_ID, message_ts: '1758351600.000100' },
   actions: [{ action_id: actionId, value: PROPOSAL_ID }],
   ...overrides,
 });
@@ -164,25 +179,135 @@ describe('an alert card button', () => {
   });
 });
 
-describe('a Slack user Lance does not know', () => {
-  it('is refused and decides nothing', async () => {
+describe('a Slack user with no link', () => {
+  it('gets the login prompt and nothing else', async () => {
     const outcome = await interact(harness, {
       ...(blockAction(ACTION.proposalApprove) as object),
       user: { id: 'U0STRANGER' },
     });
 
-    expect(text(outcome)).toContain('not authorised');
+    expect(outcome).toEqual({
+      kind: 'json',
+      body: {
+        response_type: 'ephemeral',
+        text: 'This Slack account is not linked to Lance. Run /lance login to link it; nothing else works until you do.',
+      },
+    });
     expect(harness.decider.requests).toHaveLength(0);
     expect(harness.slack.views).toHaveLength(0);
+    expect(harness.raised).toHaveLength(0);
   });
 
-  it('is refused when the principal has no Slack user id recorded', async () => {
+  it('gets the login prompt when the principal has no link recorded', async () => {
     const unset = fakeDeps({ allowedSlackUserId: null });
 
     const outcome = await interact(unset, blockAction(ACTION.proposalApprove));
 
-    expect(text(outcome)).toContain('not authorised');
+    expect(text(outcome)).toContain('/lance login');
     expect(unset.decider.requests).toHaveLength(0);
+  });
+});
+
+describe('a button pressed by another linked principal (ADR 0023)', () => {
+  const TAREK_ID = '01K5S9V6QW3SWCCPVB0N0E3T01';
+  const TAREK_SLACK = 'U0TAREK';
+  const TAREK_CHANNEL = 'G0TAREK';
+
+  let dom: FakeDeps;
+  let tarek: FakeDeps;
+  let server: ServerDeps;
+
+  beforeEach(() => {
+    const domPrincipal = fakePrincipal();
+    const tarekPrincipal = fakePrincipal({
+      id: TAREK_ID,
+      upn: 'tarek@valliance.ai',
+      slackUserId: TAREK_SLACK,
+      slackChannelId: TAREK_CHANNEL,
+      lanceRoles: ['Lance.User'],
+    });
+    const directory = new FakeDirectory([
+      [TEST_OID, domPrincipal],
+      ['tarek-oid', tarekPrincipal],
+    ]);
+    dom = fakeDeps({ principal: domPrincipal, directory });
+    tarek = fakeDeps({ principal: tarekPrincipal, directory });
+    tarek.proposals.rows = [fakeProposal({ id: PROPOSAL_ID })];
+    const byId: Record<string, ApiDeps> = {
+      [TEST_PRINCIPAL_ID]: dom.deps,
+      [TAREK_ID]: { ...tarek.deps, principalId: TAREK_ID, actor: 'user:tarek' },
+    };
+    server = {
+      ...dom.server,
+      depsFor: (principal) => {
+        const deps = byId[principal.id];
+        if (deps === undefined) throw new Error(`No fake deps for ${principal.id}`);
+        return deps;
+      },
+    };
+  });
+
+  it("refuses Dom's press on Tarek's proposal and alerts Tarek, deciding nothing", async () => {
+    const outcome = await interactWith(
+      server,
+      blockAction(ACTION.proposalApprove, {
+        channel: { id: TAREK_CHANNEL },
+        container: { channel_id: TAREK_CHANNEL, message_ts: '1.2' },
+      }),
+    );
+
+    expect(text(outcome)).toContain('belongs to another Lance user');
+    expect(dom.decider.requests).toHaveLength(0);
+    expect(tarek.decider.requests).toHaveLength(0);
+    expect(dom.raised).toHaveLength(0);
+    expect(tarek.raised).toEqual([
+      expect.objectContaining({
+        kind: 'foreign_decision_attempt',
+        severity: 'P1',
+        dedupeKey: `foreign_decision:${TEST_SLACK_USER_ID}:${PROPOSAL_ID}`,
+      }),
+    ]);
+    expect(tarek.raised[0]?.provenance?.[0]).toMatchObject({
+      system: 'slack',
+      recordId: `${TAREK_CHANNEL}:1.2`,
+    });
+  });
+
+  it("refuses Tarek's press on Dom's proposal and alerts Dom, deciding nothing", async () => {
+    const outcome = await interactWith(
+      server,
+      blockAction(ACTION.proposalReject, { user: { id: TAREK_SLACK } }),
+    );
+
+    expect(text(outcome)).toContain('belongs to another Lance user');
+    expect(dom.decider.requests).toHaveLength(0);
+    expect(tarek.decider.requests).toHaveLength(0);
+    expect(dom.slack.views).toHaveLength(0);
+    expect(tarek.raised).toHaveLength(0);
+    expect(dom.raised).toEqual([
+      expect.objectContaining({
+        kind: 'foreign_decision_attempt',
+        dedupeKey: `foreign_decision:${TAREK_SLACK}:${PROPOSAL_ID}`,
+      }),
+    ]);
+  });
+
+  it('lets Tarek decide a card in his own channel, in his own scope', async () => {
+    const outcome = await interactWith(
+      server,
+      blockAction(ACTION.proposalApprove, {
+        user: { id: TAREK_SLACK },
+        channel: { id: TAREK_CHANNEL },
+        container: { channel_id: TAREK_CHANNEL, message_ts: '1.2' },
+      }),
+    );
+
+    expect(outcome).toEqual({ kind: 'empty' });
+    expect(tarek.decider.requests).toEqual([
+      { proposalId: PROPOSAL_ID, actor: 'user:tarek', action: 'approve' },
+    ]);
+    expect(dom.decider.requests).toHaveLength(0);
+    expect([...dom.raised, ...tarek.raised]).toHaveLength(0);
   });
 });
 

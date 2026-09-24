@@ -9,10 +9,11 @@ import {
   type SubmittedView,
 } from '@lance/connectors';
 import { ProposalTransitionError } from '@lance/ledger';
+import { hashRecord, nowIso } from '@lance/shared';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { ackAlert, muteAlert } from '../alerts/service.js';
-import type { ApiDeps } from '../deps.js';
+import type { ApiDeps, PrincipalRef } from '../deps.js';
 
 /**
  * Slack's interactivity payloads (spec 9.1): the four buttons on a proposal
@@ -25,6 +26,12 @@ import type { ApiDeps } from '../deps.js';
  * Slack gives an interaction handler three seconds. Approve and Snooze do
  * one decision and one card update, Edit and Reject open a modal, so none
  * of them needs `response_url`.
+ *
+ * A button is honoured only for the principal whose channel the card sits
+ * in (ADR 0023). A press by anyone else is refused and raises a P1
+ * `foreign_decision_attempt` in the card owner's scope. Whatever passes
+ * that check still decides through the presser's own scope, where row-level
+ * security shows no other principal's proposal at all.
  */
 
 /** The card's button says "Snooze 4h"; the handler must mean the same thing. */
@@ -61,6 +68,10 @@ const BlockActionsSchema = z.object({
   type: z.literal('block_actions'),
   user: z.object({ id: z.string().min(1) }),
   trigger_id: z.string().min(1).optional(),
+  channel: z.object({ id: z.string().min(1) }).optional(),
+  container: z
+    .object({ channel_id: z.string().min(1).optional(), message_ts: z.string().optional() })
+    .optional(),
   actions: z.array(z.object({ action_id: z.string().min(1), value: z.string().optional() })).min(1),
 });
 
@@ -74,23 +85,37 @@ const ViewSubmissionSchema = z.object({
   }),
 });
 
-export const InteractionUserSchema = z.object({ user: z.object({ id: z.string().min(1) }) });
+export const InteractionUserSchema = z.object({
+  user: z.object({ id: z.string().min(1), team_id: z.string().min(1).optional() }),
+  team: z.object({ id: z.string().min(1) }).nullish(),
+});
 
-const refusal = (displayName: string): InteractionOutcome =>
-  ephemeral(
-    `You are not authorised to act on ${displayName}'s proposals from this Slack account: it is not linked to an active Lance user.`,
-  );
+/** The one reply an unlinked Slack user gets (ADR 0021). */
+export const loginPrompt = (displayName: string): string =>
+  `This Slack account is not linked to ${displayName}. Run /lance login to link it; nothing else works until you do.`;
+
+/** Who pressed, resolved from the signed Slack user id, and how to find a card's owner. */
+export interface InteractionActor {
+  slackUserId: string;
+  principal: PrincipalRef;
+  /** The presser's own dependencies: every decision runs in their scope. */
+  deps: ApiDeps;
+  /** The principal whose channel this is, with their dependencies, or null when no principal owns it. */
+  channelOwner: (
+    channelId: string,
+  ) => Promise<{ principal: Pick<PrincipalRef, 'id' | 'upn'>; deps: ApiDeps } | null>;
+}
 
 const laterPhase = (what: string): InteractionOutcome =>
   ephemeral(`${what} arrives in a later phase. Nothing has changed.`);
 
 /**
- * `deps` are those of the principal the pressing Slack user resolves to
- * (`slackPrincipalDeps` in ./routes.ts), or null when Lance does not know
- * them, which refuses every button and modal.
+ * `actor` is the active principal the pressing Slack user resolves to
+ * through their link (`slackActor` in ./routes.ts), or null when they have
+ * none, which answers every button and modal with the login prompt alone.
  */
 export async function handleInteraction(
-  deps: ApiDeps | null,
+  actor: InteractionActor | null,
   payload: unknown,
   displayName: string,
 ): Promise<InteractionOutcome> {
@@ -100,12 +125,15 @@ export async function handleInteraction(
       'That interaction did not name the Slack user who sent it, so it was ignored.',
     );
   }
-  if (deps === null) {
-    return refusal(displayName);
+  if (actor === null) {
+    return ephemeral(loginPrompt(displayName));
   }
+  const { deps } = actor;
 
   const blockActions = BlockActionsSchema.safeParse(payload);
   if (blockActions.success) {
+    const refused = await refuseForeignPress(actor, blockActions.data, displayName);
+    if (refused !== null) return refused;
     return await handleBlockAction(deps, blockActions.data);
   }
 
@@ -121,6 +149,53 @@ export async function handleInteraction(
 
 type BlockActions = z.infer<typeof BlockActionsSchema>;
 type ViewSubmission = z.infer<typeof ViewSubmissionSchema>;
+
+/**
+ * Refuses a press on a card in another principal's channel and tells that
+ * principal, in their own scope. Null lets the press through: the card is
+ * in the presser's own channel, or in one no principal owns.
+ */
+async function refuseForeignPress(
+  actor: InteractionActor,
+  payload: BlockActions,
+  displayName: string,
+): Promise<InteractionOutcome | null> {
+  const channelId = payload.channel?.id ?? payload.container?.channel_id;
+  if (channelId === undefined) return null;
+  const owner = await actor.channelOwner(channelId);
+  if (owner === null || owner.principal.id === actor.principal.id) return null;
+
+  const action = payload.actions[0];
+  const actionId = action?.action_id ?? 'unknown';
+  const recordId = readRecordId(action?.value) ?? 'an unreadable record';
+  const messageTs = payload.container?.message_ts ?? 'unknown';
+  const observedAt = (owner.deps.now ?? nowIso)();
+  await owner.deps.raiseAlert({
+    kind: 'foreign_decision_attempt',
+    severity: 'P1',
+    dedupeKey: `foreign_decision:${actor.slackUserId}:${recordId}`,
+    title: 'Someone else pressed a button on one of your cards',
+    body: `Slack user <@${actor.slackUserId}>, who acts for ${actor.principal.upn}, pressed "${actionId}" on ${recordId} in your channel. ${displayName} refused it and nothing changed. Check who else is in the channel.`,
+    provenance: [
+      {
+        system: 'slack',
+        recordId: `${channelId}:${messageTs}`,
+        hash: hashRecord({
+          slackUserId: actor.slackUserId,
+          actionId,
+          value: action?.value ?? null,
+          channelId,
+          messageTs,
+        }),
+        observedAt,
+      },
+    ],
+    actor: 'system:slack-guard',
+  });
+  return ephemeral(
+    `That card belongs to another ${displayName} user, so the button was refused and nothing changed. They have been alerted.`,
+  );
+}
 
 async function handleBlockAction(
   deps: ApiDeps,
@@ -194,8 +269,7 @@ function readRecordId(value: string | undefined): string | null {
 /**
  * Acks or mutes the alert the card names. Both go through the same service
  * functions the Alerts page calls, so a Slack click and a click in the web
- * app leave the same ledger trail. The actor is Dom either way: nothing
- * reaches here until the Dom-only check above has passed.
+ * app leave the same ledger trail, under the presser's own actor.
  */
 async function actOnAlert(
   deps: ApiDeps,

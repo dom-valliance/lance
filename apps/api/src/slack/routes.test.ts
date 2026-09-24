@@ -7,7 +7,9 @@ import {
   fakePrincipal,
   fakeSnapshot,
   TEST_COMMITMENT_ID,
+  TEST_PRINCIPAL_ID,
   TEST_SIGNING_SECRET,
+  TEST_SLACK_TEAM_ID,
   TEST_SLACK_USER_ID,
   type FakeDeps,
 } from '../test-fakes.js';
@@ -16,6 +18,8 @@ import { slackSignature } from './verify.js';
 const FORM = 'application/x-www-form-urlencoded';
 const JSON_TYPE = 'application/json';
 const PROPOSAL_ID = '01K5S9V6QW3SWCCPVB0N0E301A';
+const LOGIN_PROMPT =
+  'This Slack account is not linked to Lance. Run /lance login to link it; nothing else works until you do.';
 
 interface PostOptions {
   timestamp?: string;
@@ -45,11 +49,12 @@ const post = async (
   });
 };
 
-const command = (text: string, userId = TEST_SLACK_USER_ID): string =>
+const command = (text: string, userId = TEST_SLACK_USER_ID, teamId = TEST_SLACK_TEAM_ID): string =>
   new URLSearchParams({
     command: '/lance',
     text,
     user_id: userId,
+    ...(teamId === '' ? {} : { team_id: teamId }),
     channel_id: 'C0BU7P278N5',
     token: 'a-deprecated-verification-token',
   }).toString();
@@ -77,10 +82,10 @@ describe('Slack request signing', () => {
     expect(response.statusCode).toBe(200);
   });
 
-  it('refuses status to a Slack user other than Dom', async () => {
+  it('gives an unlinked Slack user the login prompt and nothing else', async () => {
     const response = await post('/slack/commands', command('status', 'U0STRANGER'), FORM);
     expect(response.statusCode).toBe(200);
-    expect(response.json<{ text: string }>().text).toContain('Dom only');
+    expect(response.json()).toEqual({ response_type: 'ephemeral', text: LOGIN_PROMPT });
   });
   it('rejects a slash command whose signature does not match the body', async () => {
     const response = await post('/slack/commands', command('status'), FORM, {
@@ -105,6 +110,133 @@ describe('Slack request signing', () => {
       headers: { 'content-type': JSON_TYPE },
     });
     expect(response.statusCode).toBe(401);
+  });
+});
+
+describe('replay protection (ADR 0021)', () => {
+  it('refuses the same signed request a second time inside the window', async () => {
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const body = command('pause replayed');
+
+    const first = await post('/slack/commands', body, FORM, { timestamp });
+    const replay = await post('/slack/commands', body, FORM, { timestamp });
+
+    expect(first.statusCode).toBe(200);
+    expect(replay.statusCode).toBe(401);
+    expect(replay.json<{ error: string }>().error).toContain('already received once');
+    expect(harness.control.pauseCalls).toHaveLength(1);
+  });
+
+  it('records a signature only once it has verified', async () => {
+    await post('/slack/commands', command('status'), FORM, {
+      signature: 'v0=0000000000000000000000000000000000000000000000000000000000000000',
+    });
+    expect(harness.replay.seen.size).toBe(0);
+  });
+});
+
+/** A server over `h` with its own Slack settings, for the cases that change them. */
+const serverWith = (h: FakeDeps, slack: Partial<FakeDeps['server']['slack']>): FastifyInstance =>
+  buildServer({ ...h.server, slack: { ...h.server.slack, ...slack } });
+
+const signedPost = (instance: FastifyInstance, body: string) => {
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  return instance.inject({
+    method: 'POST',
+    url: '/slack/commands',
+    payload: body,
+    headers: {
+      'content-type': FORM,
+      'x-slack-request-timestamp': timestamp,
+      'x-slack-signature': slackSignature(TEST_SIGNING_SECRET, timestamp, body),
+    },
+  });
+};
+
+describe('/lance login', () => {
+  it('gives an unlinked Slack user a single-use link, recorded under the admin', async () => {
+    const text = await slashText('login', 'U0NEWCOMER');
+
+    expect(text).toContain('Link this Slack account to Lance:');
+    expect(text).toContain(
+      '<https://web.example.test/link/slack?state=v1.token|open the link page>',
+    );
+    expect(text).toContain('works once, for you alone');
+    expect(harness.links.issued).toEqual([
+      {
+        slackUserId: 'U0NEWCOMER',
+        slackTeamId: TEST_SLACK_TEAM_ID,
+        recordFor: expect.objectContaining({ id: TEST_PRINCIPAL_ID }) as unknown,
+        actor: 'system:slack-login',
+      },
+    ]);
+  });
+
+  it("records a linked user's request under their own principal", async () => {
+    const text = await slashText('login');
+
+    expect(text).toContain('This Slack account is linked to Lance as dom@valliance.ai.');
+    expect(harness.links.issued[0]).toMatchObject({
+      slackUserId: TEST_SLACK_USER_ID,
+      actor: 'user:dom',
+    });
+  });
+
+  it('issues nothing when Slack names no workspace', async () => {
+    const response = await post('/slack/commands', command('login', 'U0NEWCOMER', ''), FORM);
+    const text = response.json<{ text: string }>().text;
+    expect(text).toContain('did not say which workspace');
+    expect(harness.links.issued).toEqual([]);
+  });
+
+  it('says so when the api has no web address to link to', async () => {
+    harness.links.issueResult = { status: 'unconfigured' };
+    expect(await slashText('login', 'U0NEWCOMER')).toContain('PUBLIC_WEB_URL is not set');
+  });
+});
+
+describe('the SLACK_ALLOWED_USER_ID fallback', () => {
+  it('lets Dom act from Slack before he has linked', async () => {
+    const unlinked = fakeDeps({ principal: fakePrincipal({ slackUserId: null }) });
+    const instance = serverWith(unlinked, { fallbackUserId: 'U0BN7JN7BAN' });
+    try {
+      const response = await signedPost(instance, command('pause before linking', 'U0BN7JN7BAN'));
+      expect(response.json<{ text: string }>().text).toContain('Lance is paused.');
+      expect(unlinked.control.pauseCalls).toHaveLength(1);
+    } finally {
+      await instance.close();
+    }
+  });
+
+  it('is ignored once Dom has linked, whoever sends it', async () => {
+    const linked = fakeDeps({ principal: fakePrincipal({ slackUserId: 'U0DOMLINKED' }) });
+    const instance = serverWith(linked, { fallbackUserId: 'U0BN7JN7BAN' });
+    try {
+      const response = await signedPost(instance, command('pause', 'U0BN7JN7BAN'));
+      expect(response.json<{ text: string }>().text).toBe(LOGIN_PROMPT);
+      expect(linked.control.pauseCalls).toEqual([]);
+    } finally {
+      await instance.close();
+    }
+  });
+});
+
+describe('a linked principal who is not active', () => {
+  it('can run /lance login and nothing else', async () => {
+    const onboarding = fakeDeps({
+      principal: fakePrincipal({ status: 'onboarding' }),
+    });
+    const instance = serverWith(onboarding, {});
+    try {
+      const status = await signedPost(instance, command('status'));
+      const login = await signedPost(instance, command('login'));
+      expect(status.json<{ text: string }>().text).toBe(
+        'Your Lance account is onboarding, so nothing but /lance login works from Slack yet.',
+      );
+      expect(login.json<{ text: string }>().text).toContain('open the link page');
+    } finally {
+      await instance.close();
+    }
   });
 });
 
@@ -146,16 +278,14 @@ describe('/lance pause', () => {
     ]);
   });
 
-  it('refuses a user who is not on the Slack allowlist', async () => {
+  it('gives a Slack user with no link the login prompt and pauses nothing', async () => {
     const text = await slashText('pause because I can', 'U0INTRUDER');
 
     expect(harness.control.pauseCalls).toEqual([]);
-    expect(text).toBe(
-      'You are not authorised to pause Lance from Slack. Ask Dom, or use the kill switch in Settings.',
-    );
+    expect(text).toBe(LOGIN_PROMPT);
   });
 
-  it('refuses everyone when no Slack user id is configured', async () => {
+  it('refuses everyone when no principal has a link', async () => {
     const unconfigured = fakeDeps({ allowedSlackUserId: null });
     const other = buildServer(unconfigured.server);
     try {
@@ -173,7 +303,7 @@ describe('/lance pause', () => {
           ),
         },
       });
-      expect(response.json<{ text: string }>().text).toContain('not authorised');
+      expect(response.json<{ text: string }>().text).toBe(LOGIN_PROMPT);
       expect(unconfigured.control.pauseCalls).toEqual([]);
     } finally {
       await other.close();
@@ -192,10 +322,10 @@ describe('/lance resume', () => {
     expect(text).toContain('Released 1 held proposals: 01K5S9V6QW3SWCCPVB0N0E301A.');
   });
 
-  it('refuses a user who is not on the Slack allowlist', async () => {
+  it('gives a Slack user with no link the login prompt and resumes nothing', async () => {
     const text = await slashText('resume', 'U0INTRUDER');
     expect(harness.control.resumeCalls).toEqual([]);
-    expect(text).toContain('not authorised to resume Lance');
+    expect(text).toBe(LOGIN_PROMPT);
   });
 });
 
@@ -209,9 +339,9 @@ describe('/lance pause all and resume all', () => {
     expect(text).toContain('Lance is paused for every principal.');
   });
 
-  it('refuses a principal who is not the admin and pauses nothing', async () => {
+  it('refuses pause all from a linked principal without Lance.Admin and pauses nothing', async () => {
     const notAdmin = fakeDeps({
-      principal: fakePrincipal({ upn: 'second.principal@valliance.ai' }),
+      principal: fakePrincipal({ lanceRoles: ['Lance.User'] }),
     });
     const other = buildServer(notAdmin.server);
     try {
@@ -227,7 +357,9 @@ describe('/lance pause all and resume all', () => {
           'x-slack-signature': slackSignature(TEST_SIGNING_SECRET, timestamp, body),
         },
       });
-      expect(response.json<{ text: string }>().text).toContain('Only an admin');
+      expect(response.json<{ text: string }>().text).toBe(
+        'Only a Lance admin may pause Lance for everyone. /lance pause pauses you alone.',
+      );
       expect(notAdmin.control.pauseAllCalls).toEqual([]);
       expect(notAdmin.control.pauseCalls).toEqual([]);
     } finally {
@@ -284,8 +416,8 @@ describe('/lance jobs, pause <job> and resume <job>', () => {
     expect(harness.control.resumeCalls).toEqual([]);
   });
 
-  it('refuses the job list to a user who is not on the Slack allowlist', async () => {
-    expect(await slashText('jobs', 'U0INTRUDER')).toContain('Only Dom may list the jobs');
+  it('gives a Slack user with no link the login prompt instead of the job list', async () => {
+    expect(await slashText('jobs', 'U0INTRUDER')).toBe(LOGIN_PROMPT);
   });
 });
 
@@ -309,10 +441,10 @@ describe('/lance mode', () => {
     expect(text).toContain('is not a mode');
   });
 
-  it('refuses a user who is not on the Slack allowlist', async () => {
+  it('gives a Slack user with no link the login prompt and changes no mode', async () => {
     const text = await slashText('mode live', 'U0INTRUDER');
     expect(harness.control.modeCalls).toEqual([]);
-    expect(text).toContain('Only Dom');
+    expect(text).toBe(LOGIN_PROMPT);
   });
 });
 
@@ -323,10 +455,10 @@ describe('/lance brief', () => {
     expect(text).toContain('regenerating the morning brief');
   });
 
-  it('refuses a user who is not on the Slack allowlist', async () => {
+  it('gives a Slack user with no link the login prompt and queues no brief', async () => {
     const text = await slashText('brief', 'U0INTRUDER');
     expect(harness.briefRequests).toHaveLength(0);
-    expect(text).toContain('Only Dom');
+    expect(text).toBe(LOGIN_PROMPT);
   });
 });
 
@@ -367,10 +499,10 @@ describe('/lance chase', () => {
     expect(harness.chased).toEqual([]);
   });
 
-  it('refuses a Slack user other than Dom', async () => {
+  it('gives a Slack user with no link the login prompt and chases nothing', async () => {
     const text = await slashText(`chase ${TEST_COMMITMENT_ID}`, 'U0INTRUDER');
 
-    expect(text).toBe('Only Dom may ask Lance to chase a commitment from Slack.');
+    expect(text).toBe(LOGIN_PROMPT);
     expect(harness.chased).toEqual([]);
   });
 });
@@ -378,12 +510,12 @@ describe('/lance chase', () => {
 describe('an unrecognised slash command', () => {
   it('replies with the usage line', async () => {
     expect(await slashText('sing')).toBe(
-      'Usage: /lance status | pause [reason | all | <job>] | resume [all | <job>] | jobs | mode [live|dry_run] | brief | task <text> | chase <commitment id>',
+      'Usage: /lance login | status | pause [reason | all | <job>] | resume [all | <job>] | jobs | mode [live|dry_run] | brief | task <text> | chase <commitment id>',
     );
   });
 
   it('replies with the usage line for an empty command', async () => {
-    expect(await slashText('')).toContain('Usage: /lance status');
+    expect(await slashText('')).toContain('Usage: /lance login | status');
   });
 });
 
@@ -429,7 +561,7 @@ describe('/slack/interactions', () => {
     ]);
   });
 
-  it('refuses a block action from a Slack user other than Dom', async () => {
+  it('gives a block action from a Slack user with no link the login prompt', async () => {
     const body = interaction({
       type: 'block_actions',
       user: { id: 'U0STRANGER' },
@@ -439,7 +571,7 @@ describe('/slack/interactions', () => {
     const response = await post('/slack/interactions', body, FORM);
 
     expect(response.statusCode).toBe(200);
-    expect(response.json<{ text: string }>().text).toContain('not authorised');
+    expect(response.json<{ text: string }>().text).toBe(LOGIN_PROMPT);
     expect(harness.decider.requests).toHaveLength(0);
   });
 

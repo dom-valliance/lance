@@ -27,6 +27,7 @@ import {
   TEST_INGEST_SECRET,
   TEST_OID,
   TEST_SIGNING_SECRET,
+  TEST_SLACK_TEAM_ID,
   TEST_SLACK_USER_ID,
   TEST_UPN,
   type TestJwks,
@@ -85,6 +86,7 @@ const slashCommand = async (
     command: '/lance',
     text,
     user_id: TEST_SLACK_USER_ID,
+    team_id: TEST_SLACK_TEAM_ID,
     channel_id: 'C0BU7P278N5',
   }).toString();
   const timestamp = String(Math.floor(Date.now() / 1000));
@@ -137,12 +139,13 @@ beforeAll(async () => {
   db = scopedDb(root, { principalId: SEED_PRINCIPAL_ID });
   fixture = openFixtureDb(connectionString);
 
-  // Dom's row as the migration left it: no Entra object id yet, and the
-  // Slack id the kill switch trusts. Ann is a second, already bound principal.
-  await fixture.$client.query('UPDATE principals SET slack_user_id = $1 WHERE id = $2', [
-    TEST_SLACK_USER_ID,
-    SEED_PRINCIPAL_ID,
-  ]);
+  // Dom's row as the migration left it: no Entra object id yet, and a
+  // Slack link he proved through /lance login (ADR 0021), which fills
+  // principals.slack_user_id. Ann is a second, already bound principal.
+  await fixture.$client.query(
+    'INSERT INTO slack_links (slack_user_id, slack_team_id, principal_id) VALUES ($1, $2, $3)',
+    [TEST_SLACK_USER_ID, TEST_SLACK_TEAM_ID, SEED_PRINCIPAL_ID],
+  );
   await fixture.$client.query(
     "INSERT INTO principals (id, entra_oid, upn, status) VALUES ($1, $2, $3, 'active')",
     [ANN_ID, ANN_OID, ANN_UPN],
@@ -216,16 +219,23 @@ describe('sign-in over a real database', () => {
       ),
     );
     const events = await new LedgerReader(db).query({ kind: 'state_changed' });
+    // Newest first: the binding, then the roles his token carried.
     expect(events.map((event) => event.payload)).toEqual([
+      {
+        change: 'principal_roles_recorded',
+        principalId: SEED_PRINCIPAL_ID,
+        roles: ['Lance.Admin', 'Lance.User'],
+        previous: [],
+      },
       { change: 'principal_bound', principalId: SEED_PRINCIPAL_ID, entraOid: TEST_OID },
     ]);
-    expect(events[0]?.actor).toBe('user:dom');
+    expect(events.map((event) => event.actor)).toEqual(['user:dom', 'user:dom']);
   });
 
   it('finds Dom by his oid on every later request without writing again', async () => {
     await trpcGet('me', domBearer);
     const events = await new LedgerReader(db).query({ kind: 'state_changed' });
-    expect(events).toHaveLength(1);
+    expect(events).toHaveLength(2);
   });
 
   it('refuses a token with neither Lance role and creates no principal', async () => {
@@ -252,6 +262,12 @@ describe('sign-in over a real database', () => {
     const stranger = scopedDb(root, { principalId: created.principalId });
     const events = await new LedgerReader(stranger).query({ kind: 'state_changed' });
     expect(events.map((event) => event.payload)).toEqual([
+      {
+        change: 'principal_roles_recorded',
+        principalId: created.principalId,
+        roles: ['Lance.User'],
+        previous: [],
+      },
       {
         change: 'principal_created',
         principalId: created.principalId,
