@@ -1,3 +1,4 @@
+import { ModeChangeRefusedError } from '@lance/ledger';
 import { ACTION, CALLBACK } from '@lance/connectors';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -433,6 +434,16 @@ describe('/lance mode', () => {
     expect(harness.control.modeCalls).toEqual([{ mode: 'live', actor: 'user:dom' }]);
     expect(text).toContain('Lance is now in live mode.');
     expect(text).toContain('/lance pause then /lance resume');
+  });
+
+  it('shows the date live opens when a new principal is inside their dry run', async () => {
+    harness.control.refuseLive = new ModeChangeRefusedError(
+      'Live mode opens on Monday 5 October 2026. A new principal runs in dry run for 5 working days after onboarding.',
+      new Date('2026-10-04T23:00:00.000Z'),
+    );
+    const text = await slashText('mode live');
+    expect(text).toContain('Live mode opens on Monday 5 October 2026.');
+    expect(harness.control.modeCalls).toEqual([]);
   });
 
   it('refuses a word that is not a mode', async () => {

@@ -1,9 +1,10 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { ModeChangeRefusedError } from '@lance/ledger';
 import { SYSTEM_MODES, SystemModeSchema } from '@lance/shared';
 import { z } from 'zod';
 import { requireActive, verifiedCaller } from '../auth/require-entra.js';
 import { resumeAndRequeue, type ApiDeps, type ServerDeps } from '../deps.js';
-import { BadRequestError } from '../errors.js';
+import { BadRequestError, HttpError } from '../errors.js';
 
 /**
  * The kill switch over HTTP (spec 4.3, docs/runbooks/kill-switch.md). Every
@@ -45,7 +46,13 @@ export const adminRoutes =
           `A mode change needs a body of {"mode": "live"} or {"mode": "dry_run"}; ${SYSTEM_MODES.join(' and ')} are the only modes.`,
         );
       }
-      return deps.control.setMode(parsed.data.mode, { actor: deps.actor });
+      try {
+        return await deps.control.setMode(parsed.data.mode, { actor: deps.actor });
+      } catch (error) {
+        // A new principal's five working days of dry run: 409 with the date.
+        if (error instanceof ModeChangeRefusedError) throw new HttpError(409, error.message);
+        throw error;
+      }
     });
 
     fastify.get('/admin/status', async (request) => callerDeps(request).status.snapshot());

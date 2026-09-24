@@ -70,11 +70,6 @@ export const verifiedCaller = (request: FastifyRequest): Caller => {
 };
 
 /**
- * Refuses a principal who may not use Lance yet or any more. Onboarding
- * reaches only the placeholder page (package 5.5 builds the checklist); a
- * paused or offboarded principal reaches nothing.
- */
-/**
  * Connecting a credential (Microsoft 365, Jamie) is part of onboarding
  * (docs/plans/multi-user.md M3, steps 2 and 3), so an onboarding principal
  * may do it as well as an active one. Paused and offboarded principals may
@@ -83,13 +78,18 @@ export const verifiedCaller = (request: FastifyRequest): Caller => {
 export const requireConnectable = (caller: Caller): Caller =>
   caller.principal.status === 'onboarding' ? caller : requireActive(caller);
 
+/**
+ * Refuses a principal who may not use Lance yet or any more. Onboarding
+ * reaches only the checklist and what it calls; a paused or offboarded
+ * principal reaches nothing.
+ */
 export const requireActive = (caller: Caller): Caller => {
   switch (caller.principal.status) {
     case 'active':
       return caller;
     case 'onboarding':
       throw new ForbiddenError(
-        'Onboarding for this account is not open yet. Nothing else in Lance is available until it is.',
+        'Onboarding for this account is not finished. Complete the checklist at /onboarding; nothing else in Lance is available until then.',
       );
     case 'paused':
       throw new ForbiddenError(

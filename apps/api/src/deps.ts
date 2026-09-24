@@ -32,6 +32,7 @@ import type { BriefStoreLike } from './briefs/store.js';
 import type { CommitmentStoreLike } from './commitments/store.js';
 import type { FeedEvent, FeedListener } from './events.js';
 import type { JobsServiceLike } from './jobs/service.js';
+import type { OnboardingServiceLike } from './onboarding/service.js';
 import type { ReplayGuardLike } from './slack/replay.js';
 import type { DecisionRequest } from './proposals/decide.js';
 import type { StatusSource } from './status.js';
@@ -489,6 +490,8 @@ export interface ServerDeps {
    * refuses and names the missing secret.
    */
   evidence?: EvidenceExporterLike;
+  /** The onboarding checklist and its completion (docs/plans/multi-user.md M3). */
+  onboarding: OnboardingServiceLike;
   /** The global `system_state` row, for the readiness probe. */
   readiness: () => Promise<{ paused: boolean; mode: SystemMode }>;
   slack: SlackDeps;

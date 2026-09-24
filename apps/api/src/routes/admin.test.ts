@@ -1,3 +1,4 @@
+import { ModeChangeRefusedError } from '@lance/ledger';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../server.js';
@@ -125,6 +126,24 @@ describe('POST /admin/mode', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ changed: true });
     expect(harness.control.modeCalls).toEqual([{ mode: 'live', actor: 'user:dom' }]);
+  });
+
+  it("answers 409 with the date live opens inside a new principal's dry run", async () => {
+    harness.control.refuseLive = new ModeChangeRefusedError(
+      'Live mode opens on Monday 5 October 2026.',
+      new Date('2026-10-04T23:00:00.000Z'),
+    );
+    const response = await server.inject({
+      method: 'POST',
+      url: '/admin/mode',
+      headers: BEARER,
+      payload: { mode: 'live' },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ error: string }>().error).toBe(
+      'Live mode opens on Monday 5 October 2026.',
+    );
   });
 
   it('rejects a mode that does not exist', async () => {

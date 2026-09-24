@@ -76,6 +76,12 @@ import { onboardingProgress } from './admin/onboarding.js';
 import { BadRequestError, UnauthorisedError } from './errors.js';
 import { createFeed, type Feed, type FeedEvent } from './events.js';
 import type { JobListing, JobsServiceLike, JobToggleStatus } from './jobs/service.js';
+import type {
+  CompletionResult,
+  OnboardingServiceLike,
+  OnboardingState,
+  PreferencesInput,
+} from './onboarding/service.js';
 import type { DecisionRequest } from './proposals/decide.js';
 import type { StatusSnapshot, StatusSource } from './status.js';
 import type { ApiContext } from './trpc.js';
@@ -187,11 +193,14 @@ export class FakeSystemControl implements SystemControlLike {
   }
 
   readonly modeCalls: { mode: SystemMode; actor: string }[] = [];
+  /** Set to refuse the next switch to live, as SystemControl does inside a new principal's dry run. */
+  refuseLive: Error | null = null;
 
   setMode(
     mode: SystemMode,
     options: { actor: string },
   ): Promise<{ changed: boolean; eventId: string }> {
+    if (mode === 'live' && this.refuseLive !== null) return Promise.reject(this.refuseLive);
     this.modeCalls.push({ mode, actor: options.actor });
     const changed = this.state.mode !== mode;
     this.state = { ...this.state, mode };
@@ -992,6 +1001,60 @@ export const createTestJwks = async (issuer: string, audience: string): Promise<
   };
 };
 
+/** An onboarding principal who has done nothing yet, as `onboarding.state` answers. */
+export const fakeOnboardingState = (overrides: Partial<OnboardingState> = {}): OnboardingState => ({
+  status: 'onboarding',
+  notice: { done: false, acceptedAt: null, changedSinceAcceptance: false },
+  graph: { done: false, connectedAt: null },
+  jamie: { done: false, connectedAt: null },
+  foundry: { required: false, arrivesLater: true },
+  slack: { done: false, linkedAt: null },
+  preferences: {
+    done: false,
+    confirmedAt: null,
+    timeZone: 'Europe/London',
+    quietHoursStart: '19:00',
+    quietHoursEnd: '07:00',
+    source: 'defaults',
+  },
+  missing: ['notice', 'graph', 'jamie', 'slack', 'preferences'],
+  ...overrides,
+});
+
+/** Records every onboarding call; the state it answers is whatever the test sets. */
+export class FakeOnboarding implements OnboardingServiceLike {
+  current: OnboardingState = fakeOnboardingState();
+  readonly accepted: { principalId: string; noticeSha256: string; actor: string }[] = [];
+  readonly confirmed: { principalId: string; input: PreferencesInput; actor: string }[] = [];
+  readonly completions: string[] = [];
+  completion: CompletionResult | Error = { status: 'already_active' };
+
+  state(): Promise<OnboardingState> {
+    return Promise.resolve(this.current);
+  }
+
+  acceptNotice(principal: PrincipalRef, noticeSha256: string, actor: string): Promise<void> {
+    this.accepted.push({ principalId: principal.id, noticeSha256, actor });
+    return Promise.resolve();
+  }
+
+  confirmPreferences(
+    principal: PrincipalRef,
+    input: PreferencesInput,
+    actor: string,
+  ): Promise<void> {
+    this.confirmed.push({ principalId: principal.id, input, actor });
+    return Promise.resolve();
+  }
+
+  complete(principal: PrincipalRef): Promise<CompletionResult> {
+    this.completions.push(principal.id);
+    return this.completion instanceof Error
+      ? Promise.reject(this.completion)
+      : Promise.resolve(this.completion);
+  }
+}
+
 export interface FakeDepsOverrides {
   config?: Config;
   control?: SystemControlLike;
@@ -1044,6 +1107,7 @@ export interface FakeDeps {
   raised: Omit<RaiseAlertInput, 'now'>[];
   links: FakeSlackLinks;
   replay: FakeReplayGuard;
+  onboarding: FakeOnboarding;
 }
 
 export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
@@ -1071,6 +1135,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
   const raised: Omit<RaiseAlertInput, 'now'>[] = [];
   const links = new FakeSlackLinks();
   const replay = new FakeReplayGuard();
+  const onboarding = new FakeOnboarding();
 
   const config = overrides.config ?? testConfig();
   const principal =
@@ -1139,6 +1204,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     directory,
     depsFor: () => deps,
     admin: new FakeAdminStore(directory),
+    onboarding,
     readiness: async () => {
       const state = await deps.control.read();
       return { paused: state.paused, mode: state.mode };
@@ -1177,6 +1243,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     raised,
     links,
     replay,
+    onboarding,
   };
 };
 

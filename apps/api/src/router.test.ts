@@ -1,6 +1,8 @@
+import { ModeChangeRefusedError } from '@lance/ledger';
 import type { MorningBriefContent } from '@lance/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { actorFromUpn } from './actor.js';
+import { OnboardingRefusedError } from './onboarding/service.js';
 import { appRouter } from './router.js';
 import {
   fakeBrief,
@@ -10,7 +12,9 @@ import {
   fakePrincipal,
   fakeProposal,
   fakeSnapshot,
+  fakeOnboardingState,
   TEST_COMMITMENT_ID,
+  TEST_PRINCIPAL_ID,
   TEST_UPN,
   type FakeDeps,
 } from './test-fakes.js';
@@ -334,6 +338,17 @@ describe('systemState.setMode', () => {
     expect(result.changed).toBe(true);
   });
 
+  it("passes a new principal's dry-run refusal to the web app with its message", async () => {
+    harness.control.refuseLive = new ModeChangeRefusedError(
+      'Live mode opens on Monday 5 October 2026.',
+      new Date('2026-10-04T23:00:00.000Z'),
+    );
+    await expect(caller.systemState.setMode({ mode: 'live' })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'Live mode opens on Monday 5 October 2026.',
+    });
+  });
+
   it('rejects a mode the schema does not know', async () => {
     await expect(
       caller.systemState.setMode({ mode: 'yolo' } as unknown as { mode: 'live' }),
@@ -566,7 +581,10 @@ describe('an onboarding principal', () => {
   it('is refused by every other procedure with FORBIDDEN', async () => {
     const codes = await Promise.all(
       procedurePaths
-        .filter((path) => path !== 'me' && !path.startsWith('slackLink.'))
+        .filter(
+          (path) =>
+            path !== 'me' && !path.startsWith('slackLink.') && !path.startsWith('onboarding.'),
+        )
         .map(async (path) => [path, await codeOf(callPath(onboarding(), path))] as const),
     );
     expect(codes.filter(([, code]) => code !== 'FORBIDDEN')).toEqual([]);
@@ -575,6 +593,59 @@ describe('an onboarding principal', () => {
       [],
       [],
     ]);
+  });
+});
+
+describe('the onboarding procedures', () => {
+  const NOTICE = 'a'.repeat(64);
+  const onboarding = (): ReturnType<typeof createCaller> =>
+    createCaller(
+      fakeContext(harness, {
+        principal: fakePrincipal({ status: 'onboarding', upn: 'new.person@valliance.ai' }),
+      }),
+    );
+
+  it("answers the checklist's state from the server for an onboarding principal", async () => {
+    harness.onboarding.current = fakeOnboardingState({ missing: ['slack'] });
+    await expect(onboarding().onboarding.state({ noticeSha256: NOTICE })).resolves.toMatchObject({
+      status: 'onboarding',
+      missing: ['slack'],
+    });
+  });
+
+  it('records the notice acceptance as the signed-in principal', async () => {
+    await onboarding().onboarding.acceptNotice({ noticeSha256: NOTICE });
+    expect(harness.onboarding.accepted).toEqual([
+      { principalId: TEST_PRINCIPAL_ID, noticeSha256: NOTICE, actor: 'user:newperson' },
+    ]);
+  });
+
+  it('refuses a notice hash that is not a SHA-256', async () => {
+    await expect(
+      onboarding().onboarding.acceptNotice({ noticeSha256: 'not-a-hash' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(harness.onboarding.accepted).toEqual([]);
+  });
+
+  it('refuses a time zone that does not exist', async () => {
+    await expect(
+      onboarding().onboarding.confirmPreferences({
+        timeZone: 'Europe/Atlantis',
+        quietHoursStart: '19:00',
+        quietHoursEnd: '07:00',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(harness.onboarding.confirmed).toEqual([]);
+  });
+
+  it('passes a refused completion to the web app with the steps it names', async () => {
+    harness.onboarding.completion = new OnboardingRefusedError(
+      'Onboarding is not finished: link Slack with /lance login. Nothing was changed.',
+    );
+    await expect(onboarding().onboarding.complete({ noticeSha256: NOTICE })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'Onboarding is not finished: link Slack with /lance login. Nothing was changed.',
+    });
   });
 });
 

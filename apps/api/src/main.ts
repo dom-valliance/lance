@@ -56,6 +56,7 @@ import type {
 } from './deps.js';
 import { createFeed, type Feed } from './events.js';
 import { createJobsService } from './jobs/service.js';
+import { createOnboardingService } from './onboarding/service.js';
 import { createExecuteQueue, type ExecuteQueue } from './executeQueue.js';
 import { createPrincipalDirectory } from './principals/directory.js';
 import { applyDecision, type DecideDeps } from './proposals/decide.js';
@@ -266,6 +267,10 @@ export const createServerDeps = (options: ServerRuntimeOptions): ServerDeps => {
             signer: options.evidenceSigner,
           }),
         }),
+    onboarding: createOnboardingService({
+      root: options.root,
+      afterActivation: (principalId) => executeQueue.enqueueReconcile(principalId),
+    }),
     readiness: async () => {
       const rows = await options.root
         .select({ paused: systemState.paused, mode: systemState.mode })

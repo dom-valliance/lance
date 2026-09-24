@@ -1,3 +1,4 @@
+import { ModeChangeRefusedError } from '@lance/ledger';
 import { isLanceAdmin, nowIso, SystemModeSchema, toLondon, UlidSchema } from '@lance/shared';
 import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -228,7 +229,14 @@ const handleMode = async (
       `"${rest.trim()}" is not a mode. Use /lance mode live or /lance mode dry_run.`,
     );
   }
-  const result = await deps.control.setMode(parsed.data, { actor: deps.actor });
+  let result: { changed: boolean };
+  try {
+    result = await deps.control.setMode(parsed.data, { actor: deps.actor });
+  } catch (error) {
+    // A new principal's five working days of dry run; the message names the date.
+    if (error instanceof ModeChangeRefusedError) return ephemeral(error.message);
+    throw error;
+  }
   const opening = result.changed
     ? `${displayName} is now in ${parsed.data} mode.`
     : `${displayName} was already in ${parsed.data} mode.`;

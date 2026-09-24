@@ -1,4 +1,9 @@
-import type { LedgerQuery, ProposalAction, ProposalFilter } from '@lance/ledger';
+import {
+  ModeChangeRefusedError,
+  type LedgerQuery,
+  type ProposalAction,
+  type ProposalFilter,
+} from '@lance/ledger';
 import {
   ActionClassSchema,
   AlertSeveritySchema,
@@ -14,7 +19,9 @@ import {
   SystemModeSchema,
   SystemSchema,
   UlidSchema,
+  isKnownTimeZone,
 } from '@lance/shared';
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { actorFromUpn } from './actor.js';
 import {
@@ -44,6 +51,7 @@ import {
 } from './commitments/service.js';
 import { listLedger, MAX_PAGE_SIZE as MAX_LEDGER_PAGE_SIZE } from './ledger/service.js';
 import { listProposals, proposalSummary } from './proposals/service.js';
+import { OnboardingRefusedError } from './onboarding/service.js';
 import { listTasks } from './tasks/service.js';
 import { TRPCError } from '@trpc/server';
 import { BadRequestError } from './errors.js';
@@ -194,6 +202,34 @@ export const InterruptionBudgetInputSchema = z.object({
 });
 export type InterruptionBudgetInput = z.infer<typeof InterruptionBudgetInputSchema>;
 
+/** The SHA-256 of the data-processing notice the web app rendered, as lowercase hex. */
+const NoticeSha256Schema = z
+  .string()
+  .regex(/^[0-9a-f]{64}$/, 'must be the SHA-256 of the notice as 64 lowercase hex characters');
+
+/** Onboarding step 6: the quiet hours and time zone the principal confirms. */
+export const PreferencesInputSchema = z.object({
+  timeZone: z
+    .string()
+    .min(1)
+    .max(64)
+    .refine(isKnownTimeZone, 'must be a time zone name such as Europe/London'),
+  quietHoursStart: HhMmSchema,
+  quietHoursEnd: HhMmSchema,
+});
+
+/** A refusal written for the principal, passed to the web app with its message intact. */
+const precondition = async <T>(work: () => Promise<T>): Promise<T> => {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof OnboardingRefusedError || error instanceof ModeChangeRefusedError) {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: error.message, cause: error });
+    }
+    throw error;
+  }
+};
+
 /** The Alerts page's three tabs and its filters (spec 12). */
 export const AlertListInputSchema = z
   .object({
@@ -279,6 +315,47 @@ export const appRouter = router({
       ctx.server.slack.links.current(ctx.caller.principal),
     ),
   }),
+  /**
+   * The onboarding checklist (docs/plans/multi-user.md M3). Open to any
+   * signed-in principal so the page can see who is already active and send
+   * them on; every write refuses a principal who is not onboarding.
+   */
+  onboarding: router({
+    state: signedInProcedure
+      .input(z.object({ noticeSha256: NoticeSha256Schema }))
+      .query(({ ctx, input }) =>
+        ctx.server.onboarding.state(ctx.caller.principal, input.noticeSha256),
+      ),
+    acceptNotice: signedInProcedure
+      .input(z.object({ noticeSha256: NoticeSha256Schema }))
+      .mutation(({ ctx, input }) =>
+        precondition(() =>
+          ctx.server.onboarding.acceptNotice(
+            ctx.caller.principal,
+            input.noticeSha256,
+            actorFromUpn(ctx.upn),
+          ),
+        ),
+      ),
+    confirmPreferences: signedInProcedure
+      .input(PreferencesInputSchema)
+      .mutation(({ ctx, input }) =>
+        precondition(() =>
+          ctx.server.onboarding.confirmPreferences(
+            ctx.caller.principal,
+            input,
+            actorFromUpn(ctx.upn),
+          ),
+        ),
+      ),
+    complete: signedInProcedure
+      .input(z.object({ noticeSha256: NoticeSha256Schema }))
+      .mutation(({ ctx, input }) =>
+        precondition(() =>
+          ctx.server.onboarding.complete(ctx.caller.principal, input.noticeSha256),
+        ),
+      ),
+  }),
   admin: router({
     /** Every principal with their status and which onboarding steps are done. */
     principals: adminProcedure.query(({ ctx }) => ctx.server.admin.principals()),
@@ -361,7 +438,7 @@ export const appRouter = router({
     setMode: procedure
       .input(z.object({ mode: SystemModeSchema }))
       .mutation(({ ctx, input }) =>
-        ctx.deps.control.setMode(input.mode, { actor: actorFromUpn(ctx.upn) }),
+        precondition(() => ctx.deps.control.setMode(input.mode, { actor: actorFromUpn(ctx.upn) })),
       ),
     setInterruptionBudget: procedure
       .input(InterruptionBudgetInputSchema)
