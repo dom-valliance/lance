@@ -2,8 +2,8 @@ import { pgTable, text } from 'drizzle-orm/pg-core';
 import { createdAt, ulid, ulidCheck, updatedAt } from './columns.js';
 
 /**
- * People Lance acts for or resolves identities against (spec section 5.1).
- * One row in v1: Dom. Times are stored UTC and displayed in `time_zone`.
+ * The spec 5.1 users table, kept for compatibility and no longer written
+ * (ADR 0015). `principals` replaced it; Dom's principal reuses his id.
  */
 export const users = pgTable(
   'users',

@@ -1,6 +1,7 @@
 import { index, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
 import { decision } from '../enums.js';
 import { createdAt, timestamptz, ulid, ulidCheck } from './columns.js';
+import { principalId } from './principals.js';
 
 /**
  * Every policy evaluation, with the matched rule, the inputs and the result
@@ -10,6 +11,7 @@ export const policyDecisions = pgTable(
   'policy_decisions',
   {
     id: ulid('id').primaryKey(),
+    principalId: principalId(),
     decision: decision('decision').notNull(),
     ruleId: ulid('rule_id'),
     reason: text('reason').notNull(),

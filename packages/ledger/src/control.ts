@@ -1,4 +1,12 @@
-import { SYSTEM_STATE_ID, proposals, systemState, type Db, type SystemState } from '@lance/db';
+import {
+  SYSTEM_STATE_ID,
+  principalState,
+  proposals,
+  systemState,
+  type Db,
+  type PrincipalState,
+  type SystemState,
+} from '@lance/db';
 import { newUlid, nowIso, type SystemMode } from '@lance/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { LedgerReader } from './reader.js';
@@ -38,6 +46,48 @@ export interface InterruptionBudget {
 /** Spec 13: the daily model spend ceiling in GBP. */
 export interface CostCeiling {
   costCeilingGbp: number;
+}
+
+/**
+ * What one principal's session runs under (ADR 0015): their own
+ * `principal_state` with the global `system_state` row applied on top.
+ * `paused` is true when either is paused; `mode` is `live` only when both
+ * are live. Quiet hours, the push budget and the cost ceiling are the
+ * principal's own.
+ */
+export interface RunState {
+  principalId: string;
+  paused: boolean;
+  /** True when the global row is paused, whatever the principal's own state. */
+  pausedGlobally: boolean;
+  pausedReason: string | null;
+  pausedBy: string | null;
+  pausedAt: Date | null;
+  mode: SystemMode;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  pushBudgetPerHour: number;
+  costCeilingGbp: number;
+  updatedAt: Date;
+}
+
+/** The stricter of the principal's state and the global row. */
+export function effectiveRunState(own: PrincipalState, global: SystemState): RunState {
+  const pausedGlobally = global.paused;
+  return {
+    principalId: own.principalId,
+    paused: pausedGlobally || own.paused,
+    pausedGlobally,
+    pausedReason: pausedGlobally ? global.pausedReason : own.pausedReason,
+    pausedBy: pausedGlobally ? global.pausedBy : own.pausedBy,
+    pausedAt: pausedGlobally ? global.pausedAt : own.pausedAt,
+    mode: global.mode === 'live' && own.mode === 'live' ? 'live' : 'dry_run',
+    quietHoursStart: own.quietHoursStart,
+    quietHoursEnd: own.quietHoursEnd,
+    pushBudgetPerHour: own.pushBudgetPerHour,
+    costCeilingGbp: own.costCeilingGbp,
+    updatedAt: own.updatedAt > global.updatedAt ? own.updatedAt : global.updatedAt,
+  };
 }
 
 /** Proposal statuses that are waiting for the executor and can be held. */
@@ -89,10 +139,12 @@ function readHeld(payload: Record<string, unknown> | null): HeldProposal[] {
 }
 
 /**
- * The kill switch and mode switch (spec 4.3). Both api and worker use this
- * class so there is one implementation. Every change is a state_changed
- * ledger event; a resume reuses the pause's correlation id so the pair reads
- * as one trail.
+ * The kill switch and mode switch (spec 4.3) for the principal the handle
+ * is scoped to (ADR 0015). Both api and worker use this class so there is
+ * one implementation. Every change is a state_changed ledger event; a
+ * resume reuses the pause's correlation id so the pair reads as one trail.
+ * `pauseAll` and `resumeAll` set the global row, which pauses every
+ * principal whatever their own state.
  */
 export class SystemControl {
   private readonly writer: LedgerWriter;
@@ -103,11 +155,31 @@ export class SystemControl {
     this.reader = new LedgerReader(db);
   }
 
-  async read(): Promise<SystemState> {
+  async read(): Promise<RunState> {
     return this.readWith(this.db);
   }
 
-  private async readWith(executor: DbExecutor): Promise<SystemState> {
+  private async readWith(executor: DbExecutor): Promise<RunState> {
+    // One after the other: inside a transaction both run on one connection.
+    const own = await this.readOwn(executor);
+    const global = await this.readGlobal(executor);
+    return effectiveRunState(own, global);
+  }
+
+  /** Row-level security returns the scoped principal's row and no other. */
+  private async readOwn(executor: DbExecutor): Promise<PrincipalState> {
+    const rows = await executor.select().from(principalState).limit(1);
+    const row = rows[0];
+    if (row === undefined) {
+      throw new Error(
+        'principal_state has no row for this session. Scope the handle with scopedDb to a principal ' +
+          'that exists, and run `pnpm --filter @lance/db seed` to create the first one.',
+      );
+    }
+    return row;
+  }
+
+  private async readGlobal(executor: DbExecutor): Promise<SystemState> {
     const rows = await executor
       .select()
       .from(systemState)
@@ -128,7 +200,7 @@ export class SystemControl {
 
   async pause(options: PauseOptions): Promise<PauseResult> {
     return this.db.transaction(async (tx) => {
-      const current = await this.readWith(tx);
+      const current = await this.readOwn(tx);
       const ts = nowIso();
       const correlationId = newUlid();
 
@@ -137,7 +209,7 @@ export class SystemControl {
 
       if (!current.paused) {
         await tx
-          .update(systemState)
+          .update(principalState)
           .set({
             paused: true,
             pausedReason: options.reason,
@@ -145,7 +217,7 @@ export class SystemControl {
             pausedAt: new Date(ts),
             updatedAt: new Date(ts),
           })
-          .where(eq(systemState.id, SYSTEM_STATE_ID));
+          .where(eq(principalState.principalId, current.principalId));
       }
 
       const event = await this.writer.append(
@@ -172,6 +244,90 @@ export class SystemControl {
   }
 
   /**
+   * Pauses every principal by setting the global row (ADR 0015). The
+   * caller's own approved proposals are held at once; every other
+   * principal's executor finds the global pause at its next job and holds
+   * theirs then. Requires an admin scope from Phase 5 (M5); until then the
+   * one principal is the admin.
+   */
+  async pauseAll(options: PauseOptions): Promise<PauseResult> {
+    return this.db.transaction(async (tx) => {
+      const current = await this.readGlobal(tx);
+      const ts = nowIso();
+      const held = await holdProposals(tx, ts);
+      const heldProposalIds = held.map((row) => row.id);
+      if (!current.paused) {
+        await tx
+          .update(systemState)
+          .set({
+            paused: true,
+            pausedReason: options.reason,
+            pausedBy: options.actor,
+            pausedAt: new Date(ts),
+            updatedAt: new Date(ts),
+          })
+          .where(eq(systemState.id, SYSTEM_STATE_ID));
+      }
+      const event = await this.writer.append(
+        {
+          ts,
+          actor: options.actor,
+          kind: 'state_changed',
+          sourceSystem: 'lance',
+          correlationId: newUlid(),
+          payload: {
+            change: 'pause_all',
+            paused: true,
+            alreadyPaused: current.paused,
+            reason: options.reason,
+            heldProposalIds,
+            // Recorded as a hold, so this principal's resume releases them.
+            held,
+          },
+        },
+        tx,
+      );
+      return { changed: !current.paused, heldProposalIds, eventId: event.id };
+    });
+  }
+
+  /**
+   * Clears the global pause. Each principal's own pause, if set, stays;
+   * proposals held under the global pause are released by each principal's
+   * own `resume`, since holds are recorded in that principal's ledger.
+   */
+  async resumeAll(options: ActorOptions): Promise<{ changed: boolean; eventId: string }> {
+    return this.db.transaction(async (tx) => {
+      const current = await this.readGlobal(tx);
+      const ts = nowIso();
+      if (current.paused) {
+        await tx
+          .update(systemState)
+          .set({
+            paused: false,
+            pausedReason: null,
+            pausedBy: null,
+            pausedAt: null,
+            updatedAt: new Date(ts),
+          })
+          .where(eq(systemState.id, SYSTEM_STATE_ID));
+      }
+      const event = await this.writer.append(
+        {
+          ts,
+          actor: options.actor,
+          kind: 'state_changed',
+          sourceSystem: 'lance',
+          correlationId: newUlid(),
+          payload: { change: 'resume_all', paused: false, wasPaused: current.paused },
+        },
+        tx,
+      );
+      return { changed: current.paused, eventId: event.id };
+    });
+  }
+
+  /**
    * Records that the executor held a proposal because the system was paused
    * when its job ran, so resume can release it (spec 4.3). The executor calls
    * this after moving the proposal to held.
@@ -193,8 +349,11 @@ export class SystemControl {
 
   async resume(options: ActorOptions): Promise<ResumeResult> {
     return this.db.transaction(async (tx) => {
-      const current = await this.readWith(tx);
+      const current = await this.readOwn(tx);
       const ts = nowIso();
+      if ((await this.readGlobal(tx)).paused) {
+        return this.resumeUnderGlobalPause(tx, current, ts, options);
+      }
       const outstanding = await this.heldSinceLastResume(tx);
       const releasedProposalIds: string[] = [];
       for (const from of HOLDABLE_STATUSES) {
@@ -210,7 +369,7 @@ export class SystemControl {
 
       if (current.paused) {
         await tx
-          .update(systemState)
+          .update(principalState)
           .set({
             paused: false,
             pausedReason: null,
@@ -218,7 +377,7 @@ export class SystemControl {
             pausedAt: null,
             updatedAt: new Date(ts),
           })
-          .where(eq(systemState.id, SYSTEM_STATE_ID));
+          .where(eq(principalState.principalId, current.principalId));
       }
 
       const event = await this.writer.append(
@@ -243,18 +402,62 @@ export class SystemControl {
     });
   }
 
+  /**
+   * A principal's resume while the global row is paused clears their own
+   * pause and releases nothing, because the executor would hold every
+   * released proposal again. It is recorded as `resume_own`, not `resume`,
+   * so the next resume after the global pause lifts still finds the holds.
+   */
+  private async resumeUnderGlobalPause(
+    tx: DbExecutor,
+    current: PrincipalState,
+    ts: string,
+    options: ActorOptions,
+  ): Promise<ResumeResult> {
+    if (current.paused) {
+      await tx
+        .update(principalState)
+        .set({
+          paused: false,
+          pausedReason: null,
+          pausedBy: null,
+          pausedAt: null,
+          updatedAt: new Date(ts),
+        })
+        .where(eq(principalState.principalId, current.principalId));
+    }
+    const event = await this.writer.append(
+      {
+        ts,
+        actor: options.actor,
+        kind: 'state_changed',
+        sourceSystem: 'lance',
+        correlationId: newUlid(),
+        payload: {
+          change: 'resume_own',
+          paused: true,
+          wasPaused: current.paused,
+          globalPauseStands: true,
+          releasedProposalIds: [],
+        },
+      },
+      tx,
+    );
+    return { changed: current.paused, releasedProposalIds: [], eventId: event.id };
+  }
+
   async setMode(
     mode: SystemMode,
     options: ActorOptions,
   ): Promise<{ changed: boolean; eventId: string }> {
     return this.db.transaction(async (tx) => {
-      const current = await this.readWith(tx);
+      const current = await this.readOwn(tx);
       const ts = nowIso();
       if (current.mode !== mode) {
         await tx
-          .update(systemState)
+          .update(principalState)
           .set({ mode, updatedAt: new Date(ts) })
-          .where(eq(systemState.id, SYSTEM_STATE_ID));
+          .where(eq(principalState.principalId, current.principalId));
       }
       const event = await this.writer.append(
         {
@@ -273,15 +476,15 @@ export class SystemControl {
 
   /**
    * Sets the quiet hours and the push budget that shape how often Lance
-   * interrupts Dom (spec 9.1). Like every other change to `system_state`,
-   * it goes through here so the ledger carries it.
+   * interrupts the principal (spec 9.1). Like every other change to their
+   * run state, it goes through here so the ledger carries it.
    */
   async setInterruptionBudget(
     budget: InterruptionBudget,
     options: ActorOptions,
   ): Promise<{ changed: boolean; eventId: string }> {
     return this.db.transaction(async (tx) => {
-      const current = await this.readWith(tx);
+      const current = await this.readOwn(tx);
       const ts = nowIso();
       const changed =
         current.quietHoursStart !== budget.quietHoursStart ||
@@ -289,14 +492,14 @@ export class SystemControl {
         current.pushBudgetPerHour !== budget.pushBudgetPerHour;
       if (changed) {
         await tx
-          .update(systemState)
+          .update(principalState)
           .set({
             quietHoursStart: budget.quietHoursStart,
             quietHoursEnd: budget.quietHoursEnd,
             pushBudgetPerHour: budget.pushBudgetPerHour,
             updatedAt: new Date(ts),
           })
-          .where(eq(systemState.id, SYSTEM_STATE_ID));
+          .where(eq(principalState.principalId, current.principalId));
       }
       const event = await this.writer.append(
         {
@@ -319,7 +522,7 @@ export class SystemControl {
   }
 
   /**
-   * Sets the daily model spend ceiling (spec 13). Recorded as a state change
+   * Sets the principal's daily model spend ceiling (spec 13). Recorded as a state change
    * like the interruption budget; the worker reads the row on every model
    * call and every budget-guard run, so the new ceiling applies at once.
    */
@@ -328,14 +531,14 @@ export class SystemControl {
     options: ActorOptions,
   ): Promise<{ changed: boolean; eventId: string }> {
     return this.db.transaction(async (tx) => {
-      const current = await this.readWith(tx);
+      const current = await this.readOwn(tx);
       const ts = nowIso();
       const changed = current.costCeilingGbp !== ceiling.costCeilingGbp;
       if (changed) {
         await tx
-          .update(systemState)
+          .update(principalState)
           .set({ costCeilingGbp: ceiling.costCeilingGbp, updatedAt: new Date(ts) })
-          .where(eq(systemState.id, SYSTEM_STATE_ID));
+          .where(eq(principalState.principalId, current.principalId));
       }
       const event = await this.writer.append(
         {
@@ -384,7 +587,7 @@ export class SystemControl {
         const payload = event.payload as Record<string, unknown> | null;
         const change = payload?.['change'];
         if (change === 'resume') return { lastPause, held: [...held.values()] };
-        if (change !== 'pause' && change !== 'hold') continue;
+        if (change !== 'pause' && change !== 'hold' && change !== 'pause_all') continue;
         if (change === 'pause')
           lastPause ??= { eventId: event.id, correlationId: event.correlationId };
         for (const row of readHeld(payload)) {

@@ -1,6 +1,6 @@
 import { MemoryRunRecorder, ScriptedRunner, textMessage } from '@lance/agents/testing';
-import { briefs, commitments, createDb, proposals, runMigrations, seed, type Db } from '@lance/db';
-import { startPostgresContainer } from '@lance/db/testing';
+import { briefs, commitments, proposals, runMigrations, type Db } from '@lance/db';
+import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerWriter } from '@lance/ledger';
 import { loadConfig, newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -20,8 +20,7 @@ beforeAll(async () => {
   container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
-  db = createDb({ connectionString, password: 'postgres' });
-  await seed(db);
+  db = await openSeededTestDb(connectionString);
   const base = {
     correlationId: newUlid(),
     counterpartyClass: 'client' as const,

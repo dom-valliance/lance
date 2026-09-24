@@ -1,6 +1,7 @@
 import { index, integer, numeric, pgTable, text } from 'drizzle-orm/pg-core';
 import { agentRunStatus } from '../enums.js';
 import { createdAt, timestamptz, ulid, ulidCheck } from './columns.js';
+import { principalId } from './principals.js';
 
 /**
  * One row per agent invocation, for cost and latency accounting
@@ -11,6 +12,7 @@ export const agentRuns = pgTable(
   'agent_runs',
   {
     id: ulid('id').primaryKey(),
+    principalId: principalId(),
     agent: text('agent').notNull(),
     version: text('version').notNull(),
     model: text('model').notNull(),

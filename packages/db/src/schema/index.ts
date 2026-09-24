@@ -11,3 +11,5 @@ export * from './briefs.js';
 export * from './agent-runs.js';
 export * from './system-state.js';
 export * from './users.js';
+export * from './principals.js';
+export * from './principal-state.js';

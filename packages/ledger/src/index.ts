@@ -5,7 +5,7 @@ export type { AppendResult, DbExecutor } from './writer.js';
 export { LedgerReader } from './reader.js';
 export type { LedgerCountQuery, LedgerEventRow, LedgerQuery } from './reader.js';
 export { rebuildObservations } from './rebuild.js';
-export { SystemControl } from './control.js';
+export { SystemControl, effectiveRunState } from './control.js';
 export type {
   ActorOptions,
   CostCeiling,
@@ -15,6 +15,7 @@ export type {
   PauseOptions,
   PauseResult,
   ResumeResult,
+  RunState,
 } from './control.js';
 export { decideProposal, expireProposals, ProposalTransitionError } from './proposals.js';
 export type { DecisionInput, DecisionResult, ProposalAction } from './proposals.js';

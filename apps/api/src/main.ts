@@ -1,6 +1,6 @@
 import { createSlackSurface, type SlackSurface } from '@lance/connectors';
 import { KeyVaultTokenStore } from '@lance/connectors/graph';
-import { createDb, type Db } from '@lance/db';
+import { createDb, waitForSinglePrincipal, scopedDb, type Db } from '@lance/db';
 import {
   countProposals,
   decideProposal,
@@ -40,6 +40,8 @@ const HOST = '0.0.0.0';
 export interface RuntimeOptions {
   config: Config;
   db: Db;
+  /** The principal `db` is scoped to; the ontology reads through the same scope. */
+  principalId: string;
   auth: TokenVerifier;
   slack: SlackDeps;
   ingestSecret: string;
@@ -93,7 +95,11 @@ export const createApiDeps = (options: RuntimeOptions): ApiDeps => {
     briefs: createBriefStore(options.db),
     alerts: createAlertStore(options.db),
     agents: createAgentsStore(options.db),
-    ontology: new OntologyRepository(options.db),
+    ontology: new OntologyRepository(
+      options.db,
+      { principalId: options.principalId },
+      { principalName: options.config.dom.name },
+    ),
     enqueueChase: (commitmentId) => executeQueue.enqueueChase(commitmentId),
     enqueueBrief: () => executeQueue.enqueueBrief(),
     status: createDbStatusSource(options.db, control, {
@@ -161,21 +167,32 @@ export const main = async (): Promise<void> => {
     serviceVersion: '0.1.0',
     environment: config.nodeEnv,
   });
-  const db = createDb();
-  const executeQueue = createExecuteQueue(db);
-
   const tenantId = requiredEnv('ENTRA_TENANT_ID');
   const clientId = requiredEnv('ENTRA_CLIENT_ID');
+  const allowedUpn = requiredEnv('ALLOWED_UPN');
+
+  // One principal in Phase 4 (ADR 0015): every store below reads and writes
+  // through a handle scoped to it, so row-level security holds the line.
+  const root = createDb();
+  const principal = await waitForSinglePrincipal(root, allowedUpn, {
+    waitSeconds: config.database.startupWaitSeconds,
+    log: (message) => {
+      console.warn(message);
+    },
+  });
+  const db = scopedDb(root, { principalId: principal.id });
+  const executeQueue = createExecuteQueue(db);
 
   const deps = createApiDeps({
     config,
     db,
+    principalId: principal.id,
     executeQueue,
     slackSurface: slackSurfaceFromEnv(config.slack.channelId),
     auth: createEntraVerifier({
       tenantId,
       clientId,
-      allowedUpn: requiredEnv('ALLOWED_UPN'),
+      allowedUpn,
     }),
     graph: {
       tenantId,
@@ -186,7 +203,9 @@ export const main = async (): Promise<void> => {
     },
     slack: {
       signingSecret: readSecret('SLACK_SIGNING_SECRET'),
-      allowedUserId: process.env['SLACK_ALLOWED_USER_ID'] ?? null,
+      // The principal's own Slack id; the environment variable covers a row
+      // recorded before the id was known.
+      allowedUserId: principal.slackUserId ?? process.env['SLACK_ALLOWED_USER_ID'] ?? null,
     },
     ingestSecret: readSecret('AGENT_LOG_INGEST_SECRET'),
   });

@@ -30,6 +30,7 @@ export const ACTION_CLASS_LABELS: Record<ActionClass, string> = {
   send_email: 'Send email',
   delete: 'Delete',
   rule_change: 'Rule change',
+  promote_to_shared: 'Share with the team',
 };
 
 export const SYSTEM_LABELS: Record<SourceSystem, string> = {

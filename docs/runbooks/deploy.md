@@ -228,10 +228,10 @@ Run this once per environment, as the Entra administrator from step 2, before th
 
 ## 8. Run the migration job
 
-The job is manual trigger only and never runs on a schedule. It runs the migrations and then the idempotent seed (system_state row, Dom's user row) as the migrate identity, and migration 0000 grants that identity `lance_migrator` so later migrations can reassign ownership. The deployment itself never runs it; `scripts/run-migration-job.sh` does, and `deploy.yml` runs that script after every automated deploy (ADR 0014). By hand:
+The job is manual trigger only and never runs on a schedule. It runs the migrations and then the idempotent seed (the global state row and the first principal) as the migrate identity, and migration 0000 grants that identity `lance_migrator` so later migrations can reassign ownership. The deployment itself never runs it; `scripts/run-migration-job.sh` does, and `deploy.yml` runs that script with the new tag before the deployment, so the migrations run before the apps move (ADR 0032). By hand, run it with the tag before step 6, and without one to rerun it on the image it has:
 
 ```
-scripts/run-migration-job.sh dev
+scripts/run-migration-job.sh dev "${LANCE_IMAGE_TAG}"
 ```
 
 The script starts an execution, waits for it to finish, prints its log and exits non-zero on anything other than `Succeeded`. To look at past executions:
@@ -288,7 +288,8 @@ Lance starts in dry run: proposals are created and held, nothing is written exte
 
 ## Notes
 
-- A deployment updates the migration job's image but never runs it. The workflow runs the job right after the deployment (step 8); a manual deploy must do the same before trusting the apps, because a worker or api that needs a table or a graph label the job has not created fails at its first use, not at start-up. The apps move to the new image before the job runs, so a migration that must precede its code needs two deploys.
+- The migration job runs on the new image before the apps move to it (ADR 0032), so every migration must leave the image already running working for the minute the apps take to move. The apps wait up to `LANCE_STARTUP_WAIT_SECONDS` (default 600) at start-up for their principal, so a start that races the job waits for it.
+- The deploy that carries migration 0009 (principals and row-level security) is the exception: the old image cannot write the ledger or read its cursors once 0009 has run. Before merging it, send `/lance pause` in Slack and check `/lance status` says paused. The migration carries the pause into the principal's own state, so the new image starts paused. After the deploy verifies, send `/lance resume`.
 
 - Prod uses `infra/params/prod.bicepparam`, which never deploys on the bootstrap image. Push the images to the prod registry and export `LANCE_IMAGE_TAG` to a tag dev has already run before the first prod deploy. The workflow deploys dev only; prod is a later addition (ADR 0014).
 - Deleting the resource group leaves the Key Vault soft deleted for 90 days, and purge protection means it cannot be purged early. The vault name is derived from the subscription id and the resource group name, so a redeploy into the same group asks for the same name and collides with the soft deleted vault. Recover it rather than renaming: `az keyvault recover --name <vault name>`.

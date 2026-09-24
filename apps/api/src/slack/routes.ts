@@ -189,7 +189,7 @@ const handleResume = async (deps: ApiDeps, displayName: string): Promise<SlackRe
 
 /**
  * Only Dom may work the kill switch from Slack. The allowlist is one Slack
- * user id from `users.slack_user_id`; an unset id refuses everyone, which
+ * user id from `principals.slack_user_id`; an unset id refuses everyone, which
  * is the safe default.
  */
 const mayControl = (deps: ApiDeps, userId: string): boolean =>

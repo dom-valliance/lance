@@ -189,6 +189,7 @@ describe('ledger', () => {
     harness.ledger.rows = [
       {
         id: '01K5S9V6QW3SWCCPVB0N0E301C',
+        principalId: '01K5S9V6QW3SWCCPVB0N0E300H',
         ts: new Date('2026-09-21T12:00:00.000Z'),
         actor: 'user:dom',
         kind: 'decided',

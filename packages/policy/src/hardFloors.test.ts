@@ -13,10 +13,11 @@ describe('hard floors', () => {
     expect(isHardFloorActionClass('read')).toBe(false);
   });
 
-  it('forbids delete and send_email and caps rule_change at propose', () => {
+  it('forbids delete and send_email and caps rule_change and promote_to_shared at propose', () => {
     expect(hardFloorDecision('delete')).toBe('forbid');
     expect(hardFloorDecision('send_email')).toBe('forbid');
     expect(hardFloorDecision('rule_change')).toBe('propose');
-    expect(Object.keys(HARD_FLOORS)).toHaveLength(3);
+    expect(hardFloorDecision('promote_to_shared')).toBe('propose');
+    expect(Object.keys(HARD_FLOORS)).toHaveLength(4);
   });
 });

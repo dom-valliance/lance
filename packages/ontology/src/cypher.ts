@@ -95,6 +95,16 @@ export function isVertex(value: unknown): value is Vertex {
   );
 }
 
+export function isEdge(value: unknown): value is Edge {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'label' in value &&
+    'properties' in value &&
+    'start_id' in value
+  );
+}
+
 /**
  * Runs one Cypher statement and returns the rows, each an array of parsed
  * columns in the order `columns` names them. The query text may not contain

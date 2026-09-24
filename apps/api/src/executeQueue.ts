@@ -40,7 +40,7 @@ export function createBoss(db: Db): PgBoss {
   return new PgBoss({
     schema: BOSS_SCHEMA,
     db: {
-      executeSql: (text: string, values?: unknown[]) => pool.query(text, values as never[]),
+      executeSql: (text: string, values?: unknown[]) => pool.query(text, values),
     },
   });
 }

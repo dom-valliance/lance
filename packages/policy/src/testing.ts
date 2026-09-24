@@ -10,6 +10,7 @@ export function seedLikeId(n: number): string {
 
 export function rule(overrides: Partial<PolicyRule> & Pick<PolicyRule, 'id'>): PolicyRule {
   return {
+    principalId: null,
     version: 1,
     active: true,
     actionClass: '*',

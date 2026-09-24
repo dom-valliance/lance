@@ -4,10 +4,13 @@ import { systemMode } from '../enums.js';
 import { timestamptz, updatedAt } from './columns.js';
 
 /**
- * The single row that carries the kill switch and the run mode
- * (spec section 5.1, CLAUDE.md non-negotiable 7). The CHECK on `id` makes a
- * second row impossible, so every reader can select by id 1 without
- * ordering. Mode defaults to `dry_run`: writes are opt in.
+ * The global row above every principal's `principal_state` (ADR 0015):
+ * the organisation-wide kill switch, the mode ceiling and the organisation
+ * cost ceiling (spec section 5.1, CLAUDE.md non-negotiable 7). The CHECK on
+ * `id` makes a second row impossible, so every reader can select by id 1
+ * without ordering. Mode defaults to `dry_run`: writes are opt in. The
+ * quiet hours and push budget columns predate ADR 0015 and are not read;
+ * each principal's own live in `principal_state`.
  */
 export const systemState = pgTable(
   'system_state',

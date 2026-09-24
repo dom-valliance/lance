@@ -78,7 +78,7 @@ const InteractionUserSchema = z.object({ user: z.object({ id: z.string().min(1) 
 
 /**
  * Only Dom works Lance's buttons. The allowlist is one Slack user id from
- * `users.slack_user_id`; an unset id refuses everyone, which is the safe
+ * `principals.slack_user_id`; an unset id refuses everyone, which is the safe
  * default before the id is recorded.
  */
 const mayDecide = (deps: ApiDeps, userId: string): boolean =>

@@ -1,5 +1,5 @@
 import { startPostgresContainer } from '@lance/db/testing';
-import { createDb, runMigrations, type Db } from '@lance/db';
+import { createDb, runMigrations, scopedDb, SEED_PRINCIPAL_ID, seed, type Db } from '@lance/db';
 import { hashRecord, isUlid, newUlid, type LedgerEventInputCandidate } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import pg from 'pg';
@@ -117,12 +117,19 @@ beforeAll(async () => {
 
   app = new pg.Client({ connectionString: appUri });
   await app.connect();
+  // Forced row-level security shows a session only its principal's rows
+  // (ADR 0015); the raw client takes the same scope as the handles below.
+  await app.query("SELECT set_config('app.principal', $1, false)", [SEED_PRINCIPAL_ID]);
 
-  appDb = createDb({ connectionString: appUri, password: APP_PASSWORD });
-  migratorDb = createDb({
+  const migratorRoot = createDb({
     connectionString: container.getConnectionUri(),
     password: container.getPassword(),
   });
+  await seed(migratorRoot);
+  appDb = scopedDb(createDb({ connectionString: appUri, password: APP_PASSWORD }), {
+    principalId: SEED_PRINCIPAL_ID,
+  });
+  migratorDb = scopedDb(migratorRoot, { principalId: SEED_PRINCIPAL_ID });
 
   writer = new LedgerWriter(appDb);
   reader = new LedgerReader(appDb);

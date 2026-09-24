@@ -24,7 +24,14 @@ import {
   type NotionConnector,
   type SlackSurface,
 } from '@lance/connectors';
-import { createDb, observations, proposals, type Db } from '@lance/db';
+import {
+  createDb,
+  observations,
+  proposals,
+  waitForSinglePrincipal,
+  scopedDb,
+  type Db,
+} from '@lance/db';
 import { OntologyRepository } from '@lance/ontology';
 import {
   expireProposals,
@@ -33,7 +40,14 @@ import {
   SystemControl,
   toProposal,
 } from '@lance/ledger';
-import { getConfig, nowIso, readSecret, type Config, type ProvenanceRef } from '@lance/shared';
+import {
+  getConfig,
+  newUlid,
+  nowIso,
+  readSecret,
+  type Config,
+  type ProvenanceRef,
+} from '@lance/shared';
 import { initTelemetry } from '@lance/telemetry';
 import { and, eq } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
@@ -48,6 +62,7 @@ import { reflectProposal } from './executor/reflect.js';
 import { postDryRunDigest } from './digest/dryRunDigest.js';
 import { ensureSeedRules, loadActiveRules } from './policy/rules.js';
 import { runChase } from './chase/run.js';
+import { icalUidOfGraphEvent } from './watchers/graph/icalUid.js';
 import { createBoss, startBoss, work } from './scheduler/boss.js';
 import { PauseGate } from './scheduler/gate.js';
 import { QUEUES, type ChaseJob } from './scheduler/queues.js';
@@ -275,7 +290,17 @@ async function main(): Promise<void> {
     serviceVersion: WORKER_VERSION,
     environment: config.nodeEnv,
   });
-  const db = createDb();
+  // One principal in Phase 4 (ADR 0015). Every job runs through a handle
+  // scoped to it; organisation rules are seeded through an admin scope.
+  const root = createDb();
+  const principal = await waitForSinglePrincipal(root, config.dom.email, {
+    waitSeconds: config.database.startupWaitSeconds,
+    log: (message) => {
+      console.warn(message);
+    },
+  });
+  const db = scopedDb(root, { principalId: principal.id });
+  const adminDb = scopedDb(root, { principalId: principal.id, admin: true });
   const control = new SystemControl(db);
   const gate = new PauseGate(control);
   const boss = createBoss(db);
@@ -283,13 +308,25 @@ async function main(): Promise<void> {
     console.error({ err: error }, 'pg-boss error');
   });
 
-  const seeded = await ensureSeedRules(db, config.slack.channelId);
+  const seeded = await ensureSeedRules(adminDb, config.slack.channelId);
   const graph = buildGraph(db);
   const notion = buildNotion(config, db);
   const slack = buildSlack(config);
   const agent = buildAgentDeps(config, db, control);
   const jamie = buildJamie(db);
-  const ontology = new OntologyRepository(db);
+  const ontology = new OntologyRepository(
+    db,
+    { principalId: principal.id },
+    { principalName: config.dom.name },
+  );
+  // Graphs written before ADR 0017 carry no layers and keep each meeting's
+  // mailbox context on the shared node. The backfill is recorded and
+  // idempotent, so a start-up after the first records nothing.
+  const backfill = await ontology.backfillLayers(
+    { correlationId: newUlid() },
+    { icalUidOf: (graphEventId) => icalUidOfGraphEvent(db, graphEventId) },
+  );
+  console.info({ ...backfill }, 'ontology layers backfilled');
   const extractCommitments =
     agent === null
       ? null

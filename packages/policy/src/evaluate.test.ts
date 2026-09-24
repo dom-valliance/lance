@@ -56,6 +56,7 @@ describe('evaluate', () => {
       reason: 'rule_matched',
       ruleId: auto.id,
       specificity: 1,
+      tier: 'organisation',
       unmetConditions: [],
       requiresCriticPass: true,
     });

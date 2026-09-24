@@ -14,7 +14,7 @@ export const runMigrations = async (options: CreateDbOptions = {}): Promise<void
   // A query error inside the migration transaction can otherwise surface only
   // as a bare "Connection terminated unexpectedly" from the checked-out client.
   // Print the first real message so the job log names the failing statement.
-  db.$client.on('connect', (client) => {
+  db.$client.base.on('connect', (client) => {
     client.on('error', (error: Error) => {
       console.error(`Postgres client error during migration: ${error.message}`);
     });

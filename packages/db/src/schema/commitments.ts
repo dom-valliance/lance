@@ -1,6 +1,7 @@
 import { index, integer, jsonb, pgTable, real, text } from 'drizzle-orm/pg-core';
 import { commitmentDirection, commitmentStatus } from '../enums.js';
 import { createdAt, timestamptz, ulid, ulidCheck, updatedAt } from './columns.js';
+import { principalId } from './principals.js';
 
 /**
  * Promises extracted from mail and meetings (spec section 5.1).
@@ -10,6 +11,7 @@ export const commitments = pgTable(
   'commitments',
   {
     id: ulid('id').primaryKey(),
+    principalId: principalId(),
     direction: commitmentDirection('direction').notNull(),
     ownerPersonId: text('owner_person_id').notNull(),
     counterpartyPersonId: text('counterparty_person_id').notNull(),

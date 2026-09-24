@@ -1,6 +1,6 @@
-import { startPostgresContainer } from '@lance/db/testing';
+import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { createDb, proposals, runMigrations, seed, type Db } from '@lance/db';
+import { proposals, runMigrations, type Db } from '@lance/db';
 import { LedgerReader, SystemControl } from '@lance/ledger';
 import { newUlid, nowIso } from '@lance/shared';
 import { eq } from 'drizzle-orm';
@@ -65,8 +65,7 @@ beforeAll(async () => {
   container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
-  db = createDb({ connectionString, password: 'postgres' });
-  await seed(db);
+  db = await openSeededTestDb(connectionString);
   control = new SystemControl(db);
   await control.setMode('live', { actor: 'user:dom' });
   boss = createBoss(db);

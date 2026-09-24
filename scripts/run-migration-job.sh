@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 #
-# Usage: scripts/run-migration-job.sh <dev|prod>
+# Usage: scripts/run-migration-job.sh <dev|prod> [image tag]
+#
+# With an image tag, first points the job at lance-worker:<tag>, so the
+# migrations of the commit being deployed run before the apps move to it.
+# The deployment that follows sets the same image from the template, so the
+# two agree. Without a tag the job runs the image it already has.
 #
 # Starts the migration job caj-lance-migrate-<env>, waits for the execution to
 # finish and prints its log. Exits 0 on Succeeded and 1 on anything else, so a
@@ -14,16 +19,29 @@
 
 set -euo pipefail
 
-if [ $# -ne 1 ]; then
-  echo "Usage: scripts/run-migration-job.sh <dev|prod>" >&2
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+  echo "Usage: scripts/run-migration-job.sh <dev|prod> [image tag]" >&2
   exit 2
 fi
 
 environment=$1
+tag=${2:-}
 resource_group="rg-lance-${environment}"
 job="caj-lance-migrate-${environment}"
 poll_seconds=10
 deadline_seconds=2000
+
+if [[ -n "${tag}" ]]; then
+  registry=$(az acr list -g "${resource_group}" --query "[0].name" -o tsv)
+  if [[ -z "${registry}" ]]; then
+    echo "No container registry in ${resource_group}. Deploy the environment on the bootstrap image first (docs/runbooks/deploy.md, step 3)." >&2
+    exit 1
+  fi
+  login_server=$(az acr show -n "${registry}" --query loginServer -o tsv)
+  image="${login_server}/lance-worker:${tag}"
+  echo "Pointing ${job} at ${image}"
+  az containerapp job update -g "${resource_group}" -n "${job}" --image "${image}" --output none
+fi
 
 execution=$(az containerapp job start -g "${resource_group}" -n "${job}" --query name -o tsv)
 if [[ -z "${execution}" ]]; then

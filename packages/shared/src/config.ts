@@ -59,6 +59,11 @@ export interface Config {
   database: {
     /** Required outside production; production reaches Postgres via the Entra token from ADR 0008, handled in `@lance/db`. */
     url: string | undefined;
+    /**
+     * How long an app waits at start-up for the migration job to create
+     * its principal before giving up (ADR 0032). Default 600 seconds.
+     */
+    startupWaitSeconds: number;
   };
   models: {
     planner: ModelConfig;
@@ -630,7 +635,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     agentDisplayName,
     mode,
     timeZone,
-    database: { url: databaseUrl },
+    database: {
+      url: databaseUrl,
+      startupWaitSeconds: readField(
+        errors,
+        env,
+        'LANCE_STARTUP_WAIT_SECONDS',
+        z.number().int().nonnegative(),
+        600,
+        'must be a whole number of seconds, zero or more',
+        toNumber,
+      ),
+    },
     models,
     anthropic: { baseUrl: anthropicBaseUrl },
     prices,

@@ -44,6 +44,7 @@ export const ACTION_CLASSES = [
   'send_email',
   'delete',
   'rule_change',
+  'promote_to_shared',
 ] as const;
 export const ActionClassSchema = z.enum(ACTION_CLASSES);
 export type ActionClass = z.infer<typeof ActionClassSchema>;
@@ -178,6 +179,9 @@ export const REVERSIBILITY_BY_ACTION_CLASS: Record<ActionClass, Reversibility> =
   send_email: 'irreversible',
   delete: 'irreversible',
   rule_change: 'irreversible',
+  // Irreversible like rule_change: once shared, every principal has seen it
+  // (ADR 0017).
+  promote_to_shared: 'irreversible',
 };
 
 /**
@@ -187,5 +191,12 @@ export const REVERSIBILITY_BY_ACTION_CLASS: Record<ActionClass, Reversibility> =
  * 1: "Not consultable, not overridable"). `rule_change` is a narrower hard
  * floor that can never be `auto` but is otherwise a normal `propose` action
  * (spec 6.4: "rule_change itself can never be auto. Hard floor.").
+ * `promote_to_shared` is the same kind of floor: private evidence becomes
+ * shared context only through a decided proposal (ADR 0017, ADR 0019).
  */
-export const HARD_FLOOR_ACTION_CLASSES = ['delete', 'send_email', 'rule_change'] as const;
+export const HARD_FLOOR_ACTION_CLASSES = [
+  'delete',
+  'send_email',
+  'rule_change',
+  'promote_to_shared',
+] as const;

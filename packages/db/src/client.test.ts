@@ -9,7 +9,7 @@ afterEach(() => {
 
 /** The pool config `pg` was given, read back off the Drizzle client. */
 function poolOptions(db: ReturnType<typeof createDb>): Record<string, unknown> {
-  return db.$client.options as unknown as Record<string, unknown>;
+  return db.$client.base.options as unknown as Record<string, unknown>;
 }
 
 describe('createDb', () => {

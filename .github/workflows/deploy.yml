@@ -150,12 +150,15 @@ jobs:
       - name: Install the Container Apps CLI extension
         run: az extension add --name containerapp --upgrade --yes
 
+      # Migrations run on the new commit's image before the apps move to it,
+      # so new code never starts against an old schema. A migration must
+      # therefore keep the running apps working until they are replaced.
+      - name: Run the migration job on the new image
+        run: scripts/run-migration-job.sh "$ENVIRONMENT" "${{ needs.resolve.outputs.tag }}"
+
       - name: Deploy the environment
         id: deploy
         run: scripts/deploy.sh "$ENVIRONMENT" "${{ needs.resolve.outputs.tag }}"
-
-      - name: Run the migration job
-        run: scripts/run-migration-job.sh "$ENVIRONMENT"
 
       - name: Verify the deployment
         run: scripts/verify-deploy.sh "$ENVIRONMENT" "${{ needs.resolve.outputs.tag }}"

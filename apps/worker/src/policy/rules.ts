@@ -9,6 +9,7 @@ export async function loadActiveRules(db: Db): Promise<PolicyRule[]> {
   return rows.map((row) =>
     validateRule({
       id: row.id,
+      principalId: row.principalId,
       version: row.version,
       active: row.active,
       actionClass: row.actionClass,
@@ -23,7 +24,10 @@ export async function loadActiveRules(db: Db): Promise<PolicyRule[]> {
   );
 }
 
-/** Inserts the v1 seed rules (spec 6.2) when the table is empty. Idempotent by id. */
+/**
+ * Inserts the v1 seed rules (spec 6.2) as organisation defaults when the
+ * table holds none. Idempotent by id. `db` must be an admin scope.
+ */
 export async function ensureSeedRules(
   db: Db,
   slackChannelId: string,
@@ -34,6 +38,9 @@ export async function ensureSeedRules(
   await db.insert(policyRules).values(
     rules.map((rule) => ({
       id: rule.id,
+      // The v1 seed rules are organisation defaults (ADR 0019), which only
+      // an admin scope may write.
+      principalId: null,
       version: rule.version,
       active: rule.active,
       actionClass: rule.actionClass,

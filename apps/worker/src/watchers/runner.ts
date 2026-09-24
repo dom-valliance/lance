@@ -55,7 +55,7 @@ async function writeCursor(
     .insert(cursors)
     .values({ watcher, key, value, updatedAt: new Date(ts) })
     .onConflictDoUpdate({
-      target: [cursors.watcher, cursors.key],
+      target: [cursors.principalId, cursors.watcher, cursors.key],
       set: { value, updatedAt: new Date(ts) },
     });
 }

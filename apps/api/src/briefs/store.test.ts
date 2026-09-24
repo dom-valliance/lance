@@ -1,5 +1,5 @@
-import { briefs, createDb, runMigrations, seed, type Db, type NewBrief } from '@lance/db';
-import { startPostgresContainer } from '@lance/db/testing';
+import { briefs, runMigrations, type Db, type NewBrief } from '@lance/db';
+import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -33,8 +33,7 @@ beforeAll(async () => {
   container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
-  db = createDb({ connectionString, password: 'postgres' });
-  await seed(db);
+  db = await openSeededTestDb(connectionString);
   store = createBriefStore(db);
 }, 300000);
 

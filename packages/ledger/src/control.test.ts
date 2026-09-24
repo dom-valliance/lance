@@ -1,10 +1,14 @@
 import { startPostgresContainer } from '@lance/db/testing';
 import {
-  SYSTEM_STATE_ID,
+  SEED_PRINCIPAL_ID,
   createDb,
+  principalState,
+  principals,
   proposals,
   runMigrations,
+  scopedDb,
   seed,
+  systemState,
   type Db,
   type NewProposal,
 } from '@lance/db';
@@ -18,13 +22,15 @@ import { SystemControl, type PauseResult, type ResumeResult } from './control.js
  * The kill switch against a real container (spec 4.3, non-negotiable 7).
  * Same setup as the ledger suite: a throwaway LOGIN role holding lance_app
  * and nothing else, because the api and the worker run the kill switch under
- * exactly that grant. The migrator seeds the single system_state row.
+ * exactly that grant. The migrator seeds the global row and the seed
+ * principal's run state; a second principal shows the scope (ADR 0015).
  */
 
 const APP_ROLE = 'test_control_app';
 const APP_PASSWORD = 'test';
 
 const DOM = 'user:dom';
+const OTHER_PRINCIPAL_ID = '01K5S9V6QW3SWCCPVB0N0E3Q7H';
 
 interface LedgerEventShape {
   actor: string;
@@ -38,7 +44,9 @@ interface LedgerEventShape {
 let container: StartedPostgreSqlContainer;
 let superuser: pg.Client;
 let app: pg.Client;
+let appRoot: Db;
 let appDb: Db;
+let otherControl: SystemControl;
 let migratorDb: Db;
 let control: SystemControl;
 
@@ -124,19 +132,27 @@ beforeAll(async () => {
   app = new pg.Client({ connectionString: appUri });
   await app.connect();
 
-  appDb = createDb({ connectionString: appUri, password: APP_PASSWORD });
+  await app.query("SELECT set_config('app.principal', $1, false)", [SEED_PRINCIPAL_ID]);
+
+  appRoot = createDb({ connectionString: appUri, password: APP_PASSWORD });
   migratorDb = createDb({
     connectionString: container.getConnectionUri(),
     password: container.getPassword(),
   });
 
   await seed(migratorDb);
+  await migratorDb
+    .insert(principals)
+    .values({ id: OTHER_PRINCIPAL_ID, upn: 'second.principal@example.test' });
+  await scopedDb(migratorDb, { principalId: OTHER_PRINCIPAL_ID }).insert(principalState).values({});
 
+  appDb = scopedDb(appRoot, { principalId: SEED_PRINCIPAL_ID });
   control = new SystemControl(appDb);
+  otherControl = new SystemControl(scopedDb(appRoot, { principalId: OTHER_PRINCIPAL_ID }));
 });
 
 afterAll(async () => {
-  await appDb?.$client.end();
+  await appRoot?.$client.end();
   await migratorDb?.$client.end();
   await app?.end();
   await superuser?.end();
@@ -144,10 +160,11 @@ afterAll(async () => {
 });
 
 describe('SystemControl.read', () => {
-  it('returns the seeded system_state row', async () => {
+  it("returns the seeded principal's run state", async () => {
     const state = await control.read();
 
-    expect(state.id).toBe(SYSTEM_STATE_ID);
+    expect(state.principalId).toBe(SEED_PRINCIPAL_ID);
+    expect(state.pausedGlobally).toBe(false);
     expect(state.paused).toBe(false);
     expect(state.pausedReason).toBeNull();
     expect(state.pausedBy).toBeNull();
@@ -386,5 +403,65 @@ describe('SystemControl.setInterruptionBudget', () => {
     expect(result.changed).toBe(false);
     const event = await eventById(result.eventId);
     expect(event.payload?.['change']).toBe('interruption_budget');
+  });
+});
+
+describe('the kill switch across principals', () => {
+  it("pauses one principal and leaves the other's run state alone", async () => {
+    await control.pause({ reason: 'one principal', actor: DOM });
+    try {
+      expect(await control.isPaused()).toBe(true);
+      expect(await otherControl.isPaused()).toBe(false);
+    } finally {
+      await control.resume({ actor: DOM });
+    }
+  });
+
+  it('pauses every principal from the global row, and a principal resume does not lift it', async () => {
+    const paused = await control.pauseAll({ reason: 'global drill', actor: DOM });
+    try {
+      expect(paused.changed).toBe(true);
+      const [own, other] = [await control.read(), await otherControl.read()];
+      expect([own.paused, own.pausedGlobally, own.pausedReason]).toEqual([
+        true,
+        true,
+        'global drill',
+      ]);
+      expect([other.paused, other.pausedGlobally]).toEqual([true, true]);
+
+      const underGlobal = await otherControl.resume({ actor: DOM });
+      expect(underGlobal.releasedProposalIds).toEqual([]);
+      expect(await otherControl.isPaused()).toBe(true);
+    } finally {
+      await control.resumeAll({ actor: DOM });
+    }
+    expect(await control.isPaused()).toBe(false);
+    expect(await otherControl.isPaused()).toBe(false);
+  });
+
+  it('runs a principal live only when the global ceiling is live as well', async () => {
+    await control.setMode('live', { actor: DOM });
+    try {
+      expect((await control.read()).mode).toBe('live');
+      expect((await otherControl.read()).mode).toBe('dry_run');
+      await migratorDb.update(systemState).set({ mode: 'dry_run' });
+      expect((await control.read()).mode).toBe('dry_run');
+    } finally {
+      await migratorDb.update(systemState).set({ mode: 'live' });
+      await control.setMode('dry_run', { actor: DOM });
+    }
+  });
+
+  it("holds the caller's approved proposals on a global pause and releases them on their resume", async () => {
+    const approvedId = await insertProposal('approved');
+    await control.pauseAll({ reason: 'global hold', actor: DOM });
+    expect(await statusOf(approvedId)).toBe('held');
+    const early = await control.resume({ actor: DOM });
+    expect(early.releasedProposalIds).toEqual([]);
+    expect(await statusOf(approvedId)).toBe('held');
+    await control.resumeAll({ actor: DOM });
+    const resumed = await control.resume({ actor: DOM });
+    expect(resumed.releasedProposalIds).toContain(approvedId);
+    expect(await statusOf(approvedId)).toBe('approved');
   });
 });

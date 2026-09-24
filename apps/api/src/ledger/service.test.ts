@@ -6,6 +6,7 @@ import { listLedger } from './service.js';
 const CORRELATION_ID = '01K5S9V6QW3SWCCPVB0N0E306Z';
 
 const event = (id: string, ts: string): LedgerEventRow => ({
+  principalId: '01K5S9V6QW3SWCCPVB0N0E300H',
   id,
   ts: new Date(ts),
   actor: 'user:dom',

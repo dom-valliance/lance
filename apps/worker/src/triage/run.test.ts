@@ -1,7 +1,7 @@
 import { MemoryRunRecorder, ScriptedRunner, textMessage } from '@lance/agents/testing';
 import type { ProposalDraft } from '@lance/agents';
-import { alerts, createDb, runMigrations, seed, type Db } from '@lance/db';
-import { startPostgresContainer } from '@lance/db/testing';
+import { alerts, SEED_PRINCIPAL_ID, runMigrations, type Db } from '@lance/db';
+import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
 import { OntologyRepository } from '@lance/ontology';
 import { hashRecord, idempotencyKey, loadConfig, stableUlid } from '@lance/shared';
@@ -57,8 +57,7 @@ beforeAll(async () => {
   container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
-  db = createDb({ connectionString, password: 'postgres' });
-  await seed(db);
+  db = await openSeededTestDb(connectionString);
 }, 120000);
 
 afterAll(async () => {
@@ -283,7 +282,7 @@ describe('runTriage', () => {
           readSpendUsd: () => Promise.resolve(0),
         },
         createProposal: () => Promise.reject(new Error('no proposals in this test')),
-        ontology: new OntologyRepository(db),
+        ontology: new OntologyRepository(db, { principalId: SEED_PRINCIPAL_ID }),
         dom: { name: 'Dom Selvon', email: 'dom@valliance.ai' },
         extractCommitments: (source) => {
           expect(source.text).toBe(record.transcript);
@@ -297,6 +296,96 @@ describe('runTriage', () => {
     expect(result.commitments.map((commitment) => commitment.description)).toEqual([
       'Send the resource plan',
     ]);
+  });
+
+  it("keys a Jamie meeting on the iCalUId of the principal's own calendar event and keeps its context on the principal's edge", async () => {
+    const ontology = new OntologyRepository(db, { principalId: SEED_PRINCIPAL_ID });
+    await new LedgerWriter(db).append({
+      ts: '2026-09-21T07:00:00.000Z',
+      actor: 'agent:watcher-graph-calendar@0.1.0',
+      kind: 'observed',
+      sourceSystem: 'graph',
+      sourceRecordId: 'AAMk-evt-9',
+      sourceRecordHash: 'calendar-hash-9',
+      idempotencyKey: idempotencyKey('graph', 'AAMk-evt-9', 'calendar-hash-9'),
+      correlationId: stableUlid('graph:AAMk-evt-9'),
+      payload: { id: 'AAMk-evt-9', iCalUId: 'ical-9', watcher: 'graph-calendar' },
+    });
+    const triageMeeting = async (id: string, graphEventId: string | null) => {
+      const meetingCorrelationId = stableUlid(`jamie:${id}`);
+      const record = {
+        kind: 'meeting',
+        id,
+        title: `Northwind review ${id}`,
+        startTime: '2026-09-22T09:00:00.000Z',
+        endTime: '2026-09-22T09:30:00.000Z',
+        participants: [{ name: 'Dom Selvon', email: 'dom@valliance.ai' }],
+        attendees: [{ name: 'Priya Raman', email: 'priya@northwind.test' }],
+        graphEventId,
+        tags: ['Client'],
+        transcriptReady: false,
+        domAttended: true,
+      };
+      const hash = hashRecord(record);
+      const observed = await new LedgerWriter(db).append({
+        ts: '2026-09-22T10:00:00.000Z',
+        actor: 'agent:watcher-jamie@0.1.0',
+        kind: 'observed',
+        sourceSystem: 'jamie',
+        sourceRecordId: id,
+        sourceRecordHash: hash,
+        idempotencyKey: idempotencyKey('jamie', id, hash),
+        correlationId: meetingCorrelationId,
+        payload: { ...record, labels: ['Meeting'], watcher: 'jamie' },
+      });
+      const modelOutput = {
+        importance: 0.3,
+        urgency: 0.1,
+        summary: 'A review with Northwind.',
+        entities: [],
+        commitments: [],
+        taskCandidates: [],
+        proposalsSubmitted: 0,
+        alertCandidates: [],
+      };
+      await runTriage(
+        {
+          db,
+          config,
+          agent: {
+            runner: new ScriptedRunner([[textMessage(JSON.stringify(modelOutput))]]),
+            recorder: new MemoryRunRecorder(),
+            ledger: new LedgerWriter(db),
+            config: agentConfig,
+            readSpendUsd: () => Promise.resolve(0),
+          },
+          createProposal: () => Promise.reject(new Error('no proposals in this test')),
+          ontology,
+        },
+        {
+          watcher: 'jamie',
+          correlationId: meetingCorrelationId,
+          observationEventIds: [observed.id],
+        },
+      );
+    };
+
+    await triageMeeting('mt-9', 'AAMk-evt-9');
+    const keyed = await ontology.findMeeting({ icalUid: 'ical-9' });
+    expect(keyed?.properties['title']).toBe('Northwind review mt-9');
+    expect(keyed?.properties).not.toHaveProperty('graph_event_id');
+    expect(keyed?.properties).not.toHaveProperty('tags');
+    expect(await ontology.meetingContext(keyed?.id ?? '')).toMatchObject({
+      graphEventId: 'AAMk-evt-9',
+      tags: ['Client'],
+      jamieId: 'mt-9',
+    });
+    expect(await ontology.findMeeting({ jamieId: 'mt-9' })).toMatchObject({ id: keyed?.id });
+
+    await triageMeeting('mt-10', null);
+    const unkeyed = await ontology.findMeeting({ jamieId: 'mt-10' });
+    expect(unkeyed?.properties['jamie_id']).toBe('mt-10');
+    expect(unkeyed?.properties).not.toHaveProperty('ical_uid');
   });
 
   it('refuses a job whose observations do not exist', async () => {

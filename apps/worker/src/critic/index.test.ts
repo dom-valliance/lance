@@ -22,6 +22,7 @@ const draftEmail = (overrides: Partial<ProposalDraft> = {}): ProposalDraft => ({
 
 const rule = (overrides: Partial<PolicyRule> = {}): PolicyRule => ({
   id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+  principalId: null,
   version: 1,
   actionClass: 'draft_email',
   counterpartyClass: '*',

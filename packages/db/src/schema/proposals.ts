@@ -8,6 +8,7 @@ import {
   targetSystem,
 } from '../enums.js';
 import { createdAt, timestamptz, ulid, ulidCheck, updatedAt } from './columns.js';
+import { principalId } from './principals.js';
 
 /**
  * One proposed write, its policy verdict and its decision trail
@@ -18,6 +19,7 @@ export const proposals = pgTable(
   'proposals',
   {
     id: ulid('id').primaryKey(),
+    principalId: principalId(),
     correlationId: ulid('correlation_id').notNull(),
     actionClass: actionClass('action_class').notNull(),
     counterpartyClass: counterpartyClass('counterparty_class').notNull(),

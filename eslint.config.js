@@ -15,24 +15,57 @@ const SDK_BOUNDARY_MESSAGE =
 const WRITES_BOUNDARY_MESSAGE =
   'Connector write functions are callable only from apps/worker/src/executor (CLAUDE.md non-negotiable 2)';
 
-// Full restriction: no file may import the model SDK or connector write functions.
-// Lifted selectively below for the two directories the boundary allows.
+const CYPHER_BOUNDARY_MESSAGE =
+  'Raw Cypher runners (runCypher, sqlRunnerOf, drizzleRunner) are internal to packages/ontology; read and write the graph through OntologyRepository, which enforces the principal scope (ADR 0017)';
+
+const CREATE_DB_MESSAGE =
+  'createDb returns an unscoped handle that row-level security shows nothing to. Only a composition root creates one; everything else takes a handle scoped to a principal (ADR 0015)';
+
+/** Composition roots and tests, the only places that may open an unscoped handle. */
+const CREATE_DB_ALLOWED = [
+  'apps/*/src/main.ts',
+  'packages/ontology/src/rebuild.ts',
+  'packages/db/src/**/*.ts',
+  '**/*.test.ts',
+];
+
+const sdkPath = { name: '@anthropic-ai/sdk', message: SDK_BOUNDARY_MESSAGE };
+const sdkPattern = { group: ['@anthropic-ai/sdk/*'], message: SDK_BOUNDARY_MESSAGE };
+const writesPattern = {
+  group: [
+    '@lance/connectors/writes',
+    '@lance/connectors/writes/*',
+    '**/connectors/src/writes',
+    '**/connectors/src/writes/**',
+  ],
+  message: WRITES_BOUNDARY_MESSAGE,
+};
+// The package entry no longer exports the runners; the named-import entry
+// catches a re-export creeping back, the pattern catches deep and relative
+// imports of the module itself.
+const cypherPath = {
+  name: '@lance/ontology',
+  importNames: ['runCypher', 'sqlRunnerOf', 'drizzleRunner'],
+  message: CYPHER_BOUNDARY_MESSAGE,
+};
+const cypherPattern = {
+  group: [
+    '@lance/ontology/src/cypher',
+    '@lance/ontology/src/cypher.*',
+    '**/ontology/src/cypher',
+    '**/ontology/src/cypher.*',
+  ],
+  message: CYPHER_BOUNDARY_MESSAGE,
+};
+
+// Full restriction: no file may import the model SDK, connector write functions
+// or the raw Cypher runners. Lifted selectively below for the directories the
+// boundary allows.
 const fullBoundaryRestriction = [
   'error',
   {
-    paths: [{ name: '@anthropic-ai/sdk', message: SDK_BOUNDARY_MESSAGE }],
-    patterns: [
-      { group: ['@anthropic-ai/sdk/*'], message: SDK_BOUNDARY_MESSAGE },
-      {
-        group: [
-          '@lance/connectors/writes',
-          '@lance/connectors/writes/*',
-          '**/connectors/src/writes',
-          '**/connectors/src/writes/**',
-        ],
-        message: WRITES_BOUNDARY_MESSAGE,
-      },
-    ],
+    paths: [sdkPath, cypherPath],
+    patterns: [sdkPattern, writesPattern, cypherPattern],
   },
 ];
 
@@ -40,17 +73,8 @@ const fullBoundaryRestriction = [
 const agentsBoundaryRestriction = [
   'error',
   {
-    patterns: [
-      {
-        group: [
-          '@lance/connectors/writes',
-          '@lance/connectors/writes/*',
-          '**/connectors/src/writes',
-          '**/connectors/src/writes/**',
-        ],
-        message: WRITES_BOUNDARY_MESSAGE,
-      },
-    ],
+    paths: [cypherPath],
+    patterns: [writesPattern, cypherPattern],
   },
 ];
 
@@ -58,8 +82,17 @@ const agentsBoundaryRestriction = [
 const executorBoundaryRestriction = [
   'error',
   {
-    paths: [{ name: '@anthropic-ai/sdk', message: SDK_BOUNDARY_MESSAGE }],
-    patterns: [{ group: ['@anthropic-ai/sdk/*'], message: SDK_BOUNDARY_MESSAGE }],
+    paths: [sdkPath, cypherPath],
+    patterns: [sdkPattern, cypherPattern],
+  },
+];
+
+// packages/ontology owns the Cypher runners; everything else still applies.
+const ontologyBoundaryRestriction = [
+  'error',
+  {
+    paths: [sdkPath],
+    patterns: [sdkPattern, writesPattern],
   },
 ];
 
@@ -70,6 +103,8 @@ const BOUNDARY_FIXTURE_PATHS = [
   'packages/policy/src/__boundary_fixture__.ts',
   'apps/worker/src/executor/__boundary_fixture__.ts',
   'apps/api/src/__boundary_fixture__.ts',
+  'apps/worker/src/__boundary_fixture__.ts',
+  'packages/ontology/src/__boundary_fixture__.ts',
 ];
 
 const sourceGlobs = ['apps/*/src/**/*.{ts,tsx}', 'packages/*/src/**/*.{ts,tsx}'];
@@ -134,6 +169,31 @@ export default tseslint.config(
     files: ['apps/worker/src/executor/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': executorBoundaryRestriction,
+    },
+  },
+  {
+    files: ['packages/ontology/src/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ontologyBoundaryRestriction,
+    },
+  },
+  {
+    files: sourceGlobs,
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "ImportDeclaration[source.value='@lance/db'] > ImportSpecifier[imported.name='createDb']",
+          message: CREATE_DB_MESSAGE,
+        },
+      ],
+    },
+  },
+  {
+    files: CREATE_DB_ALLOWED,
+    rules: {
+      'no-restricted-syntax': 'off',
     },
   },
   {

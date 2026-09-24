@@ -1,5 +1,5 @@
-import { createDb, observations, runMigrations, seed, type Db } from '@lance/db';
-import { startPostgresContainer } from '@lance/db/testing';
+import { observations, SEED_PRINCIPAL_ID, runMigrations, type Db } from '@lance/db';
+import { openFixtureDb, openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerWriter } from '@lance/ledger';
 import { OntologyRepository } from '@lance/ontology';
 import { hashRecord, idempotencyKey, stableUlid } from '@lance/shared';
@@ -10,6 +10,8 @@ import type { DetectedAlert, DetectorContext } from './types.js';
 
 let container: StartedPostgreSqlContainer;
 let db: Db;
+/** Clears observations between cases, which the application role may not do. */
+let fixtures: Db;
 let ontology: OntologyRepository;
 
 /** Tuesday morning; 22 September is today and 23 September is tomorrow. */
@@ -80,20 +82,21 @@ beforeAll(async () => {
   container = await startPostgresContainer();
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
-  db = createDb({ connectionString, password: 'postgres' });
-  await seed(db);
-  ontology = new OntologyRepository(db);
+  db = await openSeededTestDb(connectionString);
+  fixtures = openFixtureDb(connectionString);
+  ontology = new OntologyRepository(db, { principalId: SEED_PRINCIPAL_ID });
 }, 120000);
 
 afterAll(async () => {
   await db.$client.end();
+  await fixtures.$client.end();
   await container.stop();
 });
 
 // The ledger keeps every event; the detectors read observations, so each
 // test starts from an empty calendar.
 beforeEach(async () => {
-  await db.delete(observations);
+  await fixtures.delete(observations);
 });
 
 describe('calendarConflictDetector', () => {
