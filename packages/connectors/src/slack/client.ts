@@ -68,6 +68,31 @@ export function slackWriteAccess(client: SlackClient): SlackWrite {
   return write;
 }
 
+/**
+ * A Web API reply with `ok: false`. `code` is Slack's own error string,
+ * such as `name_taken`, for a caller that answers one refusal differently.
+ */
+export class SlackApiError extends ConnectorError {
+  override readonly name = 'SlackApiError';
+
+  constructor(
+    readonly code: string,
+    method: string,
+    status: number,
+    retryable: boolean,
+  ) {
+    super(`slack ${method}: ${code}.`, {
+      connector: 'slack',
+      operation: method,
+      status,
+      retryable,
+    });
+  }
+}
+
+export const isSlackApiError = (error: unknown, code?: string): error is SlackApiError =>
+  error instanceof SlackApiError && (code === undefined || error.code === code);
+
 const RETRYABLE_SLACK_ERRORS = new Set([
   'ratelimited',
   'internal_error',
@@ -112,12 +137,7 @@ export function createSlackClient(options: SlackClientOptions): SlackClient {
       const envelope = SlackEnvelope.parse(response.body);
       if (!envelope.ok) {
         const code = envelope.error ?? 'unknown_error';
-        throw new ConnectorError(`slack ${method}: ${code}.`, {
-          connector: 'slack',
-          operation: method,
-          status: response.status,
-          retryable: RETRYABLE_SLACK_ERRORS.has(code),
-        });
+        throw new SlackApiError(code, method, response.status, RETRYABLE_SLACK_ERRORS.has(code));
       }
       return schema === undefined ? (envelope as T) : schema.parse(envelope);
     };

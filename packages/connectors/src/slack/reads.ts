@@ -31,6 +31,37 @@ const AuthTestSchema = z
   .object({ user_id: z.string(), bot_id: z.string().optional(), team_id: z.string().optional() })
   .passthrough();
 
+const UserInfoSchema = z
+  .object({
+    user: z
+      .object({
+        id: z.string(),
+        name: z.string().optional(),
+        real_name: z.string().optional(),
+        profile: z
+          .object({
+            first_name: z.string().optional(),
+            real_name: z.string().optional(),
+            display_name: z.string().optional(),
+          })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+export interface SlackUserProfile {
+  id: string;
+  /** The profile's first name, or null when the person left it blank. */
+  firstName: string | null;
+  /** The best display name Slack holds: real name, display name, then handle. */
+  displayName: string | null;
+}
+
+const blankToNull = (value: string | undefined): string | null =>
+  value === undefined || value.trim() === '' ? null : value.trim();
+
 /** Channel history for the agent-logs watcher (spec 7.1). Reads only. */
 export function slackReads(client: SlackClient) {
   return {
@@ -38,6 +69,20 @@ export function slackReads(client: SlackClient) {
     async authTest(): Promise<{ userId: string; botId: string | null; teamId: string | null }> {
       const reply = await client.call('auth.test', {}, {}, AuthTestSchema);
       return { userId: reply.user_id, botId: reply.bot_id ?? null, teamId: reply.team_id ?? null };
+    },
+    /** `users.info`: a person's names, for the link page and their channel name (ADR 0023). */
+    async userProfile(user: string): Promise<SlackUserProfile> {
+      const reply = await client.call('users.info', { user }, {}, UserInfoSchema);
+      const profile = reply.user.profile;
+      return {
+        id: reply.user.id,
+        firstName: blankToNull(profile?.first_name),
+        displayName:
+          blankToNull(profile?.real_name) ??
+          blankToNull(reply.user.real_name) ??
+          blankToNull(profile?.display_name) ??
+          blankToNull(reply.user.name),
+      };
     },
     async conversationsHistory(input: {
       channel: string;
