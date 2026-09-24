@@ -71,7 +71,7 @@ describe('the job registry', () => {
 
   it('runs retention nightly for every principal whatever their status, and nothing else that way', () => {
     expect(job('retention')).toMatchObject({
-      schedules: ['15 3 * * *'],
+      schedules: ['0 3 * * *'],
       scope: 'principal',
       locked: true,
       everyStatus: true,

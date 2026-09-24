@@ -190,6 +190,7 @@ module migrateJob 'modules/migrate-job.bicep' = {
     registryLoginServer: registry.outputs.loginServer
     postgresFqdn: postgres.outputs.fqdn
     migrateIdentity: identity.outputs.identities.migrate
+    retentionMemberName: identity.outputs.identities.worker.name
     containerImageTag: containerImageTag
     useBootstrapImage: useBootstrapImage
   }

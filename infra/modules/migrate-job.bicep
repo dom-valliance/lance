@@ -36,6 +36,9 @@ param useBootstrapImage bool
 @description('Database name on the Postgres server.')
 param databaseName string = 'lance'
 
+@description('The Postgres principal of the worker identity, granted lance_retention for SET ROLE only after the migrations (packages/db/src/grants.ts, ADR 0011).')
+param retentionMemberName string
+
 var bootstrapImage = 'mcr.microsoft.com/k8se/quickstart:latest'
 
 resource migrateJob 'Microsoft.App/jobs@2025-01-01' = {
@@ -73,11 +76,11 @@ resource migrateJob 'Microsoft.App/jobs@2025-01-01' = {
           name: 'migrate'
           image: useBootstrapImage ? bootstrapImage : '${registryLoginServer}/lance-worker:${containerImageTag}'
           // The runtime image has no pnpm; tsx is installed with the db package.
-          // Seed is idempotent (ON CONFLICT DO NOTHING), so the job runs both.
+          // Seed and grants are idempotent, so the job runs all three every time.
           command: [
             'sh'
             '-c'
-            'cd /app/packages/db && ./node_modules/.bin/tsx src/migrate.ts && ./node_modules/.bin/tsx src/seed.ts'
+            'cd /app/packages/db && ./node_modules/.bin/tsx src/migrate.ts && ./node_modules/.bin/tsx src/seed.ts && ./node_modules/.bin/tsx src/grants.ts'
           ]
           resources: {
             cpu: json('0.5')
@@ -113,6 +116,12 @@ resource migrateJob 'Microsoft.App/jobs@2025-01-01' = {
             {
               name: 'AZURE_CLIENT_ID'
               value: migrateIdentity.clientId
+            }
+            {
+              // The worker's identity may act as lance_retention for the
+              // nightly retention job and nothing else (ADR 0011).
+              name: 'LANCE_RETENTION_MEMBER'
+              value: retentionMemberName
             }
           ]
         }

@@ -125,7 +125,7 @@ export const SYSTEM_JOBS: readonly JobDeclaration[] = [
   declare({
     slug: RETENTION_QUEUE,
     title: 'Apply the retention windows to what Lance holds',
-    schedules: ['15 3 * * *'],
+    schedules: ['0 3 * * *'],
     locked: true,
     everyStatus: true,
   }),
