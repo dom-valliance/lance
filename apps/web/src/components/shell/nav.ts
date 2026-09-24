@@ -24,6 +24,14 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/settings', label: 'Settings' },
 ];
 
+/** The admin page (ADR 0024). Listed only for a `Lance.Admin`; everyone else never sees it. */
+export const ADMIN_NAV_ITEM: NavItem = { href: '/admin', label: 'Admin' };
+
+/** The pages a person sees in the navigation: the ten, and Admin for a `Lance.Admin`. */
+export function navItemsFor(isAdmin: boolean): readonly NavItem[] {
+  return isAdmin ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
+}
+
 /** Whether `pathname` is `href` or a page beneath it. */
 export function isUnder(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -31,7 +39,7 @@ export function isUnder(pathname: string, href: string): boolean {
 
 /** The title the mobile top bar shows for `pathname`. */
 export function pageTitleFor(pathname: string): string {
-  const item = NAV_ITEMS.find((candidate) => isUnder(pathname, candidate.href));
+  const item = navItemsFor(true).find((candidate) => isUnder(pathname, candidate.href));
   if (item === undefined) return 'Lance';
   return pathname === item.href ? item.label : (item.singular ?? item.label);
 }

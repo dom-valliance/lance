@@ -29,6 +29,8 @@ export interface ShellData {
    * the api, which would refuse it.
    */
   onboarding: boolean;
+  /** True for a `Lance.Admin`, who alone sees Admin in the navigation (ADR 0024). */
+  admin: boolean;
   counts: NavCounts;
   statusLine: ShellStatusLine | null;
   paused: PausedState | null;
@@ -37,6 +39,7 @@ export interface ShellData {
 const EMPTY: ShellData = {
   signedIn: false,
   onboarding: false,
+  admin: false,
   counts: { pendingProposals: null, openAlerts: null },
   statusLine: null,
   paused: null,
@@ -48,6 +51,10 @@ export async function loadShellData(): Promise<ShellData> {
   if (session.principalStatus === 'onboarding')
     return { ...EMPTY, signedIn: true, onboarding: true };
 
+  // The token's roles decide what the navigation lists; the api checks
+  // them again on every admin procedure.
+  const admin = (session.roles ?? []).includes('Lance.Admin');
+
   let client: Awaited<ReturnType<typeof apiClient>>;
   try {
     client = await apiClient();
@@ -55,7 +62,7 @@ export async function loadShellData(): Promise<ShellData> {
     // Signed in, but the session carries no id token. The shell still
     // renders; it reads "Status unavailable" rather than sending the
     // reader back to the sign-in card.
-    return { ...EMPTY, signedIn: true };
+    return { ...EMPTY, signedIn: true, admin };
   }
 
   const [pending, status] = await Promise.all([
@@ -66,6 +73,7 @@ export async function loadShellData(): Promise<ShellData> {
   return {
     signedIn: true,
     onboarding: false,
+    admin,
     counts: { pendingProposals: pending === null ? null : pending.pending, openAlerts: null },
     statusLine: status === null ? null : shellStatusLine(status),
     paused:

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { MobileNav } from '@/components/shell/mobile-nav';
+import { navItemsFor } from '@/components/shell/nav';
 import { PausedBanner } from '@/components/shell/paused-banner';
 import { Sidebar } from '@/components/shell/sidebar';
 import type { ShellData } from '@/lib/shell-data';
@@ -24,11 +25,12 @@ export function AppShell({
     return <main className="grid min-h-screen place-items-center p-4">{children}</main>;
   }
 
+  const items = navItemsFor(data.admin);
   return (
     <div className="flex min-h-screen">
-      <Sidebar agentName={agentName} counts={data.counts} status={data.statusLine} />
+      <Sidebar agentName={agentName} items={items} counts={data.counts} status={data.statusLine} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <MobileNav counts={data.counts} status={data.statusLine} />
+        <MobileNav items={items} counts={data.counts} status={data.statusLine} />
         <main className="flex flex-1 flex-col gap-6 p-4 lg:p-8">
           {data.paused === null ? null : <PausedBanner {...data.paused} />}
           {children}
