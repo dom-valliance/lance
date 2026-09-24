@@ -360,6 +360,11 @@ resource containerApps 'Microsoft.App/containerApps@2025-01-01' = [
                       name: 'PUBLIC_API_URL'
                       value: 'https://${app.name}.${managedEnvironment.properties.defaultDomain}'
                     }
+                    {
+                      // Where /lance login links point: the web app's /link/slack page (ADR 0021).
+                      name: 'PUBLIC_WEB_URL'
+                      value: 'https://ca-lance-web-${environmentName}.${managedEnvironment.properties.defaultDomain}'
+                    }
                   ]
                 : [],
               app.repository == 'lance-worker'
