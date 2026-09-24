@@ -40,7 +40,7 @@ export const AGENT_LOGS_PARTITIONS = [
 export interface AgentLogsWatcherOptions {
   /** The channel history read from `@lance/connectors`. */
   slack: SlackHistoryReads;
-  /** `config.slack.channelId`, `dom-claude-agent` by default. */
+  /** The principal's own channel (ADR 0023); `dom-claude-agent` for Dom. */
   channelId: string;
   /** Lance's own Slack bot user id, so its own messages are not logged as another agent's. */
   ownBotUserId?: string;

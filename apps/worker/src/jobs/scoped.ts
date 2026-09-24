@@ -25,10 +25,13 @@ export type Resolution<TContext> =
 /**
  * One context per principal, built on first use and kept. The principal's
  * status is read fresh for every job, so a principal paused or offboarded
- * between two runs gets no second one.
+ * between two runs gets no second one. A context is rebuilt when the
+ * principal's Slack channel has changed since it was built, which happens
+ * once, at their first link (ADR 0023), so their delivery moves with it.
  */
 export class PrincipalContexts<TContext> {
   private readonly built = new Map<string, Promise<TContext>>();
+  private readonly channels = new Map<string, string | null>();
 
   constructor(
     private readonly root: Db,
@@ -49,13 +52,20 @@ export class PrincipalContexts<TContext> {
       );
     }
     if (principal.status !== 'active') {
-      this.built.delete(principalId);
+      this.evict(principalId);
       return { status: 'inactive', principal };
+    }
+    if (
+      this.channels.has(principalId) &&
+      this.channels.get(principalId) !== principal.slackChannelId
+    ) {
+      this.evict(principalId);
     }
     let context = this.built.get(principalId);
     if (context === undefined) {
       context = this.build(principal);
       this.built.set(principalId, context);
+      this.channels.set(principalId, principal.slackChannelId);
       // A failed build is not kept, so the next job tries again.
       context.catch(() => this.built.delete(principalId));
     }
@@ -65,6 +75,7 @@ export class PrincipalContexts<TContext> {
   /** Drops a principal's context, for a principal who is no longer active. */
   evict(principalId: string): void {
     this.built.delete(principalId);
+    this.channels.delete(principalId);
   }
 
   /** Principals with a context, for the boot log and tests. */

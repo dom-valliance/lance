@@ -18,7 +18,7 @@ import {
   type SlackSurface,
 } from '@lance/connectors';
 import type { Db, Principal } from '@lance/db';
-import { readSecret, type Config } from '@lance/shared';
+import { deliveryChannelFor, readSecret, type Config } from '@lance/shared';
 import { raiseAlert } from '../alerts/raise.js';
 import type { ExecutionWriters } from '../executor/dispatch.js';
 import { graphExecutionWriters, notionExecutionWriters } from '../executor/writers.js';
@@ -39,7 +39,7 @@ export interface NotionBundle {
   writers: NonNullable<ExecutionWriters['notion']>;
 }
 
-/** What the agent-logs watcher reads: Lance's own channel and, when configured, telemetry. */
+/** What the agent-logs watcher reads: the principal's own channel and, when configured, telemetry. */
 export interface AgentLogsSource {
   slack: SlackHistoryReads;
   channelId: string;
@@ -52,7 +52,11 @@ export interface ConnectorBundle {
   graph: GraphBundle | null;
   notion: NotionBundle | null;
   jamie: JamieReads | null;
-  /** Lance's own Slack channel for this principal: cards, briefs and alerts post here. */
+  /**
+   * The principal's own Slack channel (ADR 0023): cards, alerts, briefs,
+   * digests and job output post here. Null when there is no bot token or
+   * the principal has no channel yet.
+   */
   slack: SlackSurface | null;
   agentLogs: AgentLogsSource | null;
 }
@@ -137,12 +141,17 @@ function buildJamie(db: Db): JamieReads | null {
   );
 }
 
-function buildSlack(config: Config): SlackSurface | null {
+/**
+ * The principal's surface, pinned to their channel as the principal row
+ * records it (ADR 0023), and to Dom's `dom-claude-agent` for Dom until his
+ * link does. A principal with no channel gets no surface, so nothing of
+ * theirs is ever posted where someone else reads it.
+ */
+export function principalSlackSurface(config: Config, principal: Principal): SlackSurface | null {
   if (env('SLACK_BOT_TOKEN') === undefined) return null;
-  return createSlackSurface({
-    token: readSecret('SLACK_BOT_TOKEN'),
-    channelId: config.slack.channelId,
-  });
+  const channelId = deliveryChannelFor(principal, config);
+  if (channelId === null) return null;
+  return createSlackSurface({ token: readSecret('SLACK_BOT_TOKEN'), channelId });
 }
 
 /**
@@ -151,8 +160,15 @@ function buildSlack(config: Config): SlackSurface | null {
  * When Slack will not say who we are, the watcher stays off and the
  * principal hears why, rather than the whole worker failing.
  */
-async function buildAgentLogs(config: Config, db: Db): Promise<AgentLogsSource | null> {
+async function buildAgentLogs(
+  config: Config,
+  principal: Principal,
+  db: Db,
+): Promise<AgentLogsSource | null> {
   if (env('SLACK_BOT_TOKEN') === undefined) return null;
+  // Each principal's channel history is read the same way (ADR 0023).
+  const channelId = deliveryChannelFor(principal, config);
+  if (channelId === null) return null;
   const reads = slackReads(createSlackClient({ token: readSecret('SLACK_BOT_TOKEN') }));
   const self = await reads.authTest().catch(async (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -170,7 +186,7 @@ async function buildAgentLogs(config: Config, db: Db): Promise<AgentLogsSource |
   const workspaceId = env('LOG_ANALYTICS_WORKSPACE_ID');
   return {
     slack: reads,
-    channelId: config.slack.channelId,
+    channelId,
     ownBotUserId: self.userId,
     ownBotId: self.botId,
     appInsights: workspaceId === undefined ? null : createAppInsightsClient({ workspaceId }),
@@ -191,8 +207,8 @@ export function singleOwnerConnectors(config: Config): ConnectorLookup {
       graph: buildGraph(db),
       notion: buildNotion(config, db),
       jamie: buildJamie(db),
-      slack: buildSlack(config),
-      agentLogs: await buildAgentLogs(config, db),
+      slack: principalSlackSurface(config, principal),
+      agentLogs: await buildAgentLogs(config, principal, db),
     };
   };
 }
