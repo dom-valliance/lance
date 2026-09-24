@@ -10,7 +10,8 @@ Run `deploy.md` steps 1 to 4 first: the resource group and the registry must exi
 
 | Resource | Purpose |
 | --- | --- |
-| `id-lance-github-deploy-dev` managed identity | What `deploy.yml` runs as. Contributor on the group; Role Based Access Control Administrator on the group, limited by condition to the four roles `main.bicep` assigns (AcrPull, Key Vault Secrets User, Key Vault Secrets Officer, Log Analytics Reader); the custom `Lance deployment writer` role at subscription scope, which allows subscription deployments and their what-if and nothing else. |
+| `id-lance-github-deploy-dev` managed identity | What `deploy.yml` runs as. Contributor on the group; Role Based Access Control Administrator on the group, limited by condition to the five roles `main.bicep` assigns (AcrPull, Key Vault Secrets User, Key Vault Secrets Officer, Log Analytics Reader, and the custom `Lance principal secret writer`); the custom `Lance deployment writer` role at subscription scope, which allows subscription deployments and their what-if and nothing else. |
+| `Lance principal secret writer` role definition (subscription scope, through the `roles.bicep` module) | The api's role on the principal vault: set a secret, never read one (ADR 0022). The deploy identity may not create role definitions, so this template does. `deploy.md` step 2a creates the same definition on a subscription where this template has not run. |
 | Federated credential `github-environment-dev` on it | Trusts tokens from GitHub whose subject is `repo:dom-valliance@215853107/lance@1378678734:environment:dev`. No client secret exists. |
 
 The numbers in the subject are the owner id and the repository id. GitHub appends them to the names in every token it issues for this repository, and Entra compares the whole string, so a credential written without them never matches. Both ids are in `infra/params/deployer-dev.bicepparam`; if the repository is ever transferred or recreated, read the new ones from the `subject claim` line that azure/login prints on the failed run and redeploy step 1.
@@ -36,7 +37,9 @@ az deployment sub create \
   --parameters infra/params/deployer-dev.bicepparam
 ```
 
-On a clean environment the what-if lists six creations (identity, credential, two group role assignments, role definition, subscription role assignment) and the existing resources to ignore. Anything reported as a modification of a resource `main.bicep` owns is a fault in the template; stop and read it.
+On a clean environment the what-if lists the creations (identity, credential, two group role assignments, the two role definitions, subscription role assignment) and the existing resources to ignore.
+
+Redeploy this step whenever `assignableRoleIds` or a role definition in it changes, before the `main.bicep` deploy that needs it; `scripts/check-deployer-roles.sh` fails CI when a module assigns a role the list does not carry. ADR 0022 is such a change: see `deploy.md`, "Moving an environment to per-principal credentials". Anything reported as a modification of a resource `main.bicep` owns is a fault in the template; stop and read it.
 
 An environment that received the earlier version of this template also has `id-lance-github-plan-dev`, its two role assignments and the `Lance deployment reader` role, which nothing uses now. The template no longer declares them and a redeploy leaves them in place. Remove them once, assignments first: deleting an identity does not delete its role assignments, they stay behind with an empty principal name, and a role definition cannot be deleted while an assignment references it.
 

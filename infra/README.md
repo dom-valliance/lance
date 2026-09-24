@@ -11,6 +11,8 @@ params/prod.bicepparam     Prod values. Real images, geo-redundant backup on.
 deployer.bicep             Subscription scope. The two GitHub Actions identities for one
                            environment and their roles. Deployed once by Dom, never by CI.
 params/deployer-dev.bicepparam  Dev values for deployer.bicep: repository and environment name.
+roles.bicep                Subscription scope. Custom roles main.bicep assigns and CI may not
+                           create. Deployed by Dom (deploy.md step 2a) and by deployer.bicep.
 modules/deployer.bicep     The identities, their federated credentials and group roles.
 modules/monitoring.bicep   Log Analytics and Application Insights.
 modules/identity.bicep     Four user-assigned managed identities.

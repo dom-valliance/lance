@@ -62,11 +62,12 @@ var assignableRoleIds = [
   'dcd10611-553f-42e2-911d-2904e3716c5e' // Lance principal secret writer (custom, below), modules/principal-vault.bicep
 ]
 
-// The custom role the api holds on the principal vault (ADR 0022). Its id is fixed
-// here rather than derived with guid(), because modules/principal-vault.bicep must
-// name the same id and scripts/check-deployer-roles.sh compares literals. Role
-// definition ids are unique in the tenant: a copy of this template in another
-// subscription of the same tenant needs a new id in both places.
+// The custom role the api holds on the principal vault (ADR 0022), defined in
+// roles.bicep. Its id is fixed here rather than derived with guid(), because
+// modules/principal-vault.bicep must name the same id and
+// scripts/check-deployer-roles.sh compares literals. Role definition ids are unique
+// in the tenant: a copy of this template in another subscription of the same tenant
+// needs a new id here, in roles.bicep's caller and in principal-vault.bicep.
 var principalSecretWriterRoleId = 'dcd10611-553f-42e2-911d-2904e3716c5e'
 
 var deployIdentityName = 'id-lance-github-deploy-${environmentName}'
@@ -126,32 +127,14 @@ resource deploymentWriterRole 'Microsoft.Authorization/roleDefinitions@2022-04-0
   }
 }
 
-// Set only, so onboarding writes a principal's credential without being able to read
-// any back. setSecret is the one data action Key Vault's SetSecret operation checks,
-// and it covers creating a secret as well as adding a version to an existing one.
-// It does not cover a name in the soft-deleted state; recovering one needs
-// Microsoft.KeyVault/vaults/secrets/recover/action, which stays with the worker's and
-// Dom's Key Vault Secrets Officer role. Both environments of this subscription share
-// the one definition, so deploying this template for either keeps it current.
-resource principalSecretWriterRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
-  name: principalSecretWriterRoleId
-  properties: {
-    roleName: 'Lance principal secret writer'
-    description: 'Set secrets in a Lance principal vault. Cannot read, list or delete them.'
-    type: 'CustomRole'
-    assignableScopes: [
-      subscription().id
-    ]
-    permissions: [
-      {
-        actions: []
-        notActions: []
-        dataActions: [
-          'Microsoft.KeyVault/vaults/secrets/setSecret/action'
-        ]
-        notDataActions: []
-      }
-    ]
+// The custom role the api holds on the principal vault (ADR 0022). It lives in its
+// own subscription-scope template so that deploy.md can create it on a subscription
+// before the first main.bicep deployment, which assigns it; this template deploys
+// the same definition, so either run keeps it current.
+module roles 'roles.bicep' = {
+  name: 'lance-roles'
+  params: {
+    writerRoleId: principalSecretWriterRoleId
   }
 }
 

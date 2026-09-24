@@ -4,7 +4,25 @@ First deploy of an environment takes about forty minutes, most of it waiting for
 
 The templates are in `infra/`. See `infra/README.md` for what each module does.
 
-The order matters. The environment stands up on a public bootstrap image first, then the secrets go in, then the real images, then the database principals. Steps 1 to 3 create nothing that depends on a secret, so they work on a clean subscription.
+The order matters. The environment stands up on a public bootstrap image first, then the secrets go in, then the real images, then the database principals. Steps 1 to 3 create nothing that depends on a secret value, so they work on a clean subscription; step 2a creates the one custom role step 3 assigns.
+
+An environment deployed before ADR 0022 (dev) is upgraded once by the section "Moving an environment to per-principal credentials" at the end, not by repeating these steps.
+
+## Known values for dev
+
+Read with the commands beside them; none is a secret.
+
+| Item | Value | Command |
+|---|---|---|
+| Static Key Vault | `kv-lance-dev-j7riq4`, created by `infra/modules/keyvault.bicep` | `az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-dev-')].name" -o tsv` |
+| Principal vault | `kv-lance-p-dev-j7riq4`, created by `infra/modules/principal-vault.bicep` on the first deploy that carries ADR 0022 | `az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-p-dev-')].name" -o tsv` |
+| `id-lance-web-dev` principal id | `5ee0adf2-f489-46fc-99aa-7984b5c4e3b5` | `az identity show -g rg-lance-dev -n id-lance-web-dev --query principalId -o tsv` |
+| `id-lance-api-dev` principal id | `659d6af9-e4ac-4573-be8a-a370b000830b` | as above, `-n id-lance-api-dev` |
+| `id-lance-worker-dev` principal id | `84aa02b2-706b-49cc-89ef-b8577fd0c71f` | as above, `-n id-lance-worker-dev` |
+| `id-lance-migrate-dev` principal id | `1e0a907c-b7bf-48e5-98c1-e721c76ec78b` | as above, `-n id-lance-migrate-dev` |
+| `id-lance-github-deploy-dev` principal id | `758df7e5-0d06-45da-aef0-d14b7a7e2c9f` | as above, `-n id-lance-github-deploy-dev` |
+| Dom's object id | `19fb2afd-6814-4600-8697-eb798ec5691f` | `az ad signed-in-user show --query id -o tsv` |
+| Custom role `Lance principal secret writer` | `dcd10611-553f-42e2-911d-2904e3716c5e`, created by `infra/roles.bicep` | `az role definition list --custom-role-only true --name "Lance principal secret writer" --query "[0].name" -o tsv` |
 
 After the first deploy, merges to `main` deploy themselves: `.github/workflows/deploy.yml` builds and pushes the images, deploys, runs the migration job and verifies, using the same scripts steps 5 to 10 name. `github-deploy-setup.md` connects the repository to Azure once. The manual path below stays for the first deploy of an environment and for a redeploy from a laptop.
 
@@ -57,9 +75,36 @@ After the first deploy, merges to `main` deploy themselves: `.github/workflows/d
 
    Record it in the password manager if you want the fallback to be usable. If you lose it, reset it in the portal.
 
+## 2a. Create the custom role, once per subscription
+
+`main.bicep` gives the api the custom role `Lance principal secret writer` on the principal vault (ADR 0022): set a secret, never read one. The deploy identity may not create role definitions, so Dom creates it with `infra/roles.bicep`, a subscription-scope template that needs no resource group. Both environments of a subscription share it, and `infra/deployer.bicep` declares the same definition (`github-deploy-setup.md`), so this step is skipped when the role exists:
+
+```
+az role definition list --custom-role-only true --name "Lance principal secret writer" --query "[0].name" -o tsv
+```
+
+If that prints nothing:
+
+```
+az deployment sub create \
+  --name lance-roles \
+  --location uksouth \
+  --template-file infra/roles.bicep
+```
+
+The first command must then print `dcd10611-553f-42e2-911d-2904e3716c5e`.
+
 ## 3. Deploy the environment on the bootstrap image
 
-`useBootstrapImage` is `true` in `dev.bicepparam`, so the three apps and the migration job run `mcr.microsoft.com/k8se/quickstart:latest`. Nothing needs the registry or Key Vault yet.
+`useBootstrapImage` is `true` in `dev.bicepparam`, so the three apps and the migration job run `mcr.microsoft.com/k8se/quickstart:latest`. Nothing needs the registry or a secret value yet.
+
+The parameter file reads two values from the shell and refuses to compile without either. `LANCE_IMAGE_TAG` names the image tag; the bootstrap image ignores it, so any value does. `LANCE_EXISTING_SECRETS` lists the secrets already in the static vault, so the template creates a placeholder only for a missing one and never writes over a real value (`infra/modules/keyvault.bicep`). `scripts/existing-secrets.sh` reads the names from the control plane, never a value, and prints an empty line while the vault does not exist:
+
+```
+export LANCE_IMAGE_TAG=bootstrap
+export LANCE_EXISTING_SECRETS=$(scripts/existing-secrets.sh dev)
+echo "tag=${LANCE_IMAGE_TAG} existing=${LANCE_EXISTING_SECRETS:-none}"
+```
 
 1. Check the plan first. This is read-only:
 
@@ -70,7 +115,7 @@ After the first deploy, merges to `main` deploy themselves: `.github/workflows/d
      --parameters infra/params/dev.bicepparam
    ```
 
-   The eight role assignments report as `Unsupported` because their names depend on principal ids that do not exist until the deploy runs. That is expected.
+   The role assignments report as `Unsupported` because their names depend on principal ids that do not exist until the deploy runs. That is expected. On a clean subscription the plan creates both vaults and every secret in `infra/secrets.json` with the value `lance-placeholder-set-me`; the per-secret role assignments are scoped to those secrets, which is why they must exist.
 
 2. Deploy:
 
@@ -87,7 +132,7 @@ After the first deploy, merges to `main` deploy themselves: `.github/workflows/d
    az deployment sub show -n main --query properties.outputs -o json
    ```
 
-   The deployment name defaults to `main`. The outputs give the Key Vault name, the registry name and login server, the Postgres FQDN, the web and api hostnames, the migration job name, and the four identity names.
+   The deployment name defaults to `main`. The outputs give the static Key Vault name (`keyVaultName`), the principal vault name (`principalKeyVaultName`), the registry name and login server, the Postgres FQDN, the web and api hostnames, the migration job name, and the four identity names.
 
 ## 3b. Restart Postgres once
 
@@ -102,7 +147,7 @@ The second command must print `pg_cron,pg_stat_statements,age`.
 
 ## 3a. Confirm you can write secrets
 
-The vault uses RBAC, and the template grants you Key Vault Secrets Officer from `postgresEntraAdminObjectId`. Role assignments can take a few minutes to propagate. If `az keyvault secret set` returns `ForbiddenByRbac`, check the assignment exists and wait:
+Both vaults use RBAC, and the template grants you Key Vault Secrets Officer on each from `postgresEntraAdminObjectId`. Role assignments can take a few minutes to propagate. If `az keyvault secret set` returns `ForbiddenByRbac`, check the assignment exists and wait:
 
 ```
 az role assignment list --scope $(az keyvault show -g rg-lance-dev -n <vault name> --query id -o tsv) \
@@ -117,10 +162,11 @@ az role assignment delete --ids <assignment id from the list above>
 
 ## 4. Set the Key Vault secrets
 
-The template creates the vault and grants the four identities `Key Vault Secrets User`. It never creates a secret value. Set these ten by hand; the api writes `graph-refresh-token` itself on the first consent. An environment deployed before ADR 0020 also holds `allowed-upn`; no app reads it any more, and it stays until someone deletes it deliberately. Take the values from `entra-setup.md`, `slack-app-setup.md` and `rotate-secrets.md`.
+The template created every static secret in `infra/secrets.json` with the placeholder `lance-placeholder-set-me` and granted each app `Key Vault Secrets User` on exactly the secrets it binds (ADR 0022). Replace the placeholders with the real values. A redeploy never writes a secret that exists, so a value set here survives every later deploy. Take the values from `entra-setup.md`, `slack-app-setup.md` and `rotate-secrets.md`.
 
 ```
-KV=<key vault name from the outputs>
+KV=$(az deployment sub show -n main --query properties.outputs.keyVaultName.value -o tsv)
+echo "$KV"
 
 az keyvault secret set --vault-name $KV --name entra-tenant-id         --value '<directory tenant id>'
 az keyvault secret set --vault-name $KV --name entra-client-id         --value '<application client id>'
@@ -130,27 +176,36 @@ az keyvault secret set --vault-name $KV --name slack-bot-token         --value '
 az keyvault secret set --vault-name $KV --name slack-signing-secret    --value '<signing secret>'
 az keyvault secret set --vault-name $KV --name anthropic-api-key       --value '<anthropic key>'
 az keyvault secret set --vault-name $KV --name notion-token            --value '<notion integration token>'
-az keyvault secret set --vault-name $KV --name jamie-api-key           --value '<jamie read-only key>'
 az keyvault secret set --vault-name $KV --name agent-log-ingest-secret --value "$(openssl rand -hex 32)"
 ```
 
-The Notion token alone reaches nothing. In Notion, open the All Tasks database and the Meetings database, choose the three dots, Connections, and add the integration the token belongs to (`Dom's Lance`). Until both are shared, every query returns `object_not_found` and the notion watcher raises a breaker alert on each poll. Check with:
+Leave `graph-refresh-token` and `jamie-api-key` as placeholders on a new environment. They are the pre-ADR 0022 single-owner credentials, read only for the one-time copy into Dom's own secrets (see the last section), and the apps read the placeholder as "not set". Each principal connects Microsoft 365 and Jamie for themselves, and those credentials land in the principal vault as `graph-refresh-token--<principalId>` and `jamie-api-key--<principalId>`; nothing is set there by hand. An environment deployed before ADR 0020 also holds `allowed-upn`; no app reads it, and it stays until someone deletes it deliberately.
+
+The Notion token alone reaches nothing. The integration is the organisation's, named `Lance` (renamed from `Dom's Lance` for ADR 0022; renaming it in Notion under Settings, Connections, Develop or manage integrations keeps the same token). In Notion, open the All Tasks database, choose the three dots, Connections, and add the integration. The Meetings database is not in use (spec Q7) and is not shared. Until All Tasks is shared, every query returns `object_not_found` and the notion watcher raises a breaker alert on each poll. Check with:
 
 ```
 curl -s https://api.notion.com/v1/data_sources/<tasks data source id> \
   -H "Authorization: Bearer $NOTION_TOKEN" -H "Notion-Version: 2025-09-03" | head -c 300
 ```
 
-`graph-refresh-token` is the exception. The api writes it after Dom's first delegated consent, step 7 of `entra-setup.md`. Create a placeholder now so the api starts:
+Check that no placeholder is left among the values that must be real. This prints the value of each secret, so run it in a terminal nobody is watching; every line must say `set`, except the two legacy ones on a new environment:
 
 ```
-az keyvault secret set --vault-name $KV --name graph-refresh-token --value 'pending-first-consent'
+for name in $(az keyvault secret list --vault-name $KV --query "[].name" -o tsv | sort); do
+  value=$(az keyvault secret show --vault-name $KV --name "$name" --query value -o tsv)
+  [ "$value" = lance-placeholder-set-me ] && echo "$name placeholder" || echo "$name set"
+done
 ```
 
-Check all twelve are present:
+Check who may read what. The web identity must hold exactly four assignments, each at a secret's scope, and no identity may hold one at the vault's own scope except Dom:
 
 ```
-az keyvault secret list --vault-name $KV --query "[].name" -o tsv | sort
+WEB=$(az identity show -g rg-lance-dev -n id-lance-web-dev --query principalId -o tsv)
+echo "$WEB"
+az role assignment list --all --assignee "$WEB" \
+  --query "[?contains(scope, '/vaults/')].{role:roleDefinitionName, scope:scope}" -o table
+az role assignment list --scope $(az keyvault show -n $KV --query id -o tsv) \
+  --query "[].{role:roleDefinitionName, who:principalName, type:principalType}" -o table
 ```
 
 If the CLI reports a forbidden error, see step 3a.
@@ -187,7 +242,7 @@ az acr repository show-tags --name $ACR --repository lance-web -o tsv
    scripts/deploy.sh dev "$TAG"
    ```
 
-   To read the plan first, run the what-if of step 3 with the variable exported: `LANCE_IMAGE_TAG=$TAG az deployment sub what-if ...`. The three apps get new revisions that pull from the registry with their own identities and resolve the Key Vault references. The ingress target ports move from 80 to 3000 for web and 3001 for api.
+   The script reads `LANCE_EXISTING_SECRETS` itself (`scripts/existing-secrets.sh`) just before the what-if and the deployment, and after the deployment removes the vault-wide grants that templates before ADR 0022 made (`scripts/remove-legacy-vault-grants.sh`; it lists them first with `LANCE_DRY_RUN=1`). To read the plan first, run the what-if of step 3 with both variables exported: `LANCE_IMAGE_TAG=$TAG LANCE_EXISTING_SECRETS=$(scripts/existing-secrets.sh dev) az deployment sub what-if ...`. The three apps get new revisions that pull from the registry with their own identities and resolve the Key Vault references. The ingress target ports move from 80 to 3000 for web and 3001 for api.
 
 3. Watch the revisions come up:
 
@@ -273,7 +328,13 @@ It cannot see failed pg-boss jobs or failed agent runs; after any deploy that ch
 
 1. Open `https://<web hostname>` and sign in as Dom. Any other UPN is refused.
 2. Run `/lance status` in `dom-claude-agent`. The api answers with an ephemeral message and the ledger records a `state_changed` event.
-3. In the web app, open Settings and press Connect Microsoft 365, then consent as Dom. The api writes the real `graph-refresh-token` over the placeholder from step 4.
+3. In the web app, open Settings and press Connect Microsoft 365, then consent as Dom. The api writes `graph-refresh-token--<Dom's principal id>` in the principal vault, and the worker builds Dom's Graph connector from it at its next context build. Check the secret exists (names only):
+
+   ```
+   PKV=$(az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-p-dev-')].name" -o tsv)
+   echo "$PKV"
+   az keyvault secret list --vault-name $PKV --query "[].name" -o tsv
+   ```
 4. Confirm `LANCE_MODE` is still `dry_run`. Lance proposes and does not execute until Dom changes it deliberately.
 
 ## 11. Going live
@@ -293,3 +354,36 @@ Lance starts in dry run: proposals are created and held, nothing is written exte
 - Prod uses `infra/params/prod.bicepparam`, which never deploys on the bootstrap image. Push the images to the prod registry and export `LANCE_IMAGE_TAG` to a tag dev has already run before the first prod deploy. The workflow deploys dev only; prod is a later addition (ADR 0014).
 - Deleting the resource group leaves the Key Vault soft deleted for 90 days, and purge protection means it cannot be purged early. The vault name is derived from the subscription id and the resource group name, so a redeploy into the same group asks for the same name and collides with the soft deleted vault. Recover it rather than renaming: `az keyvault recover --name <vault name>`.
 - The api is externally reachable on every route because Container Apps has no path-scoped ingress. The api enforces Entra bearer authentication on every route except `/slack/*` and `/ingest/*`, and Slack signature verification on those two. Phase 5 revisits this.
+
+## Moving an environment to per-principal credentials (ADR 0022)
+
+Once for an environment deployed before ADR 0022; dev needs it. Until it has run, the web identity can read every secret in the static vault, and the Graph token and the Jamie key are Dom's alone, in `graph-refresh-token` and `jamie-api-key`.
+
+What each step consumes comes from the step before it. The order is fixed.
+
+1. **Dom redeploys `infra/deployer.bicep` first, by hand, from the branch that carries ADR 0022** (`github-deploy-setup.md` step 1, the same two commands). It creates the custom role `Lance principal secret writer` (through its `roles.bicep` module) and widens the deploy identity's condition to let it assign that role. The what-if shows the role definition and the `lance-roles` deployment as new and the administrator assignment's condition as modified; nothing that `main.bicep` owns changes. Check:
+
+   ```
+   az role definition list --custom-role-only true --name "Lance principal secret writer" --query "[0].name" -o tsv
+   az role assignment list -g rg-lance-dev --assignee 758df7e5-0d06-45da-aef0-d14b7a7e2c9f \
+     --role "Role Based Access Control Administrator" --query "[0].condition" -o tsv | grep -c dcd10611
+   ```
+
+   The first prints `dcd10611-553f-42e2-911d-2904e3716c5e`; the second prints `1`. If the CD deploy runs before this step, it stops at the principal vault's api assignment with `AuthorizationFailed` or `RoleDefinitionDoesNotExist`. The apps stay on their old image in that case, because the Container Apps depend on both vault modules, and the migration job has only run migration 0015, which the old image ignores. Run this step and re-run the workflow.
+
+2. **Merge; the `Deploy` workflow does the rest.** It runs migration 0015 on the new image, reads `LANCE_EXISTING_SECRETS` (all twelve dev secrets exist, so no placeholder is written), creates `kv-lance-p-dev-j7riq4` with its three assignments, creates the eighteen per-secret assignments on the static vault (the worker's existing Secrets Officer grant on `graph-refresh-token` is adopted, same name), moves the apps, and then `scripts/remove-legacy-vault-grants.sh` deletes the four vault-wide Secrets User assignments and the api's Secrets Officer grant on `graph-refresh-token`. To see in advance what the script will delete: `LANCE_DRY_RUN=1 scripts/remove-legacy-vault-grants.sh dev` (read-only; on 2026-09-24 it listed exactly those five).
+
+3. **The worker copies Dom's credentials on its first start.** On first use for the principal whose UPN is `DOM_EMAIL`, it copies `graph-refresh-token` from the static vault into `graph-refresh-token--<Dom's principal id>` and `JAMIE_API_KEY` into `jamie-api-key--<Dom's principal id>`, each under the rotation lock and only when the per-principal secret is absent, and records a `state_changed` event with `change: credential_migrated` for each. The old secrets are never written. For the minute both revisions run, the old worker may still rotate the old secret; Entra keeps the previous refresh token valid, and if the copied one is ever refused the P0 `token_refresh_failed` alert asks Dom to reconnect from Settings, which writes the per-principal secret directly. Check:
+
+   ```
+   PKV=$(az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-p-dev-')].name" -o tsv)
+   echo "$PKV"
+   az keyvault secret list --vault-name $PKV --query "[].name" -o tsv
+   scripts/psql-admin.sh lance -c "SELECT ts, payload FROM ledger_events WHERE payload->>'change' = 'credential_migrated' ORDER BY id"
+   ```
+
+   The vault lists two secrets named with Dom's principal id, and the query returns one row for `graph` and one for `jamie`. Then run the checks at the end of step 4 again: the web identity holds four secret-scoped assignments and nothing on either vault.
+
+4. **Rename the Notion integration** from `Dom's Lance` to `Lance` in Notion (Settings, Connections, Develop or manage integrations). The token does not change and nothing is redeployed.
+
+The fallback that copies the legacy credentials stays until dev and prod have each recorded both `credential_migrated` events. A follow-up change then removes `apps/worker/src/credentials/legacy.ts`, the worker's `KEY_VAULT_URL`, the `jamie-api-key` binding and the worker's Secrets Officer grant on `graph-refresh-token` from `infra/secrets.json`; after that deploy, Dom deletes the two old secrets by hand, since the template never deletes one.

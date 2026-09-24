@@ -7,7 +7,7 @@ Manual, once per environment. Fifteen minutes. Read the "Order of operations" fi
 Three things reference each other:
 
 - The Entra app registration (this runbook) produces a client id, a tenant id and a client secret.
-- The Key Vault, the Postgres Flexible Server and the Container Apps are created by the Bicep deployment in `deploy.md`. They do not exist until that has run.
+- The two Key Vaults (the static vault `kv-lance-<env>-<suffix>` and the principal vault `kv-lance-p-<env>-<suffix>`, ADR 0022), the Postgres Flexible Server and the Container Apps are created by the Bicep deployment in `deploy.md` (`infra/main.bicep`). They do not exist until that has run. The template creates `entra-tenant-id`, `entra-client-id` and `entra-client-secret` in the static vault as placeholders; section 5 replaces them.
 - The Container Apps read the Entra values as Key Vault references at start.
 
 So: register the app now and keep the three values somewhere safe for the next hour (a password manager, not a file in the repo). Run `deploy.md` steps 1 to 3 to create the environment, including the Key Vault. Then come back to section 5 below and put the values in. Sections 1 to 4 need nothing else to exist first.
@@ -30,6 +30,8 @@ Section 8 (app roles and groups, ADR 0020) comes last: it reads the client id fr
 | Group `Lance Users` object id | Printed by section 8; record it here after the run | `az ad group list --filter "displayName eq 'Lance Users'" --query "[0].id" -o tsv` |
 | Group `Lance Admins` object id | Printed by section 8; record it here after the run | `az ad group list --filter "displayName eq 'Lance Admins'" --query "[0].id" -o tsv` |
 | Microsoft Graph service principal | `33c5497c-a4e7-4249-ac4f-23ce45cd3f09` | `az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv` |
+| Static Key Vault | `kv-lance-dev-j7riq4` | `az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-dev-')].name" -o tsv` |
+| Principal vault | `kv-lance-p-dev-j7riq4` | `az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-p-dev-')].name" -o tsv`; exists after the first deploy that carries ADR 0022 |
 
 The client id, tenant id, UPNs, object ids and role ids are identifiers, not secrets, and may live in docs and parameter files. The client secret is the only secret this runbook produces.
 
@@ -71,10 +73,11 @@ Certificates and secrets, New client secret, description `lance-<env>`, expiry 1
 
 ## 5. Key Vault entries
 
-After `deploy.md` step 3 has created the vault (its name is printed by the deployment, `kv-lance-<env>-<suffix>`):
+After `deploy.md` step 3 has created the static vault (its name is printed by the deployment, `kv-lance-<env>-<suffix>`). The three secrets exist already as placeholders; these commands write the real values over them, and no later deploy writes them again:
 
 ```
-KV=<vault name>
+KV=$(az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-dev-')].name" -o tsv)
+echo "$KV"
 az keyvault secret set --vault-name $KV --name entra-tenant-id --value ac995b50-b931-4d4b-b0ea-c0617e8141f9
 az keyvault secret set --vault-name $KV --name entra-client-id --value d72a4e64-a707-4387-b7e3-fdfd3e75a64b
 az keyvault secret set --vault-name $KV --name entra-client-secret --value '<the secret from step 4>'
@@ -88,9 +91,13 @@ There is no `allowed-upn` secret any more: who may sign in is decided by the app
 
 Nothing to do by hand. The Azure Database for PostgreSQL Flexible Server is the managed Postgres that Bicep creates (`infra/modules/postgres.bicep`), and the template sets Dom as its Entra administrator from `postgresEntraAdminObjectId` and `postgresEntraAdminPrincipalName` in the parameter file. Password authentication is off; Dom signs in to Postgres with an Entra token, which `deploy.md` step 7 shows.
 
-## 7. First delegated consent
+## 7. Delegated consent, per principal
 
-The connect route is behind Entra bearer authentication, so it is started from the web app's Settings page: sign in, open Settings and press Connect Microsoft 365. The button goes to the web app's own `/api/graph/connect`, which calls the api with the session's token and forwards the browser to Microsoft; typing the api URL into a browser does not work. Consent once as Dom. The api exchanges the code, stores the refresh token in Key Vault as `graph-refresh-token`, records a `state_changed` ledger event with `change: graph_connected`, and every later refresh rotates the stored token. `/lance status` then shows the Graph connector as connected.
+Each principal connects their own Microsoft 365 (ADR 0022). The connect route is behind Entra bearer authentication, so it is started from the web app's Settings page: sign in, open Settings and press Connect Microsoft 365. The button goes to the web app's own `/api/graph/connect`, which calls the api with the session's token and forwards the browser to Microsoft; typing the api URL into a browser does not work. An active principal, or one still onboarding (multi-user M3 step 2), may connect; a paused or offboarded one is refused.
+
+The api exchanges the code and stores the refresh token in the principal vault as `graph-refresh-token--<principalId>`, for the principal who started the consent and nobody else. It holds only the custom role `Lance principal secret writer` there, so it can write the secret and never read it back. It records a `state_changed` ledger event with `change: graph_connected`. The worker reads the secret, and every refresh rotates it under a Postgres advisory lock for that principal. `/lance status` then shows the Graph connector as connected.
+
+Dom's token from before ADR 0022 is in the static vault as `graph-refresh-token`. The worker copies it once into his own secret, so Dom does not need to consent again (`deploy.md`, last section).
 
 ## 8. App roles, groups and assignment required
 
