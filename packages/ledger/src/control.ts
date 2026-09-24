@@ -71,6 +71,16 @@ export interface RunState {
   updatedAt: Date;
 }
 
+/**
+ * The global row as the organisation sees it: the kill switch over every
+ * principal and the organisation's daily cost ceiling across all of them
+ * (docs/plans/multi-user.md M5).
+ */
+export interface OrganisationState {
+  paused: boolean;
+  costCeilingGbp: number;
+}
+
 /** The stricter of the principal's state and the global row. */
 export function effectiveRunState(own: PrincipalState, global: SystemState): RunState {
   const pausedGlobally = global.paused;
@@ -192,6 +202,12 @@ export class SystemControl {
       );
     }
     return row;
+  }
+
+  /** The global row alone; any scope reads it, since it carries no principal. */
+  async readOrganisation(): Promise<OrganisationState> {
+    const global = await this.readGlobal(this.db);
+    return { paused: global.paused, costCeilingGbp: global.costCeilingGbp };
   }
 
   async isPaused(): Promise<boolean> {

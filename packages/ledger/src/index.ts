@@ -12,11 +12,14 @@ export type {
   HeldProposal,
   HoldableStatus,
   InterruptionBudget,
+  OrganisationState,
   PauseOptions,
   PauseResult,
   ResumeResult,
   RunState,
 } from './control.js';
+export { JobControl } from './jobs.js';
+export type { EnsureJobsResult, JobDefaults, SetEnabledResult } from './jobs.js';
 export { decideProposal, expireProposals, ProposalTransitionError } from './proposals.js';
 export type { DecisionInput, DecisionResult, ProposalAction } from './proposals.js';
 export { toAlert } from './alertView.js';
