@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PrincipalContext } from './context.js';
 import { connectorOfWatcher, type NotConnected } from './connectors.js';
-import { recordSkippedWatcherRun } from './handlers.js';
+import {
+  PRINCIPAL_QUEUE_POLL_SECONDS,
+  principalQueueOptions,
+  recordSkippedWatcherRun,
+} from './handlers.js';
+import { declarationFor } from './registry.js';
 
 const PRINCIPAL_ID = '01K5S9V6QW3SWCCPVB0N0E3C01';
 
@@ -77,5 +82,21 @@ describe('recordSkippedWatcherRun', () => {
     );
 
     expect(evict).toHaveBeenCalledWith(PRINCIPAL_ID);
+  });
+});
+
+describe('principalQueueOptions', () => {
+  it("fetches a per-principal queue every half second, at pg-boss's floor", () => {
+    const options = principalQueueOptions({ concurrency: 1 });
+    expect(options.pollingIntervalSeconds).toBe(PRINCIPAL_QUEUE_POLL_SECONDS);
+    expect(PRINCIPAL_QUEUE_POLL_SECONDS).toBe(0.5);
+  });
+
+  it("runs as many of a queue's jobs at once as its declaration says", () => {
+    const morning = declarationFor('brief-morning');
+    const delivery = declarationFor('alerts-deliver');
+    if (morning === undefined || delivery === undefined) throw new Error('not declared');
+    expect(principalQueueOptions(morning).localConcurrency).toBe(morning.concurrency);
+    expect(principalQueueOptions(delivery).localConcurrency).toBe(1);
   });
 });

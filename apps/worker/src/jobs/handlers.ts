@@ -20,7 +20,7 @@ import { runChase } from '../chase/run.js';
 import { postDryRunDigest } from '../digest/dryRunDigest.js';
 import { executeProposal } from '../executor/index.js';
 import { reflectProposal } from '../executor/reflect.js';
-import { work } from '../scheduler/boss.js';
+import { work, type WorkQueueOptions } from '../scheduler/boss.js';
 import { QUEUES } from '../scheduler/queues.js';
 import { runTriage } from '../triage/run.js';
 import { createAgentLogsDetector } from '../watchers/agent-logs/index.js';
@@ -48,6 +48,7 @@ import {
   RETENTION_QUEUE,
   ROLE_CHECK_QUEUE,
   SYSTEM_JOBS,
+  type JobDeclaration,
 } from './registry.js';
 import { PrincipalPayloadSchema, workForPrincipal, type PrincipalContexts } from './scoped.js';
 
@@ -423,6 +424,23 @@ async function registerOnDemand(deps: HandlerDeps): Promise<void> {
 }
 
 /**
+ * How often a per-principal queue's worker fetches. Every principal's
+ * alert delivery falls in the same minute; at pg-boss's default of one
+ * fetch every two seconds, thirty principals' deliveries took the whole
+ * minute in the load test, and a thirty-first would fall behind for good
+ * (docs/runbooks/load-test.md). pg-boss allows no shorter interval.
+ */
+export const PRINCIPAL_QUEUE_POLL_SECONDS = 0.5;
+
+/** The pg-boss worker options for one per-principal scheduled job. */
+export function principalQueueOptions(job: Pick<JobDeclaration, 'concurrency'>): WorkQueueOptions {
+  return {
+    localConcurrency: job.concurrency,
+    pollingIntervalSeconds: PRINCIPAL_QUEUE_POLL_SECONDS,
+  };
+}
+
+/**
  * Registers a handler for every declared job and every on-demand queue.
  * Throws when the registry declares a job with no handler, so a new
  * declaration cannot be scheduled into a queue nothing consumes.
@@ -454,6 +472,7 @@ export async function registerJobHandlers(deps: HandlerDeps): Promise<void> {
         PrincipalPayloadSchema,
         deps.contexts,
         (context) => handler(context),
+        principalQueueOptions(job),
       );
     } else {
       const handler = organisation.get(job.slug);

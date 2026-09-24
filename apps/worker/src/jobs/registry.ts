@@ -68,6 +68,12 @@ export interface JobDeclaration {
    * principal's data still ages out (spec 4.4). Such a job must be locked.
    */
   readonly everyStatus: boolean;
+  /**
+   * How many of this queue's jobs one worker process runs at once
+   * (pg-boss `localConcurrency`). One for every queue but those the load
+   * test found serialised behind a fan-out (docs/runbooks/load-test.md).
+   */
+  readonly concurrency: number;
 }
 
 /** Runs the reconciler on a timer, so a principal whose status changes gains or loses schedules within a minute. */
@@ -93,16 +99,26 @@ const LOCKED_DETECTORS = new Set(['budget_guard']);
 
 const DAILY = 24 * 60;
 
+type Defaulted = 'bounds' | 'locked' | 'scope' | 'everyStatus' | 'concurrency';
+
 const declare = (
-  declaration: Omit<JobDeclaration, 'bounds' | 'locked' | 'scope' | 'everyStatus'> &
-    Partial<Pick<JobDeclaration, 'bounds' | 'locked' | 'scope' | 'everyStatus'>>,
+  declaration: Omit<JobDeclaration, Defaulted> & Partial<Pick<JobDeclaration, Defaulted>>,
 ): JobDeclaration => ({
   bounds: {},
   locked: false,
   scope: 'principal',
   everyStatus: false,
+  concurrency: 1,
   ...declaration,
 });
+
+/**
+ * Morning briefs run this many at once. Every principal's brief falls at
+ * 06:30; one at a time, each waiting on its planner call, thirty took
+ * twelve minutes in the load test and missed 06:35 (docs/runbooks/load-test.md).
+ * The model limiter, not this number, caps the calls in flight.
+ */
+export const MORNING_BRIEF_CONCURRENCY = 8;
 
 const watcherJob = (name: string, schedules: readonly string[], title: string): JobDeclaration =>
   declare({ slug: watcherQueue({ name }), title, schedules });
@@ -165,6 +181,7 @@ export const SYSTEM_JOBS: readonly JobDeclaration[] = [
     slug: QUEUE_MORNING,
     title: 'Morning brief',
     schedules: ['30 6 * * 1-5'],
+    concurrency: MORNING_BRIEF_CONCURRENCY,
     bounds: { earliest: '05:30', latest: '08:30', minIntervalMinutes: DAILY / 2 },
   }),
   declare({

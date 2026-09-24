@@ -33,12 +33,25 @@ export async function startBoss(boss: PgBoss): Promise<void> {
  * failure is logged with the queue and job ids, then rethrown so pg-boss
  * still records and retries it. `docs/runbooks/observing.md` reads both.
  */
+/** The pg-boss worker options the worker sets; everything else keeps pg-boss's default. */
+export interface WorkQueueOptions {
+  /** Jobs of the queue this process runs at once; pg-boss defaults to one. */
+  localConcurrency?: number;
+  /**
+   * How long a worker waits between fetches, less the time the last job
+   * took; pg-boss defaults to two seconds, so a queue of quick jobs runs
+   * at most one every two seconds per worker.
+   */
+  pollingIntervalSeconds?: number;
+}
+
 export function work<T>(
   boss: PgBoss,
   queue: string,
   handler: (jobs: Job<T>[]) => Promise<void>,
+  options: WorkQueueOptions = {},
 ): Promise<string> {
-  return boss.work<T>(queue, async (jobs) => {
+  return boss.work<T>(queue, options, async (jobs) => {
     try {
       await handler(jobs);
     } catch (error) {

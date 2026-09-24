@@ -3,7 +3,7 @@ import { UlidSchema } from '@lance/shared';
 import { eq } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
-import { work } from '../scheduler/boss.js';
+import { work, type WorkQueueOptions } from '../scheduler/boss.js';
 
 /**
  * Per-principal job execution (ADR 0025). Every job payload carries the
@@ -97,33 +97,39 @@ export function workForPrincipal<TContext, TSchema extends z.ZodType<{ principal
   schema: TSchema,
   contexts: PrincipalContexts<TContext>,
   handler: (context: TContext, data: z.infer<TSchema>) => Promise<void>,
+  options: WorkQueueOptions = {},
 ): Promise<string> {
-  return work<unknown>(boss, queue, async (jobs) => {
-    for (const job of jobs) {
-      const parsed = schema.safeParse(job.data);
-      if (!parsed.success) {
-        throw new JobScopeError(
-          `Job ${job.id} on ${queue} has a payload that does not match its schema: ` +
-            parsed.error.issues
-              .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
-              .join('; ') +
-            '. Every job must name the principal it runs for.',
-        );
+  return work<unknown>(
+    boss,
+    queue,
+    async (jobs) => {
+      for (const job of jobs) {
+        const parsed = schema.safeParse(job.data);
+        if (!parsed.success) {
+          throw new JobScopeError(
+            `Job ${job.id} on ${queue} has a payload that does not match its schema: ` +
+              parsed.error.issues
+                .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+                .join('; ') +
+              '. Every job must name the principal it runs for.',
+          );
+        }
+        const resolution = await contexts.resolve(parsed.data.principalId);
+        if (resolution.status === 'inactive') {
+          console.info(
+            {
+              queue,
+              jobId: job.id,
+              principalId: resolution.principal.id,
+              status: resolution.principal.status,
+            },
+            'job skipped: the principal is not active',
+          );
+          continue;
+        }
+        await handler(resolution.context, parsed.data);
       }
-      const resolution = await contexts.resolve(parsed.data.principalId);
-      if (resolution.status === 'inactive') {
-        console.info(
-          {
-            queue,
-            jobId: job.id,
-            principalId: resolution.principal.id,
-            status: resolution.principal.status,
-          },
-          'job skipped: the principal is not active',
-        );
-        continue;
-      }
-      await handler(resolution.context, parsed.data);
-    }
-  });
+    },
+    options,
+  );
 }

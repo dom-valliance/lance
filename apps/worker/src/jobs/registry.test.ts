@@ -90,6 +90,13 @@ describe('the job registry', () => {
     ).toEqual(['jobs-reconcile', 'organisation-budget-guard', 'role-check', 'onboarding-prefill']);
   });
 
+  it('runs morning briefs several at a time and every other queue one at a time', () => {
+    expect(job('brief-morning').concurrency).toBeGreaterThan(1);
+    expect(SYSTEM_JOBS.filter((declared) => declared.concurrency !== 1).map((d) => d.slug)).toEqual(
+      ['brief-morning'],
+    );
+  });
+
   it('runs the role check nightly at 02:30', () => {
     expect(job('role-check').schedules).toEqual(['30 2 * * *']);
   });
