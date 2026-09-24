@@ -15,7 +15,7 @@ import { createdAt, timestamptz, ulid, ulidCheck, updatedAt } from './columns.js
  * `slack_user_id` is written by the database alone, from the principal's
  * active row in `slack_links` (ADR 0021, migration 0014). The principal's
  * own scope may record their Lance app roles and set their private Slack
- * channel once (ADR 0023).
+ * channel once (ADR 0023), and set their own time zone (onboarding step 6).
  */
 export const principals = pgTable(
   'principals',
@@ -40,6 +40,13 @@ export const principals = pgTable(
       .notNull()
       .default(sql`'{}'::text[]`),
     rolesRecordedAt: timestamptz('roles_recorded_at'),
+    /**
+     * When the principal finished onboarding and became active (package
+     * 5.5), set once by the onboarding completion in an admin scope. Live
+     * mode opens five working days after it. Null for a principal who was
+     * never onboarded, which is Dom, whose row predates onboarding.
+     */
+    activatedAt: timestamptz('activated_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

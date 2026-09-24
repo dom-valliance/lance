@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { isWeekend, isWithinQuietHours, nowIso, toLondon } from './time.js';
+import {
+  addWorkingDays,
+  formatLongDate,
+  isWeekend,
+  isWithinQuietHours,
+  nowIso,
+  toLondon,
+} from './time.js';
 
 describe('nowIso', () => {
   it('returns a parseable ISO instant close to now', () => {
@@ -66,5 +73,46 @@ describe('isWeekend', () => {
 
   it('is false on a midweek day', () => {
     expect(isWeekend('2026-01-14T12:00:00Z', 'Europe/London')).toBe(false);
+  });
+});
+
+describe('addWorkingDays', () => {
+  const london = 'Europe/London';
+
+  it('lands on the next Monday at London midnight five working days after a Monday', () => {
+    // Monday 28 September 2026, 10:00 BST.
+    const opens = addWorkingDays(new Date('2026-09-28T09:00:00Z'), 5, london);
+    // Monday 5 October 2026 00:00 BST is 23:00 UTC the day before.
+    expect(opens.toISOString()).toBe('2026-10-04T23:00:00.000Z');
+  });
+
+  it('skips the weekend when counting from a Friday', () => {
+    const opens = addWorkingDays(new Date('2026-10-02T15:00:00Z'), 5, london);
+    expect(opens.toISOString()).toBe('2026-10-08T23:00:00.000Z');
+  });
+
+  it('counts a Saturday as the day before the first working day', () => {
+    const opens = addWorkingDays(new Date('2026-10-03T12:00:00Z'), 5, london);
+    expect(formatLongDate(opens, london)).toBe('Friday 9 October 2026');
+  });
+
+  it('uses the London date, not the UTC one, late in the evening', () => {
+    // 23:30 BST on Friday 2 October is still Friday in London.
+    const opens = addWorkingDays(new Date('2026-10-02T22:30:00Z'), 1, london);
+    expect(formatLongDate(opens, london)).toBe('Monday 5 October 2026');
+  });
+
+  it('lands on GMT midnight after the clocks go back', () => {
+    // Monday 19 October 2026; the clocks go back on Sunday 25 October.
+    const opens = addWorkingDays(new Date('2026-10-19T09:00:00Z'), 5, london);
+    expect(opens.toISOString()).toBe('2026-10-26T00:00:00.000Z');
+  });
+});
+
+describe('formatLongDate', () => {
+  it('names the weekday, day, month and year without a comma', () => {
+    expect(formatLongDate(new Date('2026-10-05T09:00:00Z'), 'Europe/London')).toBe(
+      'Monday 5 October 2026',
+    );
   });
 });

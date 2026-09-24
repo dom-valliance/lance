@@ -100,3 +100,98 @@ export function isWeekend(iso: string, timeZone: string): boolean {
   }
   return weekday === 'Sat' || weekday === 'Sun';
 }
+
+interface LocalDateParts {
+  year: number;
+  month: number;
+  day: number;
+}
+
+function localDateParts(date: Date, timeZone: string): LocalDateParts {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const read = (type: 'year' | 'month' | 'day'): number => {
+    const value = parts.find((part) => part.type === type)?.value;
+    if (value === undefined) {
+      throw new Error(
+        `Could not resolve the local date of "${date.toISOString()}" in "${timeZone}"`,
+      );
+    }
+    return Number(value);
+  };
+  return { year: read('year'), month: read('month'), day: read('day') };
+}
+
+/**
+ * The instant local midnight starts `parts` in `timeZone`. Offsets are read
+ * from `Intl` at a first guess and applied, then read again at the result,
+ * which settles on the right side of a daylight saving change.
+ */
+function localMidnight(parts: LocalDateParts, timeZone: string): Date {
+  const wall = Date.UTC(parts.year, parts.month - 1, parts.day);
+  const offsetAt = (instant: number): number => {
+    const local = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(instant));
+    const value = (type: Intl.DateTimeFormatPartTypes): number =>
+      Number(local.find((part) => part.type === type)?.value ?? '0');
+    const asUtc = Date.UTC(
+      value('year'),
+      value('month') - 1,
+      value('day'),
+      value('hour'),
+      value('minute'),
+      value('second'),
+    );
+    return asUtc - instant;
+  };
+  const first = wall - offsetAt(wall);
+  return new Date(wall - offsetAt(first));
+}
+
+/**
+ * The start of the local day `workingDays` weekdays after the local date
+ * of `from`, in `timeZone`. Saturdays and Sundays are skipped; bank
+ * holidays are not. From a Monday, five working days lands on the next
+ * Monday; from a Saturday, on the next Friday.
+ */
+export function addWorkingDays(from: Date, workingDays: number, timeZone: string): Date {
+  const start = localDateParts(from, timeZone);
+  let cursor = Date.UTC(start.year, start.month - 1, start.day);
+  let remaining = workingDays;
+  while (remaining > 0) {
+    cursor += 24 * 60 * 60 * 1000;
+    const weekday = new Date(cursor).getUTCDay();
+    if (weekday !== 0 && weekday !== 6) remaining -= 1;
+  }
+  const day = new Date(cursor);
+  return localMidnight(
+    { year: day.getUTCFullYear(), month: day.getUTCMonth() + 1, day: day.getUTCDate() },
+    timeZone,
+  );
+}
+
+/** "Monday 5 October 2026": a date as UI copy and Slack replies name it, in `timeZone`. */
+export function formatLongDate(date: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  return `${value('weekday')} ${value('day')} ${value('month')} ${value('year')}`;
+}
