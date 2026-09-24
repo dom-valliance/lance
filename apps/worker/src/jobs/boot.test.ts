@@ -275,6 +275,29 @@ describe('per-principal jobs', () => {
     }
   }, 30_000);
 
+  it('puts a bulk-mail job back while its principal is paused, as it puts back triage', async () => {
+    const control = new SystemControl(scoped(OTHER_ID));
+    await control.pause({ reason: 'drill', actor: 'user:dom' });
+    const correlationId = newUlid();
+    const waiting = async (): Promise<number> => {
+      const result: { rows: Array<{ n: string }> } = await fixture.$client.query(
+        "SELECT count(*) AS n FROM pgboss.job WHERE name = 'bulk-mail' AND state = 'created' AND data->>'correlationId' = $1 AND start_after > now()",
+        [correlationId],
+      );
+      return Number(result.rows[0]?.n ?? '0');
+    };
+    try {
+      await boss.send(
+        'bulk-mail',
+        { principalId: OTHER_ID, watcher: 'graph-mail', correlationId, observationEventIds: [] },
+        { group: { id: OTHER_ID } },
+      );
+      await waitFor(async () => (await waiting()) === 1);
+    } finally {
+      await control.resume({ actor: 'user:dom' });
+    }
+  }, 30_000);
+
   it('the global pause stops both principals', async () => {
     const control = new SystemControl(scoped(SEED_PRINCIPAL_ID));
     await control.pauseAll({ reason: 'drill', actor: 'user:dom' });

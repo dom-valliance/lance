@@ -126,7 +126,8 @@ export function workingDaysBetween(start: Date, end: Date): number {
   return days;
 }
 
-function provenanceFor(
+/** The provenance of one record among a batch's observed events (non-negotiable 5). */
+export function provenanceFor(
   events: Array<{
     sourceSystem: string | null;
     sourceRecordId: string | null;
@@ -222,6 +223,40 @@ export function taskDraft(
   };
 }
 
+/** Every label the batch's observations carry, once each, in first-seen order. */
+export function labelsOf(events: ReadonlyArray<{ payload: unknown }>): string[] {
+  return [
+    ...new Set(
+      events.flatMap((event) => {
+        const value = (event.payload as Record<string, unknown> | null)?.['labels'];
+        return Array.isArray(value)
+          ? value.filter((item): item is string => typeof item === 'string')
+          : [];
+      }),
+    ),
+  ];
+}
+
+/**
+ * The context every proposal for a batch is created in: its labels, for
+ * the label-gated seed rules, and whether the watcher is still in its
+ * dry-run window (spec 6.3). Triage and the bulk-mail filer (ADR 0034)
+ * both use it, so policy treats their proposals alike.
+ */
+export async function proposalContextFor(
+  deps: { db: Db; config: Pick<Config, 'watchers'>; now: () => string },
+  job: Pick<TriageJob, 'correlationId' | 'watcher'>,
+  events: ReadonlyArray<{ payload: unknown }>,
+  actor: string,
+): Promise<ProposalContext & { watcherDryRun: boolean }> {
+  const startedAt = await watcherStartedAt(deps.db, job.watcher);
+  const watcherDryRun =
+    startedAt !== null &&
+    workingDaysBetween(new Date(startedAt), new Date(deps.now())) <
+      deps.config.watchers.dryRunDaysForNewWatcher;
+  return { correlationId: job.correlationId, actor, labels: labelsOf(events), watcherDryRun };
+}
+
 /**
  * Triage for one correlation id (spec 7.2): the model reads the batch with
  * read tools and submits action proposals through create_proposal; task
@@ -238,27 +273,13 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
     throw new Error(`Triage job for ${job.correlationId} names no observed events that exist.`);
   }
 
-  const startedAt = await watcherStartedAt(deps.db, job.watcher);
-  const watcherDryRun =
-    startedAt !== null &&
-    workingDaysBetween(new Date(startedAt), new Date(now())) <
-      deps.config.watchers.dryRunDaysForNewWatcher;
-  const labels = [
-    ...new Set(
-      events.flatMap((event) => {
-        const value = (event.payload as Record<string, unknown> | null)?.['labels'];
-        return Array.isArray(value)
-          ? value.filter((item): item is string => typeof item === 'string')
-          : [];
-      }),
-    ),
-  ];
-  const context: ProposalContext = {
-    correlationId: job.correlationId,
-    actor: TRIAGE_ACTOR,
-    labels,
-    watcherDryRun,
-  };
+  const context = await proposalContextFor(
+    { db: deps.db, config: deps.config, now },
+    job,
+    events,
+    TRIAGE_ACTOR,
+  );
+  const { watcherDryRun } = context;
 
   const tools = [
     ...readTools({

@@ -29,6 +29,7 @@ import type { ReflectDeps } from '../executor/reflect.js';
 import { loadActiveRules } from '../policy/rules.js';
 import { PauseGate } from '../scheduler/gate.js';
 import { QUEUES } from '../scheduler/queues.js';
+import { createMailRouter, type BulkMailDeps } from '../triage/bulk.js';
 import type { TriageDeps } from '../triage/run.js';
 import { createAgentLogsWatcher } from '../watchers/agent-logs/index.js';
 import {
@@ -117,6 +118,8 @@ export interface PrincipalContext {
   watchers: ReadonlyMap<string, Watcher>;
   runner: WatcherRunnerDeps;
   triage: TriageDeps | null;
+  /** Files bulk mail without a model (ADR 0034); runs whether or not a model is configured. */
+  bulkMail: BulkMailDeps;
   chase: ChaseDeps | null;
 }
 
@@ -455,12 +458,25 @@ export async function buildPrincipalContext(
       gate,
       control,
       principalId: principal.id,
-      enqueueTriage: (job: TriageJob) =>
-        shared.send(
-          QUEUES.triage,
-          { ...job, principalId: principal.id },
-          threadJobOptions(principal.id, job.correlationId),
-        ),
+      // A burst on one thread is sent once (the singleton window), and
+      // bulk mail goes to the filer rather than to the model (ADR 0034).
+      enqueueTriage: createMailRouter({
+        db,
+        config,
+        ontology,
+        sendTriage: (job: TriageJob) =>
+          shared.send(
+            QUEUES.triage,
+            { ...job, principalId: principal.id },
+            threadJobOptions(principal.id, job.correlationId),
+          ),
+        sendBulk: (job: TriageJob) =>
+          shared.send(
+            QUEUES.bulkMail,
+            { ...job, principalId: principal.id },
+            threadJobOptions(principal.id, job.correlationId),
+          ),
+      }),
     },
     triage:
       agent === null
@@ -475,6 +491,7 @@ export async function buildPrincipalContext(
             dom: { ...config.dom, notionUserId: principalNotionUserId },
             debrief: { slack },
           },
+    bulkMail: { db, config, createProposal },
     chase: agent === null ? null : { db, config, agent, ontology, createProposal },
   };
 }

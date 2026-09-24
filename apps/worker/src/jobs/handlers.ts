@@ -22,6 +22,7 @@ import { executeProposal } from '../executor/index.js';
 import { reflectProposal } from '../executor/reflect.js';
 import { work, type WorkQueueOptions } from '../scheduler/boss.js';
 import { QUEUES } from '../scheduler/queues.js';
+import { fileBulkMail } from '../triage/bulk.js';
 import { runTriage } from '../triage/run.js';
 import { createAgentLogsDetector, watermarkThreshold } from '../watchers/agent-logs/index.js';
 import { runWatcher } from '../watchers/runner.js';
@@ -384,6 +385,27 @@ async function registerOnDemand(deps: HandlerDeps): Promise<void> {
       await reflectProposal(context.reflect, data.proposalId, outcome);
     },
   );
+  // Bulk mail needs no model (ADR 0034), so it is filed whether or not
+  // this process has one.
+  await workForPrincipal(
+    boss,
+    QUEUES.bulkMail,
+    TriagePayloadSchema,
+    contexts,
+    async (context, data) => {
+      if (!(await context.gate.check()).runnable) {
+        await boss.send(QUEUES.bulkMail, data, {
+          startAfter: RETRY_WHILE_PAUSED_S,
+          ...principalJobOptions(data.principalId),
+        });
+        return;
+      }
+      const { principalId, ...job } = data;
+      void principalId;
+      await fileBulkMail(context.bulkMail, job);
+    },
+    bulkMailQueueOptions(),
+  );
   // Without a model there is no consumer, so triage and chase jobs wait on
   // the queue for a worker that has one, as they did before Phase 5.
   if (!deps.modelsAvailable) return;
@@ -439,6 +461,21 @@ async function registerOnDemand(deps: HandlerDeps): Promise<void> {
  * (docs/runbooks/load-test.md). pg-boss allows no shorter interval.
  */
 export const PRINCIPAL_QUEUE_POLL_SECONDS = 0.5;
+
+/**
+ * Bulk-mail jobs are a few database writes each, so four run at once and
+ * a Monday's newsletters for thirty principals clear in seconds rather
+ * than at one a fetch; still one per principal at a time.
+ */
+export const BULK_MAIL_CONCURRENCY = 4;
+
+export function bulkMailQueueOptions(): WorkQueueOptions {
+  return {
+    localConcurrency: BULK_MAIL_CONCURRENCY,
+    localGroupConcurrency: 1,
+    pollingIntervalSeconds: PRINCIPAL_QUEUE_POLL_SECONDS,
+  };
+}
 
 /**
  * The pg-boss worker options for a queue whose jobs wait on the model
