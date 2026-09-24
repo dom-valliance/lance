@@ -1,3 +1,5 @@
+import { ONBOARDING_CHANGES } from '@lance/ledger';
+
 /**
  * The onboarding checklist as the admin page counts it (ADR 0024,
  * docs/plans/multi-user.md M3): which steps a principal has done, read
@@ -6,17 +8,16 @@
  *
  * Each step is done when any one of its facts is in the principal's own
  * ledger. A fact is a `payload.change` value, or `credential_migrated:<connector>`
- * for Dom's credentials copied from before ADR 0022. The notice and the
- * hours steps are recorded by package 5.5's checklist; their change names
- * are the contract with it and are listed here once.
+ * for Dom's credentials copied from before ADR 0022. The checklist's own
+ * change names come from `ONBOARDING_CHANGES`, so the two cannot drift.
  */
 
 export const ONBOARDING_STEPS = [
-  { step: 'notice', facts: ['data_processing_notice_accepted'] },
-  { step: 'microsoft365', facts: ['graph_connected', 'credential_migrated:graph'] },
-  { step: 'jamie', facts: ['jamie_connected', 'credential_migrated:jamie'] },
+  { step: 'notice', facts: [ONBOARDING_CHANGES.noticeAccepted] },
+  { step: 'microsoft365', facts: [ONBOARDING_CHANGES.graphConnected, 'credential_migrated:graph'] },
+  { step: 'jamie', facts: [ONBOARDING_CHANGES.jamieConnected, 'credential_migrated:jamie'] },
   { step: 'slack', facts: ['slack_linked'] },
-  { step: 'hours', facts: ['working_hours_confirmed'] },
+  { step: 'hours', facts: [ONBOARDING_CHANGES.preferencesConfirmed] },
 ] as const;
 
 export type OnboardingStepKey = (typeof ONBOARDING_STEPS)[number]['step'];

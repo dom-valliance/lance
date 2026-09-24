@@ -53,7 +53,6 @@ import { listLedger, MAX_PAGE_SIZE as MAX_LEDGER_PAGE_SIZE } from './ledger/serv
 import { listProposals, proposalSummary } from './proposals/service.js';
 import { OnboardingRefusedError } from './onboarding/service.js';
 import { listTasks } from './tasks/service.js';
-import { TRPCError } from '@trpc/server';
 import { BadRequestError } from './errors.js';
 import { adminProcedure, procedure, router, signedInProcedure } from './trpc.js';
 
