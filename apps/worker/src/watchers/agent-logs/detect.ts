@@ -187,8 +187,20 @@ export interface AgentLogsDetectorOptions {
   /** The pool to read. Defaults to the one the engine passes on the context. */
   db?: Db;
   /** How old the inbox agent's watermark may be before it is an alert. */
-  maxWatermarkAgeHours: number;
+  /** Null switches the stale watermark alert off (`config.inboxAgent`). */
+  maxWatermarkAgeHours: number | null;
   telemetryLookbackHours?: number;
+}
+
+/**
+ * The watermark threshold the detector runs with: null, so no stale
+ * watermark alert, unless `config.inboxAgent.watermarkAlert` is on.
+ */
+export function watermarkThreshold(inboxAgent: {
+  watermarkAlert: boolean;
+  watermarkMaxAgeHours: number;
+}): number | null {
+  return inboxAgent.watermarkAlert ? inboxAgent.watermarkMaxAgeHours : null;
 }
 
 /**
@@ -208,14 +220,16 @@ export function createAgentLogsDetector(options: AgentLogsDetectorOptions): Dete
       const now = context.now();
       const detected: DetectedAlert[] = [];
 
-      const watermark = await readLatestWatermark(db);
-      const stale = staleWatermark(
-        watermark === null ? null : watermarkAtOf(watermark.payload),
-        now,
-        options.maxWatermarkAgeHours,
-      );
-      if (stale !== null && watermark !== null) {
-        detected.push({ ...stale, provenance: [provenanceOf(watermark, 'slack')] });
+      if (options.maxWatermarkAgeHours !== null) {
+        const watermark = await readLatestWatermark(db);
+        const stale = staleWatermark(
+          watermark === null ? null : watermarkAtOf(watermark.payload),
+          now,
+          options.maxWatermarkAgeHours,
+        );
+        if (stale !== null && watermark !== null) {
+          detected.push({ ...stale, provenance: [provenanceOf(watermark, 'slack')] });
+        }
       }
 
       const since = new Date(Date.parse(now) - lookbackHours * HOUR_MS).toISOString();

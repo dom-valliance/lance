@@ -23,7 +23,7 @@ import { reflectProposal } from '../executor/reflect.js';
 import { work, type WorkQueueOptions } from '../scheduler/boss.js';
 import { QUEUES } from '../scheduler/queues.js';
 import { runTriage } from '../triage/run.js';
-import { createAgentLogsDetector } from '../watchers/agent-logs/index.js';
+import { createAgentLogsDetector, watermarkThreshold } from '../watchers/agent-logs/index.js';
 import { runWatcher } from '../watchers/runner.js';
 import { runOnboardingPrefill } from '../onboarding/prefill.js';
 import { connectorOfWatcher, type ConnectorLookup } from './connectors.js';
@@ -60,7 +60,6 @@ import { PrincipalPayloadSchema, workForPrincipal, type PrincipalContexts } from
  */
 
 /** Spec 11: the inbox agent's watermark is stale after this many hours without a new line. */
-const STALE_WATERMARK_HOURS = 24;
 /** How long a triage or chase job waits before it is looked at again while paused. */
 const RETRY_WHILE_PAUSED_S = 60;
 
@@ -151,9 +150,9 @@ export async function recordSkippedWatcherRun(
   }
 }
 
-function detectors(): Detector[] {
+function detectors(config: Config): Detector[] {
   return [
-    createAgentLogsDetector({ maxWatermarkAgeHours: STALE_WATERMARK_HOURS }),
+    createAgentLogsDetector({ maxWatermarkAgeHours: watermarkThreshold(config.inboxAgent) }),
     ...allDetectors(),
   ];
 }
@@ -226,7 +225,7 @@ function scheduledHandlers(deps: HandlerDeps): Map<string, PrincipalHandler> {
       },
     ],
   ]);
-  for (const detector of detectors()) {
+  for (const detector of detectors(deps.config)) {
     handlers.set(detectorQueue(detector), async (context) => {
       await runDetector(detector, context.detectors);
     });

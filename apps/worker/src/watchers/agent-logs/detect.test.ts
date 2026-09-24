@@ -6,6 +6,7 @@ import {
   staleWatermark,
   telemetryFromRows,
   watermarkAtOf,
+  watermarkThreshold,
   type ObservedRow,
 } from './detect.js';
 import type { TelemetryRecord } from './telemetry.js';
@@ -63,6 +64,13 @@ describe('staleWatermark', () => {
 
   it('raises nothing when the watermark line carried an unreadable instant', () => {
     expect(staleWatermark('sometime yesterday', NOW, MAX_AGE_HOURS)).toBeNull();
+  });
+});
+
+describe('watermarkThreshold', () => {
+  it('switches the stale watermark alert off unless the inbox agent alert is on', () => {
+    expect(watermarkThreshold({ watermarkAlert: false, watermarkMaxAgeHours: 24 })).toBeNull();
+    expect(watermarkThreshold({ watermarkAlert: true, watermarkMaxAgeHours: 36 })).toBe(36);
   });
 });
 

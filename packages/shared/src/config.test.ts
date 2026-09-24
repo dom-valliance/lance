@@ -6,6 +6,23 @@ const minimalTestEnv: NodeJS.ProcessEnv = {
   DATABASE_URL: 'postgres://lance_app:pw@localhost:5432/lance_test',
 };
 
+describe('the inbox agent watermark alert', () => {
+  it('turns on with its threshold when the environment asks for it', () => {
+    const config = loadConfig({
+      ...minimalTestEnv,
+      INBOX_AGENT_WATERMARK_ALERT: 'true',
+      INBOX_AGENT_WATERMARK_MAX_AGE_HOURS: '36',
+    });
+    expect(config.inboxAgent).toEqual({ watermarkAlert: true, watermarkMaxAgeHours: 36 });
+  });
+
+  it('refuses a value that is not true or false', () => {
+    expect(() => loadConfig({ ...minimalTestEnv, INBOX_AGENT_WATERMARK_ALERT: 'yes' })).toThrow(
+      /INBOX_AGENT_WATERMARK_ALERT/,
+    );
+  });
+});
+
 describe('loadConfig defaults', () => {
   it('loads every documented default from a near-empty env in test mode', () => {
     const config = loadConfig(minimalTestEnv);
@@ -62,6 +79,7 @@ describe('loadConfig defaults', () => {
     });
     expect(config.promotion).toEqual({ threshold: 10, minSpanDays: 14 });
     expect(config.watchers).toEqual({ dryRunDaysForNewWatcher: 5 });
+    expect(config.inboxAgent).toEqual({ watermarkAlert: false, watermarkMaxAgeHours: 24 });
     expect(config.briefs).toEqual({ minFreeBlockHours: 2 });
     expect(config.retention).toEqual({
       mailBodiesDays: 90,

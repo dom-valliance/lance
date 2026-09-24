@@ -113,6 +113,16 @@ export interface Config {
   watchers: {
     dryRunDaysForNewWatcher: number;
   };
+  inboxAgent: {
+    /**
+     * Whether the agent-logs watcher alerts on a stale inbox agent
+     * watermark. Off by default since Dom's inbox agent stopped posting its
+     * digest to Slack on 2026-09-23 (Phase 1: its posting retired in favour
+     * of Lance), which left the watermark with nothing to read.
+     */
+    watermarkAlert: boolean;
+    watermarkMaxAgeHours: number;
+  };
   briefs: {
     minFreeBlockHours: number;
   };
@@ -520,6 +530,28 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
   };
 
+  const inboxAgent: Config['inboxAgent'] = {
+    watermarkAlert:
+      readField(
+        errors,
+        env,
+        'INBOX_AGENT_WATERMARK_ALERT',
+        z.enum(['true', 'false']),
+        'false',
+        'must be true or false',
+        (value) => value,
+      ) === 'true',
+    watermarkMaxAgeHours: readField(
+      errors,
+      env,
+      'INBOX_AGENT_WATERMARK_MAX_AGE_HOURS',
+      z.number().positive(),
+      24,
+      'must be a positive number of hours',
+      toNumber,
+    ),
+  };
+
   const briefs: Config['briefs'] = {
     minFreeBlockHours: readField(
       errors,
@@ -720,6 +752,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     interruption,
     promotion,
     watchers,
+    inboxAgent,
     briefs,
     retention,
     offboarding,
