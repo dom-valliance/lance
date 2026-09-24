@@ -28,3 +28,10 @@ Lesson: use plain git for branches and commits. Do not install or use the `gh` C
 **Correction**: Dom said it was not clear what Claude wanted him to do next.
 **Rule**: Close any hand-over with a numbered list of Dom's actions, each with the exact command where one exists, followed by what Claude will do and what it is waiting on. State of branches goes above that list, not in place of it.
 **Applies to**: global, every hand-over message
+
+### [2026-09-24] Create worktrees for subagents by hand, from the working branch
+
+**Context**: Launching three Phase 5 agents with the Agent tool's worktree isolation.
+**Correction**: None from Dom; the agents stopped themselves. The tool cut each worktree from local `main`, which lags `origin/main` on this machine because `git fetch` fails over SSH, so none held the Phase 5 base. It also deleted each worktree and its branch as soon as the agent stopped unchanged, so a resumed agent had nowhere to work.
+**Rule**: For parallel agents, create each worktree with `git worktree add ../lance-worktrees/<name> -b <branch> <working branch>` before launching, tell Dom the paths and branches, and pin each agent to its path in the prompt. Check the base commit before the agent starts.
+**Applies to**: global, parallel subagent work
