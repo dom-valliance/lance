@@ -2,10 +2,8 @@ import { proposals, type Db } from '@lance/db';
 import { LedgerWriter, SystemControl } from '@lance/ledger';
 import { newUlid, nowIso } from '@lance/shared';
 import { and, eq, inArray } from 'drizzle-orm';
-import type { PgBoss } from 'pg-boss';
-import { work } from '../scheduler/boss.js';
 import type { PauseGate } from '../scheduler/gate.js';
-import { QUEUES, type ExecuteJob } from '../scheduler/queues.js';
+import type { ExecuteJob } from '../scheduler/queues.js';
 
 export const EXECUTOR = 'executor';
 export const EXECUTOR_ACTOR = 'agent:executor@0.1.0';
@@ -167,19 +165,6 @@ export async function executeProposal(
       ? { status: 'held', reason: message }
       : { status: 'failed', eventId: event.id, error: message };
   }
-}
-
-export function registerExecutor(
-  boss: PgBoss,
-  deps: ExecutorDeps,
-  afterEach?: (proposalId: string, outcome: ExecuteOutcome) => Promise<void>,
-): Promise<string> {
-  return work<ExecuteJob>(boss, QUEUES.execute, async (jobs) => {
-    for (const job of jobs) {
-      const outcome = await executeProposal(deps, job.data);
-      await afterEach?.(job.data.proposalId, outcome);
-    }
-  });
 }
 
 /** Phase 0 stand-in: there are no connector writes yet, so any attempt is a failure with a clear message. */

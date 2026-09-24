@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertCron, nextOccurrences, nextRun } from './cron.js';
+import { assertCron, nextOccurrences, nextRun, occurrencesBetween } from './cron.js';
 
 describe('nextOccurrences', () => {
   it('reads the expression in the given zone, honouring British Summer Time', () => {
@@ -52,5 +52,20 @@ describe('assertCron', () => {
     expect(() => {
       assertCron('61 * * * *');
     }).toThrow(/not a valid cron expression/);
+  });
+});
+
+describe('occurrencesBetween', () => {
+  it('stops at the end of the window', () => {
+    const runs = occurrencesBetween('30 16 * * 5', {
+      timeZone: 'Europe/London',
+      from: new Date('2026-01-05T00:00:00.000Z'),
+      to: new Date('2026-01-20T00:00:00.000Z'),
+      limit: 100,
+    });
+    expect(runs.map((run) => run.toISOString())).toEqual([
+      '2026-01-09T16:30:00.000Z',
+      '2026-01-16T16:30:00.000Z',
+    ]);
   });
 });

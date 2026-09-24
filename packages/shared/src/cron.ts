@@ -42,6 +42,27 @@ export function nextOccurrences(expression: string, options: OccurrenceOptions):
   return parsed.take(options.count).map((date) => date.toDate());
 }
 
+export interface WindowOptions {
+  readonly timeZone: string;
+  /** Occurrences strictly after this instant. */
+  readonly from: Date;
+  /** And no later than this one. */
+  readonly to: Date;
+  /** A ceiling on how many are returned, whatever the window holds. */
+  readonly limit: number;
+}
+
+/** Every instant `expression` fires at inside the window, up to `limit`. */
+export function occurrencesBetween(expression: string, options: WindowOptions): Date[] {
+  assertCron(expression);
+  const parsed = CronExpressionParser.parse(expression, {
+    tz: options.timeZone,
+    currentDate: options.from,
+    endDate: options.to,
+  });
+  return parsed.take(options.limit).map((date) => date.toDate());
+}
+
 /** The earliest next run across several expressions, or null for none. */
 export function nextRun(expressions: readonly string[], timeZone: string, from: Date): Date | null {
   let earliest: Date | null = null;
