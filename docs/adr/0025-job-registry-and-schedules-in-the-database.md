@@ -14,3 +14,7 @@ Code declares every system job with its default schedule, its bounds, whether it
 ## Consequences
 
 Adding a principal adds their schedules without a deploy. A job's schedule can be changed within its declared bounds from the Jobs page and Slack. The single-principal start-up resolution from Phase 4 (ADR 0015) is replaced by per-job and per-request resolution.
+
+## Amendment, 2026-09-24 (package 5.3)
+
+pg-boss accepts only letters, digits, underscores, hyphens, full stops and slashes in a schedule key, so the key is `<job>/<principalId>` rather than `<job>:<principalId>`, with `/<n>` added for a job declared with more than one cron (the mail watcher has three). A job's slug is also its pg-boss queue. Two jobs are organisation-wide: `jobs-reconcile`, which runs the reconciler every minute so a principal whose status changes gains or loses schedules without a deploy, and `organisation-budget-guard`, which raises the organisation ceiling's alerts to the admin. The api asks for a reconcile by sending a `jobs-reconcile` job after it changes a row, rather than the worker polling the table, because the api already holds a pg-boss client and the change then lands within pg-boss's fetch interval; the every-minute run covers anything the message misses.
