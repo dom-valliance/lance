@@ -12,6 +12,7 @@ export {
   NODE_LABEL_VALUES,
   ONTOLOGY_LAYERS,
   edgeLayer,
+  edgeLayerBetween,
   nodeLayer,
 } from './layers.js';
 export type { Layer } from './layers.js';

@@ -4,6 +4,7 @@ import {
   NODE_LABEL_VALUES,
   ONTOLOGY_LAYERS,
   edgeLayer,
+  edgeLayerBetween,
   nodeLayer,
   type Layer,
 } from './layers.js';
@@ -38,6 +39,7 @@ describe('ontology layers', () => {
       OWES: 'private',
       OWED_TO: 'private',
       ASSIGNED_TO: 'private',
+      OBSERVED: 'private',
       WORKS_AT: 'shared',
       ORGANISED: 'shared',
       RELATES_TO: 'shared',
@@ -54,5 +56,13 @@ describe('ontology layers', () => {
       ...Object.values(ONTOLOGY_LAYERS.edges),
     ] as Layer[];
     expect(layers).not.toContain('reference');
+  });
+
+  it('makes any edge with a private end private, whatever its label', () => {
+    expect(edgeLayerBetween('SAME_AS', 'private', 'shared')).toBe('private');
+    expect(edgeLayerBetween('WORKS_AT', 'shared', 'private')).toBe('private');
+    expect(edgeLayerBetween('SAME_AS', 'shared', 'shared')).toBe('shared');
+    expect(edgeLayerBetween('ATTENDED', 'shared', 'shared')).toBe('private');
+    expect(edgeLayerBetween('WORKS_AT', null, null)).toBe('shared');
   });
 });
