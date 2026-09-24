@@ -15,7 +15,9 @@ export const healthRoutes =
     fastify.get('/health/ready', async (request, reply) => {
       try {
         const state = await server.readiness();
-        return { ok: true, paused: state.paused, mode: state.mode };
+        // The global row, not any one principal's state: an unauthenticated
+        // probe has no principal, so the names say what the values are.
+        return { ok: true, pausedGlobally: state.paused, modeCeiling: state.mode };
       } catch (error) {
         request.log.error({ err: error }, 'Readiness probe could not read system_state');
         return reply.code(503).send({

@@ -267,7 +267,7 @@ describe('the api over a real database', () => {
     const response = await server.inject({ method: 'GET', url: '/health/ready' });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true, paused: false, mode: 'live' });
+    expect(response.json()).toEqual({ ok: true, pausedGlobally: false, modeCeiling: 'live' });
   });
 
   it('pauses through POST /admin/pause with a test-signed Entra token', async () => {
