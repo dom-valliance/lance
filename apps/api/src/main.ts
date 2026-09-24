@@ -33,6 +33,7 @@ import type {
   TokenVerifier,
 } from './deps.js';
 import { createFeed } from './events.js';
+import { createJobsService } from './jobs/service.js';
 import { createExecuteQueue, type ExecuteQueue } from './executeQueue.js';
 import { createPrincipalDirectory } from './principals/directory.js';
 import { applyDecision, type DecideDeps } from './proposals/decide.js';
@@ -74,7 +75,7 @@ export const createApiDeps = (options: PrincipalRuntimeOptions): ApiDeps => {
   const decideDeps: DecideDeps = {
     decide: (input) => decideProposal(options.db, input),
     getProposal: (id) => getProposal(options.db, id),
-    enqueueExecute: (proposalId) => executeQueue.enqueueExecute(proposalId),
+    enqueueExecute: (proposalId) => executeQueue.enqueueExecute(options.principal.id, proposalId),
     slack: slackSurface,
     notify: (event) => {
       feed.notify(event);
@@ -89,6 +90,7 @@ export const createApiDeps = (options: PrincipalRuntimeOptions): ApiDeps => {
     config: options.config,
     principalId: options.principal.id,
     actor: actorFromUpn(options.principal.upn),
+    upn: options.principal.upn,
     control,
     ledger: new LedgerReader(options.db),
     writer: new LedgerWriter(options.db),
@@ -99,7 +101,7 @@ export const createApiDeps = (options: PrincipalRuntimeOptions): ApiDeps => {
       get: (id) => getProposal(options.db, id),
     },
     decide: (request) => applyDecision(decideDeps, request),
-    enqueueExecute: (proposalId) => executeQueue.enqueueExecute(proposalId),
+    enqueueExecute: (proposalId) => executeQueue.enqueueExecute(options.principal.id, proposalId),
     commitments: createCommitmentStore(options.db),
     tasks: createTaskStore(options.db),
     briefs: createBriefStore(options.db),
@@ -110,8 +112,13 @@ export const createApiDeps = (options: PrincipalRuntimeOptions): ApiDeps => {
       { principalId: options.principal.id },
       { principalName: options.config.dom.name },
     ),
-    enqueueChase: (commitmentId) => executeQueue.enqueueChase(commitmentId),
-    enqueueBrief: () => executeQueue.enqueueBrief(),
+    enqueueChase: (commitmentId) => executeQueue.enqueueChase(options.principal.id, commitmentId),
+    enqueueBrief: () => executeQueue.enqueueBrief(options.principal.id),
+    jobs: createJobsService({
+      db: options.db,
+      principalId: options.principal.id,
+      queue: executeQueue,
+    }),
     status: createDbStatusSource(options.db, control, {
       usdToGbp: options.config.cost.usdToGbp,
       timeZone: options.config.timeZone,
@@ -160,8 +167,8 @@ export interface ServerRuntimeOptions {
   /** Null, the default, when no bot token is configured: cards are skipped. */
   slackSurface?: SlackSurface | null;
   /**
-   * One queue for every principal: pg-boss's tables carry no principal. The
-   * job payloads gain a principal id with package 5.3.
+   * One queue for every principal: pg-boss's tables carry no principal, so
+   * every job payload names the principal it is for (ADR 0025).
    */
   executeQueue?: ExecuteQueue;
 }

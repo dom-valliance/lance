@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../server.js';
 import {
   fakeDeps,
+  fakePrincipal,
   fakeSnapshot,
   TEST_COMMITMENT_ID,
   TEST_SIGNING_SECRET,
@@ -198,6 +199,96 @@ describe('/lance resume', () => {
   });
 });
 
+describe('/lance pause all and resume all', () => {
+  it('pauses every principal for an admin', async () => {
+    const text = await slashText('pause all');
+    expect(harness.control.pauseAllCalls).toEqual([
+      { reason: 'paused for everyone from Slack', actor: 'user:dom' },
+    ]);
+    expect(harness.control.pauseCalls).toEqual([]);
+    expect(text).toContain('Lance is paused for every principal.');
+  });
+
+  it('refuses a principal who is not the admin and pauses nothing', async () => {
+    const notAdmin = fakeDeps({
+      principal: fakePrincipal({ upn: 'second.principal@valliance.ai' }),
+    });
+    const other = buildServer(notAdmin.server);
+    try {
+      const body = command('pause all');
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const response = await other.inject({
+        method: 'POST',
+        url: '/slack/commands',
+        payload: body,
+        headers: {
+          'content-type': FORM,
+          'x-slack-request-timestamp': timestamp,
+          'x-slack-signature': slackSignature(TEST_SIGNING_SECRET, timestamp, body),
+        },
+      });
+      expect(response.json<{ text: string }>().text).toContain('Only an admin');
+      expect(notAdmin.control.pauseAllCalls).toEqual([]);
+      expect(notAdmin.control.pauseCalls).toEqual([]);
+    } finally {
+      await other.close();
+    }
+  });
+
+  it('lifts the global pause and says each principal resumes separately', async () => {
+    await slashText('pause all');
+    const text = await slashText('resume all');
+    expect(harness.control.resumeAllCalls).toEqual([{ actor: 'user:dom' }]);
+    expect(harness.control.resumeCalls).toEqual([]);
+    expect(text).toContain('The pause over every principal is lifted.');
+    expect(text).toContain('Resuming each principal is not automatic');
+  });
+});
+
+describe('/lance jobs, pause <job> and resume <job>', () => {
+  it("lists the caller's jobs with their state and next run in London time", async () => {
+    const text = await slashText('jobs');
+    expect(text).toContain('Your Lance jobs:');
+    expect(text).toContain('`alerts-deliver`: on, locked, next run 20 Sept 2026, 10:01');
+    expect(text).toContain('`brief-morning`: on, next run 21 Sept 2026, 06:30');
+  });
+
+  it('pauses one job and leaves the rest of Lance running', async () => {
+    const text = await slashText('pause brief-morning');
+    expect(harness.jobs.toggles).toEqual([
+      { slug: 'brief-morning', enabled: false, actor: 'user:dom' },
+    ]);
+    expect(harness.control.pauseCalls).toEqual([]);
+    expect(text).toContain('brief-morning is paused');
+    expect(await slashText('jobs')).toContain('`brief-morning`: paused, no next run');
+  });
+
+  it('refuses to pause a locked job', async () => {
+    const text = await slashText('pause alerts-deliver');
+    expect(text).toBe(
+      'alerts-deliver is locked and cannot be paused. It keeps running whatever else is paused.',
+    );
+    expect(harness.jobs.jobs.find((job) => job.slug === 'alerts-deliver')?.enabled).toBe(true);
+  });
+
+  it('refuses a job name the caller does not have rather than pausing everything', async () => {
+    const text = await slashText('pause brief-mornin');
+    expect(text).toContain('You have no job called brief-mornin');
+    expect(harness.control.pauseCalls).toEqual([]);
+  });
+
+  it('resumes a paused job', async () => {
+    await slashText('pause brief-morning');
+    const text = await slashText('resume brief-morning');
+    expect(text).toContain('brief-morning is running again');
+    expect(harness.control.resumeCalls).toEqual([]);
+  });
+
+  it('refuses the job list to a user who is not on the Slack allowlist', async () => {
+    expect(await slashText('jobs', 'U0INTRUDER')).toContain('Only Dom may list the jobs');
+  });
+});
+
 describe('/lance mode', () => {
   it('reports the current mode when no mode is given', async () => {
     const text = await slashText('mode');
@@ -287,7 +378,7 @@ describe('/lance chase', () => {
 describe('an unrecognised slash command', () => {
   it('replies with the usage line', async () => {
     expect(await slashText('sing')).toBe(
-      'Usage: /lance status | pause [reason] | resume | mode [live|dry_run] | brief | task <text> | chase <commitment id>',
+      'Usage: /lance status | pause [reason | all | <job>] | resume [all | <job>] | jobs | mode [live|dry_run] | brief | task <text> | chase <commitment id>',
     );
   });
 

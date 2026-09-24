@@ -1,4 +1,4 @@
-import { nowIso, SystemModeSchema, UlidSchema } from '@lance/shared';
+import { nowIso, SystemModeSchema, toLondon, UlidSchema } from '@lance/shared';
 import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { resumeAndRequeue, type ApiDeps, type ServerDeps } from '../deps.js';
@@ -80,7 +80,118 @@ const laterPhase = (command: string, nothing: string): string =>
   `The ${command} command arrives in a later phase. ${nothing}`;
 
 const usage = (): string =>
-  'Usage: /lance status | pause [reason] | resume | mode [live|dry_run] | brief | task <text> | chase <commitment id>';
+  'Usage: /lance status | pause [reason | all | <job>] | resume [all | <job>] | jobs | mode [live|dry_run] | brief | task <text> | chase <commitment id>';
+
+/** A job slug as the registry writes them: lower case words joined by hyphens or underscores. */
+const JOB_SLUG = /^[a-z0-9]+(?:[-_][a-z0-9]+)+$/;
+
+/**
+ * `/lance pause all` and `resume all` act on every principal; `pause <job>`
+ * and `resume <job>` on one of the caller's jobs; anything else after
+ * `pause` is the reason. A single hyphenated word is read as a job, so a
+ * mistyped job name is refused rather than pausing everything with it as
+ * the reason.
+ */
+type PauseTarget =
+  { kind: 'all' } | { kind: 'job'; slug: string } | { kind: 'self'; reason: string };
+
+const pauseTarget = (rest: string): PauseTarget => {
+  const trimmed = rest.trim();
+  if (trimmed.toLowerCase() === 'all') return { kind: 'all' };
+  if (JOB_SLUG.test(trimmed)) return { kind: 'job', slug: trimmed };
+  return { kind: 'self', reason: trimmed };
+};
+
+const handleJobs = async (deps: ApiDeps, displayName: string): Promise<SlackReply> => {
+  const jobs = await deps.jobs.list();
+  if (jobs.length === 0) {
+    return ephemeral(
+      `${displayName} has no jobs for you yet. The worker creates them on its next reconcile, within a minute of it starting.`,
+    );
+  }
+  const lines = jobs.map((job) => {
+    const state = job.enabled ? 'on' : 'paused';
+    const locked = job.locked ? ', locked' : '';
+    const next =
+      job.nextRunAt === null
+        ? job.enabled
+          ? 'not scheduled yet'
+          : 'no next run'
+        : `next run ${toLondon(job.nextRunAt)}`;
+    return `• \`${job.slug}\`: ${state}${locked}, ${next}`;
+  });
+  return ephemeral(
+    [
+      `Your ${displayName} jobs:`,
+      ...lines,
+      'Pause one with /lance pause <job> and resume it with /lance resume <job>. Locked jobs keep running.',
+    ].join('\n'),
+  );
+};
+
+const handleJobToggle = async (
+  deps: ApiDeps,
+  slug: string,
+  enabled: boolean,
+): Promise<SlackReply> => {
+  const status = await deps.jobs.setEnabled(slug, enabled, deps.actor);
+  switch (status) {
+    case 'unknown':
+      return ephemeral(
+        `You have no job called ${slug}, so nothing changed. /lance jobs lists your jobs.`,
+      );
+    case 'locked':
+      return ephemeral(
+        `${slug} is locked and cannot be paused. It keeps running whatever else is paused.`,
+      );
+    case 'unchanged':
+      return ephemeral(enabled ? `${slug} was already running.` : `${slug} was already paused.`);
+    case 'changed':
+      return ephemeral(
+        enabled
+          ? `${slug} is running again; its schedule returns within a minute.`
+          : `${slug} is paused; it will not run again until you resume it with /lance resume ${slug}.`,
+      );
+  }
+};
+
+/**
+ * Whether the resolved principal may pause or resume every principal.
+ * Slack requests carry no Entra token, so the `Lance.Admin` role is not
+ * known here; until package 5.4 brings the role to Slack, only the
+ * principal whose UPN is `config.dom.email` may. tRPC's `admin.pauseAll`
+ * checks the role itself.
+ */
+const mayControlOrganisation = (deps: ApiDeps): boolean =>
+  deps.upn.toLowerCase() === deps.config.dom.email.toLowerCase();
+
+/** `/lance pause all` sets the global row (ADR 0015), which pauses every principal. */
+const handlePauseAll = async (deps: ApiDeps, displayName: string): Promise<SlackReply> => {
+  const result = await deps.control.pauseAll({
+    reason: 'paused for everyone from Slack',
+    actor: deps.actor,
+  });
+  const opening = result.changed
+    ? `${displayName} is paused for every principal.`
+    : `${displayName} was already paused for every principal, so the existing reason stands.`;
+  const held =
+    result.heldProposalIds.length === 0
+      ? 'None of your queued proposals needed holding.'
+      : `Held ${String(result.heldProposalIds.length)} of your queued proposals: ${listIds(result.heldProposalIds)}.`;
+  return ephemeral(
+    `${opening} ${held} Other principals' queued proposals are held when their executor next runs.`,
+  );
+};
+
+const handleResumeAll = async (deps: ApiDeps, displayName: string): Promise<SlackReply> => {
+  const result = await deps.control.resumeAll({ actor: deps.actor });
+  const opening = result.changed
+    ? `The pause over every principal is lifted.`
+    : `${displayName} was not paused for every principal, so nothing changed.`;
+  return ephemeral(
+    `${opening} Resuming each principal is not automatic: anyone who paused themselves stays paused, and proposals held during the pause stay held until that principal runs /lance resume.`,
+  );
+};
 
 /**
  * `/lance mode` alone reports the mode; `/lance mode live` or `dry_run`
@@ -264,18 +375,40 @@ export const slackRoutes =
             : ephemeral(
                 `${displayName} status is available to Dom only; it includes cursor ages and spend.`,
               );
-        case 'pause':
-          return deps !== null
-            ? handlePause(deps, rest, displayName)
+        case 'pause': {
+          if (deps === null) {
+            return ephemeral(
+              `You are not authorised to pause ${displayName} from Slack. Ask Dom, or use the kill switch in Settings.`,
+            );
+          }
+          const target = pauseTarget(rest);
+          if (target.kind === 'job') return handleJobToggle(deps, target.slug, false);
+          if (target.kind === 'self') return handlePause(deps, target.reason, displayName);
+          return mayControlOrganisation(deps)
+            ? handlePauseAll(deps, displayName)
             : ephemeral(
-                `You are not authorised to pause ${displayName} from Slack. Ask Dom, or use the kill switch in Settings.`,
+                `Only an admin may pause ${displayName} for everyone. /lance pause pauses you alone.`,
               );
-        case 'resume':
-          return deps !== null
-            ? handleResume(deps, displayName)
+        }
+        case 'resume': {
+          if (deps === null) {
+            return ephemeral(
+              `You are not authorised to resume ${displayName} from Slack. Ask Dom, or use the kill switch in Settings.`,
+            );
+          }
+          const target = pauseTarget(rest);
+          if (target.kind === 'job') return handleJobToggle(deps, target.slug, true);
+          if (target.kind === 'self') return handleResume(deps, displayName);
+          return mayControlOrganisation(deps)
+            ? handleResumeAll(deps, displayName)
             : ephemeral(
-                `You are not authorised to resume ${displayName} from Slack. Ask Dom, or use the kill switch in Settings.`,
+                `Only an admin may resume ${displayName} for everyone. /lance resume resumes you alone.`,
               );
+        }
+        case 'jobs':
+          return deps !== null
+            ? handleJobs(deps, displayName)
+            : ephemeral(`Only Dom may list the jobs of ${displayName} from Slack.`);
         case 'mode':
           return deps !== null
             ? handleMode(deps, rest, displayName)

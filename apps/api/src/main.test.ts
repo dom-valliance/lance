@@ -10,14 +10,14 @@ import {
   scopedDb,
   type Db,
 } from '@lance/db';
-import { LedgerReader, LedgerWriter } from '@lance/ledger';
+import { JobControl, LedgerReader, LedgerWriter } from '@lance/ledger';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEntraVerifier, entraIssuer } from './auth/entra.js';
-import { createExecuteQueue, type ExecuteQueue } from './executeQueue.js';
+import { createBoss, createExecuteQueue, type ExecuteQueue } from './executeQueue.js';
 import { createServerDeps } from './main.js';
 import { buildServer } from './server.js';
 import { slackSignature } from './slack/verify.js';
@@ -341,11 +341,15 @@ describe('the api over a real database', () => {
     expect(forProposal[0]?.actor).toBe('user:dom');
     expect((forProposal[0]?.payload as { to: string }).to).toBe('approved');
 
-    const queued = await db.execute<{ name: string; data: { proposalId: string } }>(
-      sql`select name, data from pgboss.job where name = 'execute'`,
-    );
+    const queued = await db.execute<{
+      name: string;
+      data: { principalId: string; proposalId: string };
+    }>(sql`select name, data from pgboss.job where name = 'execute'`);
     expect(queued.rows).toHaveLength(1);
-    expect(queued.rows[0]?.data.proposalId).toBe(PROPOSAL_ID);
+    expect(queued.rows[0]?.data).toEqual({
+      principalId: SEED_PRINCIPAL_ID,
+      proposalId: PROPOSAL_ID,
+    });
   });
 
   it('appends an observed agent log through the ingest webhook', async () => {
@@ -368,6 +372,61 @@ describe('the api over a real database', () => {
     expect(observed).toHaveLength(1);
     expect(observed[0]?.actor).toBe('agent:inbox-agent@0.0.0');
     expect(observed[0]?.idempotencyKey).toContain('webhook:slack-1758351600.123456:');
+  });
+
+  it("pauses one of the principal's jobs from Slack, records it and asks the worker to reconcile", async () => {
+    // The worker's reconciler creates these rows; here the test does.
+    await new JobControl(db).ensure(
+      [
+        { slug: 'brief-morning', locked: false },
+        { slug: 'alerts-deliver', locked: true },
+      ],
+      { actor: 'system:scheduler' },
+    );
+
+    // And the worker's schedule for one of them, keyed as its reconciler keys it.
+    const boss = createBoss(db);
+    await boss.start();
+    await boss.createQueue('alerts-deliver');
+    await boss.schedule(
+      'alerts-deliver',
+      '* * * * *',
+      { principalId: SEED_PRINCIPAL_ID },
+      { tz: 'Europe/London', key: `alerts-deliver/${SEED_PRINCIPAL_ID}` },
+    );
+    await boss.stop({ graceful: false });
+
+    const listed = await slashCommand('jobs');
+    const listing = listed.json<{ text: string }>().text;
+    expect(listing).toContain('`brief-morning`: on');
+    expect(listing).toContain('`alerts-deliver`: on, locked, next run');
+    expect(listing).toContain('`brief-morning`: on, not scheduled yet');
+
+    const paused = await slashCommand('pause brief-morning');
+    expect(paused.json<{ text: string }>().text).toContain('brief-morning is paused');
+    const refused = await slashCommand('pause alerts-deliver');
+    expect(refused.json<{ text: string }>().text).toContain('locked');
+
+    const rows = await new JobControl(db).list();
+    expect(rows.find((row) => row.slug === 'brief-morning')?.enabled).toBe(false);
+    expect(rows.find((row) => row.slug === 'alerts-deliver')?.enabled).toBe(true);
+
+    const changes = (await new LedgerReader(db).query({ kind: 'state_changed' }))
+      .map((event) => event.payload as { change: string; slug?: string })
+      .filter((payload) => payload.change === 'job');
+    expect(changes).toEqual([
+      {
+        change: 'job',
+        slug: 'brief-morning',
+        old: { enabled: true, scheduleOverride: null },
+        new: { enabled: false, scheduleOverride: null },
+      },
+    ]);
+
+    const reconcile = await db.execute<{ data: { principalId: string } }>(
+      sql`select data from pgboss.job where name = 'jobs-reconcile'`,
+    );
+    expect(reconcile.rows.map((row) => row.data)).toEqual([{ principalId: SEED_PRINCIPAL_ID }]);
   });
 });
 

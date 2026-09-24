@@ -562,8 +562,13 @@ describe('an onboarding principal', () => {
 describe('the admin router', () => {
   const adminPaths = procedurePaths.filter((path) => path.startsWith('admin.'));
 
-  it('covers the principals list and the health read', () => {
-    expect(adminPaths.sort()).toEqual(['admin.health', 'admin.principals']);
+  it('covers the principals list, the health read and the organisation kill switch', () => {
+    expect(adminPaths.sort()).toEqual([
+      'admin.health',
+      'admin.pauseAll',
+      'admin.principals',
+      'admin.resumeAll',
+    ]);
   });
 
   it('refuses a Lance.User without Lance.Admin on every admin procedure', async () => {
@@ -582,5 +587,18 @@ describe('the admin router', () => {
       },
     ]);
     await expect(admin.admin.health()).resolves.toHaveLength(1);
+  });
+
+  it('lets a Lance.Admin pause and resume every principal, and nobody else', async () => {
+    await expect(caller.admin.pauseAll({ reason: 'drill' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+    expect(harness.control.pauseAllCalls).toEqual([]);
+
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    await admin.admin.pauseAll({ reason: 'drill' });
+    await admin.admin.resumeAll();
+    expect(harness.control.pauseAllCalls).toEqual([{ reason: 'drill', actor: 'user:dom' }]);
+    expect(harness.control.resumeAllCalls).toEqual([{ actor: 'user:dom' }]);
   });
 });

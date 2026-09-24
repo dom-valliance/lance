@@ -27,6 +27,7 @@ import type { AlertStoreLike } from './alerts/store.js';
 import type { BriefStoreLike } from './briefs/store.js';
 import type { CommitmentStoreLike } from './commitments/store.js';
 import type { FeedEvent, FeedListener } from './events.js';
+import type { JobsServiceLike } from './jobs/service.js';
 import type { DecisionRequest } from './proposals/decide.js';
 import type { StatusSource } from './status.js';
 import type { TaskStoreLike } from './tasks/store.js';
@@ -42,6 +43,10 @@ export interface SystemControlLike {
   read(): Promise<RunState>;
   pause(options: { reason: string; actor: string }): Promise<PauseResult>;
   resume(options: { actor: string }): Promise<ResumeResult>;
+  /** Sets the global row, which pauses every principal (ADR 0015). */
+  pauseAll(options: { reason: string; actor: string }): Promise<PauseResult>;
+  /** Clears the global row; each principal's own pause, and their held proposals, stay. */
+  resumeAll(options: { actor: string }): Promise<{ changed: boolean; eventId: string }>;
   /** Switches between dry run and live (spec 6.3); records a state_changed event either way. */
   setMode(
     mode: SystemMode,
@@ -184,6 +189,12 @@ export interface ApiDeps {
   principalId: string;
   /** The ledger actor for what this principal does by hand, `user:<name>`. */
   actor: string;
+  /**
+   * The principal's UPN. Slack requests carry no Entra roles, so until the
+   * roles reach Slack (package 5.4) `/lance pause all` compares this with
+   * `config.dom.email`; tRPC checks the `Lance.Admin` role instead.
+   */
+  upn: string;
   control: SystemControlLike;
   ledger: LedgerReaderLike;
   writer: LedgerWriterLike;
@@ -215,6 +226,8 @@ export interface ApiDeps {
   enqueueChase: (commitmentId: string) => Promise<string>;
   /** `/lance brief`: the worker regenerates the morning brief now. */
   enqueueBrief: () => Promise<string>;
+  /** The principal's jobs behind `/lance jobs`, `pause <job>` and `resume <job>` (ADR 0025). */
+  jobs: JobsServiceLike;
   status: StatusSource;
   /**
    * How Lance speaks in its own channel (ADR 0012). Null when

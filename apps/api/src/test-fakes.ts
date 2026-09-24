@@ -60,6 +60,7 @@ import type { TaskCountQuery, TaskQuery, TaskStoreLike } from './tasks/store.js'
 import { toTaskView, type ObservationRecord } from './tasks/view.js';
 import { UnauthorisedError } from './errors.js';
 import { createFeed, type Feed, type FeedEvent } from './events.js';
+import type { JobListing, JobsServiceLike, JobToggleStatus } from './jobs/service.js';
 import type { DecisionRequest } from './proposals/decide.js';
 import type { StatusSnapshot, StatusSource } from './status.js';
 import type { ApiContext } from './trpc.js';
@@ -204,6 +205,27 @@ export class FakeSystemControl implements SystemControlLike {
     return Promise.resolve({ changed, eventId: '01K5S9V6QW3SWCCPVB0N0E30E4' });
   }
 
+  readonly pauseAllCalls: { reason: string; actor: string }[] = [];
+  readonly resumeAllCalls: { actor: string }[] = [];
+
+  pauseAll(options: { reason: string; actor: string }): Promise<PauseResult> {
+    this.pauseAllCalls.push(options);
+    const changed = !this.state.pausedGlobally;
+    this.state = { ...this.state, paused: true, pausedGlobally: true };
+    return Promise.resolve({
+      changed,
+      heldProposalIds: [],
+      eventId: '01K5S9V6QW3SWCCPVB0N0E30E6',
+    });
+  }
+
+  resumeAll(options: { actor: string }): Promise<{ changed: boolean; eventId: string }> {
+    this.resumeAllCalls.push(options);
+    const changed = this.state.pausedGlobally;
+    this.state = { ...this.state, pausedGlobally: false };
+    return Promise.resolve({ changed, eventId: '01K5S9V6QW3SWCCPVB0N0E30E7' });
+  }
+
   resume(options: { actor: string }): Promise<ResumeResult> {
     this.resumeCalls.push(options);
     const changed = this.state.paused;
@@ -213,6 +235,30 @@ export class FakeSystemControl implements SystemControlLike {
       releasedProposalIds: ['01K5S9V6QW3SWCCPVB0N0E301A'],
       eventId: '01K5S9V6QW3SWCCPVB0N0E30E2',
     });
+  }
+}
+
+/** The caller's job rows without a database; `setEnabled` follows JobControl's rules. */
+export class FakeJobs implements JobsServiceLike {
+  jobs: JobListing[] = [
+    { slug: 'alerts-deliver', enabled: true, locked: true, nextRunAt: '2026-09-20T09:01:00.000Z' },
+    { slug: 'brief-morning', enabled: true, locked: false, nextRunAt: '2026-09-21T05:30:00.000Z' },
+  ];
+  readonly toggles: { slug: string; enabled: boolean; actor: string }[] = [];
+
+  list(): Promise<JobListing[]> {
+    return Promise.resolve(this.jobs);
+  }
+
+  setEnabled(slug: string, enabled: boolean, actor: string): Promise<JobToggleStatus> {
+    this.toggles.push({ slug, enabled, actor });
+    const job = this.jobs.find((candidate) => candidate.slug === slug);
+    if (job === undefined) return Promise.resolve('unknown');
+    if (job.locked && !enabled) return Promise.resolve('locked');
+    if (job.enabled === enabled) return Promise.resolve('unchanged');
+    job.enabled = enabled;
+    job.nextRunAt = enabled ? '2026-09-21T05:30:00.000Z' : null;
+    return Promise.resolve('changed');
   }
 }
 
@@ -887,6 +933,7 @@ export interface FakeDeps {
   chased: string[];
   /** One entry per `/lance brief` request. */
   briefRequests: number[];
+  jobs: FakeJobs;
 }
 
 export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
@@ -910,6 +957,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
   const agents = new FakeAgentsStore();
   const ontology = new FakeOntology();
   const slackFailures: string[] = [];
+  const jobs = new FakeJobs();
 
   const config = overrides.config ?? testConfig();
   const principal =
@@ -925,6 +973,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     config,
     principalId: principal.id,
     actor: 'user:dom',
+    upn: principal.upn,
     control: overrides.control ?? control,
     ledger: overrides.ledger ?? ledger,
     writer: overrides.writer ?? writer,
@@ -948,6 +997,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
       chased.push(commitmentId);
       return Promise.resolve(`job-${String(chased.length)}`);
     },
+    jobs,
     status: overrides.status ?? status,
     slackSurface: overrides.withoutSlackSurface === true ? null : slack.surface,
     onAlertSlackFailure: (_error, alertId) => {
@@ -999,6 +1049,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     enqueued,
     chased,
     briefRequests,
+    jobs,
   };
 };
 

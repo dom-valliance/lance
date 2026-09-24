@@ -236,6 +236,24 @@ export const appRouter = router({
   admin: router({
     principals: adminProcedure.query(({ ctx }) => ctx.server.admin.principals()),
     health: adminProcedure.query(({ ctx }) => ctx.server.admin.health()),
+    /**
+     * The organisation kill switch (multi-user plan M5): sets the global
+     * row, which pauses every principal. `Lance.Admin` only; the caller's
+     * own approved proposals are held at once, everyone else's when their
+     * executor next runs.
+     */
+    pauseAll: adminProcedure
+      .input(z.object({ reason: z.string().min(1) }))
+      .mutation(({ ctx, input }) =>
+        ctx.deps.control.pauseAll({ reason: input.reason, actor: ctx.deps.actor }),
+      ),
+    /**
+     * Lifts the global pause. Each principal's own pause stays, and proposals
+     * held under the global pause are released by that principal's resume.
+     */
+    resumeAll: adminProcedure.mutation(({ ctx }) =>
+      ctx.deps.control.resumeAll({ actor: ctx.deps.actor }),
+    ),
   }),
   systemState: router({
     get: procedure.query(({ ctx }) => ctx.deps.control.read()),
