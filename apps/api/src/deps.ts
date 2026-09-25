@@ -209,10 +209,16 @@ export type SlackLinkRefusal =
   | 'invalid'
   | 'expired'
   | 'used'
-  /** The Slack user is linked, or was, to another principal. */
+  /** The Slack user is linked to another principal. */
   | 'taken'
   /** The signed-in principal is paused or offboarded. */
-  | 'inactive';
+  | 'inactive'
+  /** The Slack profile's email is not the signed-in principal's UPN: the link was opened by someone else. */
+  | 'email_mismatch'
+  /** Slack gave no email for the account (no bot token, or no `users:read.email`), so the link cannot be checked. */
+  | 'email_unavailable'
+  /** The signed-in principal already has an active link to a different Slack user; `/lance unlink` from that account first. */
+  | 'linked_elsewhere';
 
 /** What the link page shows before the person confirms. */
 export type SlackLinkPreview =
@@ -270,6 +276,11 @@ export interface SlackLinksLike {
   /** Consumes the token and binds its Slack user to the caller's principal. */
   confirm(token: string, caller: Caller): Promise<SlackLinkOutcome>;
   current(principal: PrincipalRef): Promise<SlackLinkState | null>;
+  /**
+   * `/lance unlink`: revokes the principal's own active link to this Slack
+   * user, with a ledger event. False when there was none to revoke.
+   */
+  unlink(input: { principal: PrincipalRef; slackUserId: string; actor: string }): Promise<boolean>;
 }
 
 /**

@@ -5,6 +5,7 @@ import { LedgerReader } from '@lance/ledger';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { actorFromUpn } from '../actor.js';
 import type { Caller, PrincipalRef, SlackLinkIssue } from '../deps.js';
 import { createPrincipalDirectory } from '../principals/directory.js';
 import { testConfig, TEST_SIGNING_SECRET } from '../test-fakes.js';
@@ -19,6 +20,8 @@ import { createReplayGuard } from './replay.js';
 
 const DOM_SLACK = 'U0BN7JN7BAN';
 const TAREK_SLACK = 'U0TAREK';
+/** A second Slack account whose profile carries Tarek's email. */
+const TAREK_SECOND_SLACK = 'U0TAREK2';
 const TEAM = 'T0VALLIANCE';
 const WEB = 'https://web.example.test';
 
@@ -31,9 +34,16 @@ class FakeProvisioner implements ChannelProvisionerLike {
   readonly invited: { channel: string; user: string }[] = [];
   taken = new Set<string>();
   failWith: Error | null = null;
+  /** The profile email Slack returns per user; absent, Slack gave none. */
+  emails = new Map<string, string>();
 
   userProfile(user: string) {
-    return Promise.resolve({ id: user, firstName: 'Tarek', displayName: 'Tarek Example' });
+    return Promise.resolve({
+      id: user,
+      firstName: 'Tarek',
+      displayName: 'Tarek Example',
+      email: this.emails.get(user) ?? null,
+    });
   }
 
   createPrivateChannel(input: { name: string }) {
@@ -57,13 +67,13 @@ let nowMs: number;
 let TAREK_ID: string;
 let TAREK_UPN: string;
 
-const links = (webUrl: string | null = WEB) =>
+const links = (webUrl: string | null = WEB, withProvisioner = true) =>
   createSlackLinks({
     root,
     config: testConfig(),
     signingSecret: TEST_SIGNING_SECRET,
     webUrl,
-    provisioner,
+    provisioner: withProvisioner ? provisioner : null,
     now: () => new Date(nowMs).toISOString(),
   });
 
@@ -129,6 +139,11 @@ beforeEach(async () => {
     "INSERT INTO principals (id, entra_oid, upn, status) VALUES ($1, $2, $3, 'onboarding')",
     [TAREK_ID, `oid-${TAREK_ID}`, TAREK_UPN],
   );
+  provisioner.emails = new Map([
+    [DOM_SLACK, 'Dom@Valliance.ai'],
+    [TAREK_SLACK, TAREK_UPN],
+    [TAREK_SECOND_SLACK, TAREK_UPN],
+  ]);
 });
 
 describe('a /lance login link', () => {
@@ -206,6 +221,137 @@ describe('a /lance login link', () => {
         actor: 'system:slack-login',
       }),
     ).toEqual({ status: 'unconfigured' });
+  });
+});
+
+describe('who a link may bind', () => {
+  it("refuses a link opened by someone other than the Slack account's owner, and records it", async () => {
+    const dom = await principal('dom@valliance.ai');
+    const token = await issueFor(DOM_SLACK, dom);
+    const tarek = await callerFor(TAREK_UPN);
+
+    expect(await links().preview(token, tarek.principal)).toEqual({ status: 'email_mismatch' });
+    expect(await links().confirm(token, tarek)).toEqual({ status: 'email_mismatch' });
+
+    expect(await createPrincipalDirectory(root).bySlackUserId(DOM_SLACK)).toBeNull();
+    expect(provisioner.invited).toEqual([]);
+    expect((await payloads(TAREK_ID)).map((p) => [p['change'], p['step'], p['reason']])).toEqual([
+      ['slack_link_refused', 'preview', 'email_mismatch'],
+      ['slack_link_refused', 'confirm', 'email_mismatch'],
+    ]);
+    // The link was not consumed: its owner can still use it.
+    expect(await links().confirm(token, await callerFor('dom@valliance.ai'))).toMatchObject({
+      status: 'linked',
+    });
+  });
+
+  it("matches the Slack email to the principal's UPN without regard to case", async () => {
+    provisioner.emails.set(TAREK_SLACK, TAREK_UPN.toUpperCase());
+    const tarek = await principal(TAREK_UPN);
+    expect(
+      await links().confirm(await issueFor(TAREK_SLACK, tarek), await callerFor(TAREK_UPN)),
+    ).toMatchObject({ status: 'linked', slackUserId: TAREK_SLACK });
+  });
+
+  it('refuses when Slack gives no email for the account', async () => {
+    provisioner.emails.delete(TAREK_SLACK);
+    const tarek = await principal(TAREK_UPN);
+    const token = await issueFor(TAREK_SLACK, tarek);
+
+    expect(await links().confirm(token, await callerFor(TAREK_UPN))).toEqual({
+      status: 'email_unavailable',
+    });
+    expect(await links(WEB, false).confirm(token, await callerFor(TAREK_UPN))).toEqual({
+      status: 'email_unavailable',
+    });
+    expect(await createPrincipalDirectory(root).bySlackUserId(TAREK_SLACK)).toBeNull();
+  });
+
+  it('refuses to replace an active link to another Slack account, and keeps it', async () => {
+    const tarek = await principal(TAREK_UPN);
+    await links().confirm(await issueFor(TAREK_SLACK, tarek), await callerFor(TAREK_UPN));
+    const token = await issueFor(TAREK_SECOND_SLACK, tarek);
+
+    expect(await links().preview(token, tarek)).toEqual({ status: 'linked_elsewhere' });
+    expect(await links().confirm(token, await callerFor(TAREK_UPN))).toEqual({
+      status: 'linked_elsewhere',
+    });
+    expect(await createPrincipalDirectory(root).bySlackUserId(TAREK_SLACK)).toMatchObject({
+      id: TAREK_ID,
+    });
+    expect((await payloads(TAREK_ID)).at(-1)).toMatchObject({
+      change: 'slack_link_refused',
+      reason: 'linked_elsewhere',
+    });
+  });
+
+  it('links the other Slack account once the principal has unlinked the first', async () => {
+    const tarek = await principal(TAREK_UPN);
+    await links().confirm(await issueFor(TAREK_SLACK, tarek), await callerFor(TAREK_UPN));
+
+    const actor = actorFromUpn(TAREK_UPN);
+    expect(await links().unlink({ principal: tarek, slackUserId: TAREK_SLACK, actor })).toBe(true);
+    expect(await links().unlink({ principal: tarek, slackUserId: TAREK_SLACK, actor })).toBe(false);
+    expect(await createPrincipalDirectory(root).bySlackUserId(TAREK_SLACK)).toBeNull();
+    expect((await payloads(TAREK_ID)).at(-1)).toMatchObject({
+      change: 'slack_unlinked',
+      slackUserId: TAREK_SLACK,
+    });
+
+    const outcome = await links().confirm(
+      await issueFor(TAREK_SECOND_SLACK, tarek),
+      await callerFor(TAREK_UPN),
+    );
+    expect(outcome).toMatchObject({ status: 'linked', slackUserId: TAREK_SECOND_SLACK });
+  });
+
+  it("does not unlink another principal's Slack account", async () => {
+    const tarek = await principal(TAREK_UPN);
+    await links().confirm(await issueFor(TAREK_SLACK, tarek), await callerFor(TAREK_UPN));
+    const dom = await principal('dom@valliance.ai');
+
+    expect(
+      await links().unlink({
+        principal: dom,
+        slackUserId: TAREK_SLACK,
+        actor: actorFromUpn('dom@valliance.ai'),
+      }),
+    ).toBe(false);
+    expect(await createPrincipalDirectory(root).bySlackUserId(TAREK_SLACK)).toMatchObject({
+      id: TAREK_ID,
+    });
+  });
+
+  it('binds a Slack account whose earlier link was revoked to a new principal', async () => {
+    const tarek = await principal(TAREK_UPN);
+    await links().confirm(await issueFor(TAREK_SLACK, tarek), await callerFor(TAREK_UPN));
+    await links().unlink({
+      principal: tarek,
+      slackUserId: TAREK_SLACK,
+      actor: actorFromUpn(TAREK_UPN),
+    });
+
+    const nextId = newUlid();
+    const nextUpn = `next.${nextId.toLowerCase()}@valliance.ai`;
+    await fixture.$client.query(
+      "INSERT INTO principals (id, entra_oid, upn, status) VALUES ($1, $2, $3, 'onboarding')",
+      [nextId, `oid-${nextId}`, nextUpn],
+    );
+    provisioner.emails.set(TAREK_SLACK, nextUpn);
+    nowMs += 60 * 1000;
+    const next = await principal(nextUpn);
+    const token = await issueFor(TAREK_SLACK, next);
+
+    expect(await links().preview(token, next)).toMatchObject({
+      status: 'ready',
+      alreadyLinked: false,
+    });
+    expect(await links().confirm(token, await callerFor(nextUpn))).toMatchObject({
+      status: 'linked',
+    });
+    expect(await createPrincipalDirectory(root).bySlackUserId(TAREK_SLACK)).toMatchObject({
+      id: nextId,
+    });
   });
 });
 

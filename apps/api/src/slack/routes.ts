@@ -96,7 +96,7 @@ const laterPhase = (command: string, nothing: string): string =>
   `The ${command} command arrives in a later phase. ${nothing}`;
 
 const usage = (): string =>
-  'Usage: /lance login | status | pause [reason | all | <job>] | resume [all | <job>] | jobs | mode [live|dry_run] | brief | task <text> | chase <commitment id>';
+  'Usage: /lance login | unlink | status | pause [reason | all | <job>] | resume [all | <job>] | jobs | mode [live|dry_run] | brief | task <text> | chase <commitment id>';
 
 /** A job slug as the registry writes them: lower case words joined by hyphens or underscores. */
 const JOB_SLUG = /^[a-z0-9]+(?:[-_][a-z0-9]+)+$/;
@@ -415,6 +415,29 @@ const handleLogin = async (
   );
 };
 
+/**
+ * `/lance unlink` (ADR 0021): revokes the link of the Slack account that
+ * sends it, with a ledger event, so its principal can link another account.
+ * Open to a paused or onboarding principal, like `/lance login`.
+ */
+const handleUnlink = async (
+  server: ServerDeps,
+  command: SlashCommand,
+  resolved: PrincipalRef,
+): Promise<SlackReply> => {
+  const displayName = server.config.agentDisplayName;
+  const revoked = await server.slack.links.unlink({
+    principal: resolved,
+    slackUserId: command.user_id,
+    actor: actorFromUpn(resolved.upn),
+  });
+  return ephemeral(
+    revoked
+      ? `This Slack account no longer acts for ${resolved.upn} in ${displayName}. Run /lance login from the account you want to link.`
+      : `This Slack account has no link of its own to ${resolved.upn}, so nothing was unlinked. Ask a Lance admin if you expected one.`,
+  );
+};
+
 export const slackRoutes =
   (server: ServerDeps): FastifyPluginAsync =>
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -478,9 +501,10 @@ export const slackRoutes =
       );
       if (verb === 'login') return handleLogin(server, parsed.data, resolved);
       if (resolved === null) return ephemeral(loginPrompt(displayName));
+      if (verb === 'unlink') return handleUnlink(server, parsed.data, resolved);
       if (resolved.status !== 'active') {
         return ephemeral(
-          `Your ${displayName} account is ${resolved.status}, so nothing but /lance login works from Slack yet.`,
+          `Your ${displayName} account is ${resolved.status}, so nothing but /lance login and /lance unlink work from Slack yet.`,
         );
       }
       const principal = resolved;

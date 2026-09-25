@@ -196,6 +196,43 @@ describe('/lance login', () => {
   });
 });
 
+describe('/lance unlink', () => {
+  it("revokes the sending Slack account's own link, as its principal", async () => {
+    const text = await slashText('unlink');
+
+    expect(text).toContain('This Slack account no longer acts for dom@valliance.ai in Lance.');
+    expect(harness.links.unlinked).toEqual([
+      {
+        principal: expect.objectContaining({ id: TEST_PRINCIPAL_ID }) as unknown,
+        slackUserId: TEST_SLACK_USER_ID,
+        actor: 'user:dom',
+      },
+    ]);
+  });
+
+  it('says so when there was no link to revoke', async () => {
+    harness.links.unlinkResult = false;
+    expect(await slashText('unlink')).toContain('nothing was unlinked');
+  });
+
+  it('gives an unlinked Slack user the login prompt and revokes nothing', async () => {
+    expect(await slashText('unlink', 'U0NEWCOMER')).toBe(LOGIN_PROMPT);
+    expect(harness.links.unlinked).toEqual([]);
+  });
+
+  it('works for a principal who is paused', async () => {
+    const paused = fakeDeps({ principal: fakePrincipal({ status: 'paused' }) });
+    const instance = serverWith(paused, {});
+    try {
+      const response = await signedPost(instance, command('unlink'));
+      expect(response.json<{ text: string }>().text).toContain('no longer acts for');
+      expect(paused.links.unlinked).toHaveLength(1);
+    } finally {
+      await instance.close();
+    }
+  });
+});
+
 describe('the SLACK_ALLOWED_USER_ID fallback', () => {
   it('lets Dom act from Slack before he has linked', async () => {
     const unlinked = fakeDeps({ principal: fakePrincipal({ slackUserId: null }) });
@@ -232,7 +269,7 @@ describe('a linked principal who is not active', () => {
       const status = await signedPost(instance, command('status'));
       const login = await signedPost(instance, command('login'));
       expect(status.json<{ text: string }>().text).toBe(
-        'Your Lance account is onboarding, so nothing but /lance login works from Slack yet.',
+        'Your Lance account is onboarding, so nothing but /lance login and /lance unlink work from Slack yet.',
       );
       expect(login.json<{ text: string }>().text).toContain('open the link page');
     } finally {
@@ -521,12 +558,12 @@ describe('/lance chase', () => {
 describe('an unrecognised slash command', () => {
   it('replies with the usage line', async () => {
     expect(await slashText('sing')).toBe(
-      'Usage: /lance login | status | pause [reason | all | <job>] | resume [all | <job>] | jobs | mode [live|dry_run] | brief | task <text> | chase <commitment id>',
+      'Usage: /lance login | unlink | status | pause [reason | all | <job>] | resume [all | <job>] | jobs | mode [live|dry_run] | brief | task <text> | chase <commitment id>',
     );
   });
 
   it('replies with the usage line for an empty command', async () => {
-    expect(await slashText('')).toContain('Usage: /lance login | status');
+    expect(await slashText('')).toContain('Usage: /lance login | unlink | status');
   });
 });
 

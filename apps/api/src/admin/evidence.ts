@@ -36,6 +36,7 @@ export const ACCESS_CHANGES = [
   'principal_paused',
   'slack_link_issued',
   'slack_linked',
+  'slack_unlinked',
   'slack_channel_created',
   'slack_channel_assigned',
   'slack_channel_invited',

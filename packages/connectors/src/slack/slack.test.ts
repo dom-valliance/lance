@@ -284,7 +284,23 @@ describe('Slack channel provisioning', () => {
       id: 'U0TAREK',
       firstName: 'Tarek',
       displayName: 'Tarek Example',
+      email: null,
     });
     expect(captured[0]?.url).toBe('https://slack.com/api/users.info');
+  });
+
+  it("reads the profile's email when the token holds users:read.email", async () => {
+    const { fetchImpl } = stubFetch([
+      {
+        body: {
+          ok: true,
+          user: { id: 'U0TAREK', profile: { email: ' Tarek@Valliance.ai ' } },
+        },
+      },
+    ]);
+    const client = createSlackClient({ token: 't', fetchImpl, clock: new FakeClock() });
+    expect(await slackReads(client).userProfile('U0TAREK')).toMatchObject({
+      email: 'Tarek@Valliance.ai',
+    });
   });
 });

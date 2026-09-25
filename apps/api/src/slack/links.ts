@@ -2,7 +2,7 @@ import { isSlackApiError, type SlackChannelProvisioner } from '@lance/connectors
 import { principals, scopedDb, slackLinks, slackLinkTokens, type Db } from '@lance/db';
 import { LedgerWriter } from '@lance/ledger';
 import { newUlid, nowIso, type Config } from '@lance/shared';
-import { and, eq, isNull, ne, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { actorFromUpn } from '../actor.js';
 import type {
   Caller,
@@ -31,7 +31,14 @@ import {
  * calls `preview`, then `confirm`, through tRPC with their token. `confirm`
  * consumes the nonce, so the link works once, and records the binding in
  * `slack_links` in the principal's own scope. Each step writes a ledger
- * event. The database enforces the limits as well (migration 0014).
+ * event. The database enforces the limits as well (migrations 0014, 0019).
+ *
+ * A link binds only the person it was issued to: the Slack profile's email
+ * (`users.info`, bot scope `users:read.email`) must be the signing-in
+ * principal's UPN, so a link sent to someone else binds nobody. A principal
+ * with an active link to another Slack user runs `/lance unlink` from that
+ * account first; a link never replaces another silently. Every refusal of
+ * these kinds is recorded in the ledger of the principal who tried.
  */
 
 /**
@@ -107,6 +114,12 @@ interface TokenRow {
 
 type Checked = { status: 'ok'; row: TokenRow } | { status: SlackLinkRefusal };
 
+/** Refusals that say who tried to bind what, so each one is recorded. */
+type BindingRefusal = 'taken' | 'email_mismatch' | 'email_unavailable' | 'linked_elsewhere';
+
+type Binding =
+  { status: 'ok'; active: boolean; slackName: string | null } | { status: BindingRefusal };
+
 export function createSlackLinks(options: SlackLinksOptions): SlackLinksLike {
   const { root, config } = options;
   const clock = options.now ?? nowIso;
@@ -156,12 +169,58 @@ export function createSlackLinks(options: SlackLinksOptions): SlackLinksLike {
     return { status: 'ok', row };
   };
 
-  const linkOf = async (slackUserId: string) => {
+  /** The Slack user's active link, whoever holds it; revoked links bind nobody. */
+  const activeLinkOf = async (slackUserId: string) => {
     const rows = await root
       .select()
       .from(slackLinks)
-      .where(eq(slackLinks.slackUserId, slackUserId));
+      .where(and(eq(slackLinks.slackUserId, slackUserId), isNull(slackLinks.revokedAt)));
     return rows[0] ?? null;
+  };
+
+  const activeLinkFor = async (principalId: string) => {
+    const rows = await root
+      .select()
+      .from(slackLinks)
+      .where(and(eq(slackLinks.principalId, principalId), isNull(slackLinks.revokedAt)));
+    return rows[0] ?? null;
+  };
+
+  /**
+   * Whether this principal may bind this Slack user: the user is not bound
+   * to anyone else, the principal is bound to no other Slack user, and the
+   * Slack profile's email is the principal's UPN.
+   */
+  const checkBinding = async (slackUserId: string, principal: PrincipalRef): Promise<Binding> => {
+    const active = await activeLinkOf(slackUserId);
+    if (active !== null && active.principalId !== principal.id) return { status: 'taken' };
+    const own = await activeLinkFor(principal.id);
+    if (own !== null && own.slackUserId !== slackUserId) return { status: 'linked_elsewhere' };
+    const profile =
+      options.provisioner === null
+        ? null
+        : await options.provisioner.userProfile(slackUserId).catch(() => null);
+    if (profile === null || profile.email === null) return { status: 'email_unavailable' };
+    if (profile.email.toLowerCase() !== principal.upn.toLowerCase()) {
+      return { status: 'email_mismatch' };
+    }
+    return { status: 'ok', active: active !== null, slackName: profile.displayName };
+  };
+
+  const recordRefusal = async (
+    principal: PrincipalRef,
+    actor: string,
+    step: 'preview' | 'confirm',
+    reason: BindingRefusal,
+    row: TokenRow,
+  ): Promise<void> => {
+    await record(principal.id, actor, 'failed', {
+      change: 'slack_link_refused',
+      step,
+      reason,
+      slackUserId: row.slackUserId,
+      slackTeamId: row.slackTeamId,
+    });
   };
 
   const channelOf = async (principalId: string): Promise<string | null> => {
@@ -329,19 +388,18 @@ export function createSlackLinks(options: SlackLinksOptions): SlackLinksLike {
       const checked = await check(token);
       if (checked.status !== 'ok') return { status: checked.status };
       const { row } = checked;
-      const existing = await linkOf(row.slackUserId);
-      if (existing !== null && existing.principalId !== principal.id) return { status: 'taken' };
-      const profile =
-        options.provisioner === null
-          ? null
-          : await options.provisioner.userProfile(row.slackUserId).catch(() => null);
+      const binding = await checkBinding(row.slackUserId, principal);
+      if (binding.status !== 'ok') {
+        await recordRefusal(principal, actorFromUpn(principal.upn), 'preview', binding.status, row);
+        return { status: binding.status };
+      }
       return {
         status: 'ready',
         slackUserId: row.slackUserId,
         slackTeamId: row.slackTeamId,
-        slackName: profile?.displayName ?? null,
+        slackName: binding.slackName,
         expiresAt: row.expiresAt.toISOString(),
-        alreadyLinked: existing !== null && existing.revokedAt === null,
+        alreadyLinked: binding.active,
       };
     },
 
@@ -353,8 +411,12 @@ export function createSlackLinks(options: SlackLinksOptions): SlackLinksLike {
       const checked = await check(token);
       if (checked.status !== 'ok') return { status: checked.status };
       const { row } = checked;
-      const existing = await linkOf(row.slackUserId);
-      if (existing !== null && existing.principalId !== principal.id) return { status: 'taken' };
+      const actor = actorFromUpn(identity.upn);
+      const binding = await checkBinding(row.slackUserId, principal);
+      if (binding.status !== 'ok') {
+        await recordRefusal(principal, actor, 'confirm', binding.status, row);
+        return { status: binding.status };
+      }
 
       const consumed = await root
         .update(slackLinkTokens)
@@ -366,30 +428,25 @@ export function createSlackLinks(options: SlackLinksOptions): SlackLinksLike {
         return { status: again.status === 'ok' ? 'used' : again.status };
       }
 
-      const actor = actorFromUpn(identity.upn);
       const db = scoped(principal.id);
       const at = new Date(clock());
-      const replaced = await db
-        .update(slackLinks)
-        .set({ revokedAt: at })
-        .where(
-          and(
-            eq(slackLinks.principalId, principal.id),
-            isNull(slackLinks.revokedAt),
-            ne(slackLinks.slackUserId, row.slackUserId),
-          ),
-        )
-        .returning({ slackUserId: slackLinks.slackUserId });
-      if (existing === null) {
+      if (binding.active) {
+        await db
+          .update(slackLinks)
+          .set({ linkedAt: at })
+          .where(
+            and(
+              eq(slackLinks.slackUserId, row.slackUserId),
+              eq(slackLinks.principalId, principal.id),
+              isNull(slackLinks.revokedAt),
+            ),
+          );
+      } else {
+        // A new row per binding: a revoked link stays as it was (migration 0019).
         await db.execute(
           sql`INSERT INTO slack_links (slack_user_id, slack_team_id, principal_id, linked_at)
               VALUES (${row.slackUserId}, ${row.slackTeamId}, ${principal.id}, ${at.toISOString()})`,
         );
-      } else {
-        await db
-          .update(slackLinks)
-          .set({ linkedAt: at, revokedAt: null })
-          .where(eq(slackLinks.slackUserId, row.slackUserId));
       }
 
       const roles = [...identity.roles].sort();
@@ -410,7 +467,6 @@ export function createSlackLinks(options: SlackLinksOptions): SlackLinksLike {
         change: 'slack_linked',
         slackUserId: row.slackUserId,
         slackTeamId: row.slackTeamId,
-        replacedSlackUserIds: replaced.map((link) => link.slackUserId),
         roles,
         directorySlackUserId: fromDirectory,
       });
@@ -424,6 +480,28 @@ export function createSlackLinks(options: SlackLinksOptions): SlackLinksLike {
         channel,
         warnings,
       };
+    },
+
+    async unlink(input): Promise<boolean> {
+      const revoked = await scoped(input.principal.id)
+        .update(slackLinks)
+        .set({ revokedAt: new Date(clock()) })
+        .where(
+          and(
+            eq(slackLinks.principalId, input.principal.id),
+            eq(slackLinks.slackUserId, input.slackUserId),
+            isNull(slackLinks.revokedAt),
+          ),
+        )
+        .returning({ slackTeamId: slackLinks.slackTeamId });
+      const link = revoked[0];
+      if (link === undefined) return false;
+      await record(input.principal.id, input.actor, 'state_changed', {
+        change: 'slack_unlinked',
+        slackUserId: input.slackUserId,
+        slackTeamId: link.slackTeamId,
+      });
+      return true;
     },
 
     async current(principal): Promise<SlackLinkState | null> {

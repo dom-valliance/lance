@@ -133,3 +133,19 @@ Removing the parameter and the environment variable from `infra/main.bicep` and 
 ### 8.5 Everyone else
 
 Each colleague with a Lance role runs `/lance login` anywhere in Slack and follows the link. Their first link creates `lance-<first-name>` (with `-2`, `-3` and so on when the name is taken) holding them and the bot, and their cards, alerts and briefs arrive there. If Slack refuses the channel, the page says so and the link stands; they run `/lance login` again once the cause is fixed. A button pressed on a card in someone else's channel is refused and raises a P1 `foreign_decision_attempt` alert for the card's owner.
+
+### 8.6 Add `users:read.email` and reinstall the app
+
+A link binds a Slack account only when the Slack profile's email equals the Microsoft account that signs in (ADR 0021), so a link forwarded to someone else binds nobody. The api reads the email with `users.info`, which returns it only when the bot token holds `users:read.email`. Until this step is done, every link is refused with "Slack did not confirm whose account this is", and links made before it stand.
+
+1. api.slack.com/apps, Lance, App Manifest. Paste `slack-app-manifest.json` with `<api-hostname>` replaced as in section 2, or add `users:read.email` under OAuth and Permissions, Bot Token Scopes. The manifest also adds `unlink` to the `/lance` usage hint.
+2. Slack shows a banner asking to reinstall. Reinstall to Workspace and approve.
+3. If the Bot User OAuth Token shown after reinstalling differs from the one in Key Vault, store it and restart the api and the worker as in 8.2 step 3.
+4. Check from Slack's side that the token carries the scope, as in 8.2 step 4. The `x-oauth-scopes` line must include `users:read.email`.
+5. Send `/lance login` from your own Slack account and open the link: the page names your Slack account and offers Link this Slack account. A page that says Slack did not confirm whose account this is means the scope is missing from the token the api holds.
+
+### 8.7 Unlinking a Slack account
+
+A principal has one active Slack link. To move to another Slack account, send `/lance unlink` from the account linked now, then `/lance login` from the new one; the ledger records `slack_unlinked` and then `slack_linked`. A link page for the new account refuses with "Your account is linked to another Slack account" until the old link is revoked. A revoked Slack account can later be linked again, by its owner or by whoever its email then belongs to.
+
+If the principal no longer has the old Slack account, `/lance unlink` cannot be sent from it and there is no admin command for one link yet. Offboarding revokes every link of a principal who is leaving (docs/runbooks/offboard-principal.md); for anyone staying, raise it with the lead rather than editing `slack_links` by hand.

@@ -14,7 +14,7 @@
         "command": "/lance",
         "url": "https://<api-hostname>/slack/commands",
         "description": "login, status, pause, resume, jobs, brief, task, chase",
-        "usage_hint": "login | status | pause [reason, all or a job] | resume [all or a job] | jobs | brief | task <text> | chase <commitment id>",
+        "usage_hint": "login | unlink | status | pause [reason, all or a job] | resume [all or a job] | jobs | brief | task <text> | chase <commitment id>",
         "should_escape": false
       }
     ]
@@ -31,7 +31,8 @@
         "reactions:read",
         "reactions:write",
         "commands",
-        "users:read"
+        "users:read",
+        "users:read.email"
       ]
     }
   },

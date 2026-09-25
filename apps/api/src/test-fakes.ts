@@ -914,6 +914,14 @@ export class FakeSlackLinks implements SlackLinksLike {
   current(): Promise<SlackLinkState | null> {
     return Promise.resolve(this.currentResult);
   }
+
+  readonly unlinked: Parameters<SlackLinksLike['unlink']>[0][] = [];
+  unlinkResult = true;
+
+  unlink(input: Parameters<SlackLinksLike['unlink']>[0]): Promise<boolean> {
+    this.unlinked.push(input);
+    return Promise.resolve(this.unlinkResult);
+  }
 }
 
 /** The replay rule in memory: a signature is accepted once. */

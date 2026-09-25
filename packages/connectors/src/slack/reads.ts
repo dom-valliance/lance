@@ -43,6 +43,7 @@ const UserInfoSchema = z
             first_name: z.string().optional(),
             real_name: z.string().optional(),
             display_name: z.string().optional(),
+            email: z.string().optional(),
           })
           .passthrough()
           .optional(),
@@ -57,6 +58,11 @@ export interface SlackUserProfile {
   firstName: string | null;
   /** The best display name Slack holds: real name, display name, then handle. */
   displayName: string | null;
+  /**
+   * The profile's email address. Slack returns it only when the bot token
+   * holds `users:read.email`; null without that scope or when it is blank.
+   */
+  email: string | null;
 }
 
 const blankToNull = (value: string | undefined): string | null =>
@@ -70,7 +76,7 @@ export function slackReads(client: SlackClient) {
       const reply = await client.call('auth.test', {}, {}, AuthTestSchema);
       return { userId: reply.user_id, botId: reply.bot_id ?? null, teamId: reply.team_id ?? null };
     },
-    /** `users.info`: a person's names, for the link page and their channel name (ADR 0023). */
+    /** `users.info`: a person's names and email, for the link page, the link check and their channel name (ADR 0021, ADR 0023). */
     async userProfile(user: string): Promise<SlackUserProfile> {
       const reply = await client.call('users.info', { user }, {}, UserInfoSchema);
       const profile = reply.user.profile;
@@ -82,6 +88,7 @@ export function slackReads(client: SlackClient) {
           blankToNull(reply.user.real_name) ??
           blankToNull(profile?.display_name) ??
           blankToNull(reply.user.name),
+        email: blankToNull(profile?.email),
       };
     },
     async conversationsHistory(input: {

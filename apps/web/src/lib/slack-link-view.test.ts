@@ -74,4 +74,23 @@ describe('the Slack link page', () => {
       'This Slack account is linked to someone else',
     );
   });
+
+  it('says the link was issued to someone else when the Slack email differs', () => {
+    const message = previewMessage({ status: 'email_mismatch' }, null, 'Lance');
+    expect(message.heading).toBe('This link was issued to someone else');
+    expect(message.body).toContain('Run /lance login from your own Slack account.');
+    expect(message.tone).toBe('failure');
+  });
+
+  it('names the missing Slack scope when Slack returned no email', () => {
+    expect(outcomeMessage({ status: 'email_unavailable' }, 'Lance').body).toContain(
+      'users:read.email',
+    );
+  });
+
+  it('says how to unlink first when the principal is linked to another Slack account', () => {
+    const message = outcomeMessage({ status: 'linked_elsewhere' }, 'Lance');
+    expect(message.heading).toBe('Your account is linked to another Slack account');
+    expect(message.body).toContain('Run /lance unlink from the Slack account linked now');
+  });
 });

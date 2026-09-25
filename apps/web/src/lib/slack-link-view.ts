@@ -42,13 +42,31 @@ const refusal = (status: Refusal, name: string): LinkMessage => {
     case 'taken':
       return {
         heading: 'This Slack account is linked to someone else',
-        body: `It belongs to another ${name} account, so it cannot be linked to yours. Ask a Lance admin if that is wrong. Nothing was changed.`,
+        body: `It acts for another ${name} account, so it cannot be linked to yours. Ask a Lance admin if that is wrong. Nothing was changed.`,
         tone: 'failure',
       };
     case 'inactive':
       return {
         heading: 'Your account cannot link Slack now',
         body: `Your ${name} account is paused or offboarded. Ask a Lance admin. Nothing was changed.`,
+        tone: 'failure',
+      };
+    case 'email_mismatch':
+      return {
+        heading: 'This link was issued to someone else',
+        body: `The Slack account that ran /lance login has a different email address from the Microsoft account you signed in with, so ${name} will not link them. Run /lance login from your own Slack account. Nothing was changed.`,
+        tone: 'failure',
+      };
+    case 'email_unavailable':
+      return {
+        heading: 'Slack did not confirm whose account this is',
+        body: `${name} checks that the Slack account's email matches your Microsoft account, and Slack did not return one. Ask a Lance admin to check the Slack app's users:read.email scope. Nothing was changed.`,
+        tone: 'failure',
+      };
+    case 'linked_elsewhere':
+      return {
+        heading: 'Your account is linked to another Slack account',
+        body: `${name} acts for you through one Slack account at a time. Run /lance unlink from the Slack account linked now, then run /lance login again from this one. If you no longer have that account, ask a Lance admin to revoke its link. Nothing was changed.`,
         tone: 'failure',
       };
   }
