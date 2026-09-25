@@ -8,6 +8,7 @@ import {
   particleAt,
   perspective,
   seededRandom,
+  timelineAt,
   type Cell,
 } from './ascii-morph';
 
@@ -122,5 +123,17 @@ describe('perspective', () => {
   it('stays finite at and beyond the focal plane', () => {
     expect(Number.isFinite(perspective(100, 100))).toBe(true);
     expect(perspective(150, 100)).toBe(20);
+  });
+});
+
+describe('timelineAt', () => {
+  it('holds the first picture, then morphs to the second', () => {
+    expect(timelineAt(500, 1000, 2000, 2)).toEqual({ index: 0, progress: 0 });
+    expect(timelineAt(2000, 1000, 2000, 2)).toEqual({ index: 0, progress: 0.5 });
+  });
+
+  it('morphs the last picture back to the first and starts the cycle again', () => {
+    expect(timelineAt(3000 + 2000, 1000, 2000, 2)).toEqual({ index: 1, progress: 0.5 });
+    expect(timelineAt(6000 + 500, 1000, 2000, 2)).toEqual({ index: 0, progress: 0 });
   });
 });

@@ -208,3 +208,27 @@ export function particleAt(
 export function perspective(z: number, focal: number): number {
   return focal / Math.max(focal - z, focal * 0.05);
 }
+
+export interface TimelinePoint {
+  /** The transition in play: from picture `index` to the next, wrapping round. */
+  index: number;
+  /** Progress through that transition, 0 while its first picture holds. */
+  progress: number;
+}
+
+/**
+ * Where an endless cycle through `count` pictures stands at `elapsed`
+ * milliseconds. Each step holds its picture for `holdMs`, then morphs to
+ * the next over `morphMs`; the last picture morphs back to the first.
+ */
+export function timelineAt(
+  elapsed: number,
+  holdMs: number,
+  morphMs: number,
+  count: number,
+): TimelinePoint {
+  const step = holdMs + morphMs;
+  const into = ((elapsed % (step * count)) + step * count) % (step * count);
+  const index = Math.floor(into / step);
+  return { index, progress: clamp01((into - index * step - holdMs) / morphMs) };
+}
