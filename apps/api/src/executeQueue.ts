@@ -37,6 +37,17 @@ interface PrincipalJob {
   principalId: string;
 }
 
+/**
+ * The send options of a per-principal job: the principal's pg-boss group,
+ * as the worker's `principalJobOptions` (apps/worker/src/jobs/scoped.ts)
+ * gives them. The worker runs one job of a group at a time on each queue,
+ * which holds only for jobs sent in the group, so an api `/lance brief`
+ * never runs beside the scheduled brief for the same principal.
+ */
+export function principalJobOptions(principalId: string): { group: { id: string } } {
+  return { group: { id: principalId } };
+}
+
 /** The job body the worker's executor consumes. */
 export interface ExecuteJob extends PrincipalJob {
   proposalId: string;
@@ -104,14 +115,14 @@ export function createExecuteQueue(db: Db): ExecuteQueue {
       started ??= start();
       await started;
       const job: ExecuteJob = { principalId, proposalId };
-      await boss.send(EXECUTE_QUEUE, job);
+      await boss.send(EXECUTE_QUEUE, job, principalJobOptions(principalId));
     },
 
     async enqueueBrief(principalId: string): Promise<string> {
       started ??= start();
       await started;
       const job: PrincipalJob = { principalId };
-      const jobId = await boss.send(BRIEF_QUEUE, job);
+      const jobId = await boss.send(BRIEF_QUEUE, job, principalJobOptions(principalId));
       if (jobId === null) {
         throw new Error(
           'The brief queue refused the job. Check that the worker is running and that the pgboss schema is present.',
@@ -124,7 +135,7 @@ export function createExecuteQueue(db: Db): ExecuteQueue {
       started ??= start();
       await started;
       const job: ChaseJob = { principalId, commitmentId };
-      const jobId = await boss.send(CHASE_QUEUE, job);
+      const jobId = await boss.send(CHASE_QUEUE, job, principalJobOptions(principalId));
       if (jobId === null) {
         throw new Error(
           `The chase queue refused the job for commitment ${commitmentId}. Check that the worker is running and that the pgboss schema is present.`,
