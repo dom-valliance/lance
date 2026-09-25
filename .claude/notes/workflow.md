@@ -63,3 +63,10 @@ Lesson: use plain git for branches and commits. Do not install or use the `gh` C
 **Correction**: Dom ran it and pasted each failure; he chose the portal over signing in as the tenant admin.
 **Rule**: Before handing over a script that changes Entra, read with the operator's own account: owners of every object it edits (`az ad app owner list`, `/servicePrincipals/{id}/owners`), the operator's directory roles (`/me/memberOf`), and the tenant's licences (`/subscribedSkus`). Give the portal route beside any step the operator's CLI token may not be allowed to do.
 **Applies to**: global, Entra and tenant changes
+
+### [2026-09-25] Check the branch's own commits before committing in a shared checkout
+
+**Context**: Another Claude session was working in the same checkout. It switched to `docs/evidence-key-and-rehearsal` a minute before I ran `git switch -c feat/sign-in-ascii-morph`, then committed its docs change while my branch was checked out, so its commit landed on my branch.
+**Correction**: Found through `git reflog` before handover. I moved the commit to its own branch with a fast-forward and rebased mine onto `origin/main`.
+**Rule**: Before every commit, and again before handing a branch over, run `git log --oneline origin/main..HEAD` and `git reflog -5`. The branch must hold only your own commits. If it holds a commit you did not make, or a checkout you did not run, stop and separate the branches before going on. Tell Dom that another session shares the checkout.
+**Applies to**: global, git
