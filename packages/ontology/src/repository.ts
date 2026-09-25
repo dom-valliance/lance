@@ -56,6 +56,36 @@ export const MUTATION_KIND = 'ontology_mutation';
 /** The Cypher parameter that carries the scope's principal. Reserved. */
 const SCOPE_PARAM = 'principal';
 
+/** A Drizzle transaction over the repository's handle. */
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+/**
+ * How an `apply` runs: inside a caller's transaction rather than its own,
+ * and holding the node locks a merge takes (see `lockNodes`).
+ */
+interface ApplyOptions {
+  tx?: Tx;
+  locks?: readonly string[];
+}
+
+/** Raised inside a merge's transaction to roll it back when the merge is refused. */
+class MergeRefused extends Error {
+  override readonly name = 'MergeRefused';
+}
+
+/**
+ * Transaction-scoped advisory locks on graph node ids, taken in id order.
+ * A meeting merge holds the lock on the node it deletes from its edge
+ * scan to its delete, and every write that attaches an edge to a Meeting
+ * or changes one takes the same lock, so no edge can reach the node
+ * between the check and the delete (ADR 0033).
+ */
+async function lockNodes(runner: SqlRunner, ids: readonly string[]): Promise<void> {
+  for (const id of [...new Set(ids)].sort()) {
+    await runner.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`ontology-node:${id}`]);
+  }
+}
+
 const REBUILD_PAGE = 500;
 
 /** The principal a repository reads and writes for (ADR 0015, ADR 0017). */
@@ -857,9 +887,24 @@ export class OntologyRepository {
   }
 
   /**
-   * One shared Meeting node per iCalUId, or per Jamie id when no calendar
-   * event matched. The node carries the facts every attendee shares; the
-   * observing principal's context goes on their own `ATTENDED` edge.
+   * One shared Meeting node per iCalUId. The node carries the facts every
+   * attendee shares; the observing principal's context goes on their own
+   * `ATTENDED` edge.
+   *
+   * A meeting only this principal's Jamie saw, with no iCalUId, is keyed
+   * on its Jamie id and is private to the principal: nothing but their
+   * own recording says it happened, so no other principal may find it.
+   * It becomes shared when the principal's calendar supplies its iCalUId,
+   * which every attendee's mailbox holds. It keeps its title, start and
+   * end then, because ADR 0017 lists exactly those as the shared facts
+   * of a Meeting, and loses its Jamie id to the principal's edge.
+   *
+   * Which source wins on a shared Meeting: the calendar. A Jamie
+   * observation never changes a shared Meeting's title, start or end,
+   * which the first sighting wrote and only a calendar (`graph`)
+   * observation may change; it fills a fact only where the node has none.
+   * On the principal's own private Meeting, their Jamie may update all
+   * three.
    *
    * ADR 0033: once the node has an iCalUId it keeps no Jamie id, which
    * lives on the principal's edge. When this observation supplies the
@@ -894,7 +939,8 @@ export class OntologyRepository {
         title: input.title,
         start: input.start,
         end: input.end,
-        ...this.stamp(nodeLayer('Meeting')),
+        // Only one principal's recording knows of a meeting with no iCalUId.
+        ...this.stamp(icalUid === null ? 'private' : nodeLayer('Meeting')),
         ts,
       };
       // The Jamie id keys the node only when no calendar event did.
@@ -912,23 +958,37 @@ export class OntologyRepository {
       result = { id, created: true };
     } else {
       const key = stringOrNull(existing.properties['ical_uid']) ?? icalUid;
+      const props = existing.properties;
+      const current = {
+        title: props['title'] ?? null,
+        start: props['start'] ?? null,
+        end: props['end_at'] ?? props['end'] ?? null,
+      };
+      // The calendar wins on a shared meeting: another source only fills a gap.
+      const authoritative = layerOf(existing) === 'private' || input.sourceRef.system === 'graph';
+      const pick = (incoming: string | null, held: unknown): unknown =>
+        authoritative ? (incoming ?? held) : (held ?? incoming);
       const params = {
         id: existing.id,
-        title: input.title,
-        start: input.start ?? existing.properties['start'] ?? null,
-        end: input.end ?? existing.properties['end_at'] ?? existing.properties['end'] ?? null,
+        title: pick(input.title, current.title),
+        start: pick(input.start, current.start),
+        end: pick(input.end, current.end),
         ts,
       };
+      const locks = { locks: [existing.id] };
       await (key === null
         ? this.apply(
             `MATCH (m:Meeting {id: $id}) WHERE ${visible('m')} SET m.title = $title, m.start = $start, m.end_at = $end, m.updated_at = $ts RETURN m.id`,
             params,
             context,
+            locks,
           )
-        : this.apply(
-            `MATCH (m:Meeting {id: $id}) WHERE ${visible('m')} SET m.title = $title, m.start = $start, m.end_at = $end, m.ical_uid = $icalUid, m.updated_at = $ts REMOVE m.jamie_id RETURN m.id`,
-            { ...params, icalUid: key },
+        : // An iCalUId makes the meeting one every attendee shares.
+          this.apply(
+            `MATCH (m:Meeting {id: $id}) WHERE ${visible('m')} SET m.title = $title, m.start = $start, m.end_at = $end, m.ical_uid = $icalUid, m.layer = $layer, m.principal_id = $owner, m.updated_at = $ts REMOVE m.jamie_id RETURN m.id`,
+            { ...params, icalUid: key, ...this.stamp(nodeLayer('Meeting')) },
             context,
+            locks,
           ));
       result = { id: existing.id, created: false };
     }
@@ -979,68 +1039,108 @@ export class OntologyRepository {
     intoId: string,
     context: MutationContext,
   ): Promise<boolean> {
-    const source = firstNode(
-      await this.read(
-        `MATCH (m:Meeting {id: $id}) WHERE m.layer = 'shared' AND m.ical_uid IS NULL RETURN m`,
-        { id: fromId },
-      ),
-    );
-    if (source === null) return false;
-    const outgoing = await this.read(
+    // One transaction from the scan to the delete, holding the lock every
+    // edge write to a Meeting takes, so no other principal's edge can land
+    // on the node between the check and the delete.
+    try {
+      await this.db.transaction(async (tx) => {
+        const runner = drizzleRunner(tx);
+        await runner.query('SET LOCAL search_path = ag_catalog, "$user", public');
+        await lockNodes(runner, [fromId]);
+        const read = (query: string, params: CypherParams, columns?: readonly string[]) =>
+          runCypher(runner, query, this.scoped(params), columns);
+        const source = firstNode(
+          await read(
+            `MATCH (m:Meeting {id: $id}) WHERE (m.layer = 'shared' OR ${own('m')}) AND m.ical_uid IS NULL RETURN m`,
+            { id: fromId },
+          ),
+        );
+        if (source === null) throw new MergeRefused('no Jamie-keyed meeting to merge');
+        const edges = await this.edgesOf(read, fromId);
+        const scope = this.scope.principalId;
+        const movable = edges.every(
+          ({ edge, other }) =>
+            isEdge(edge) &&
+            typeof other === 'string' &&
+            edge.properties['layer'] === 'private' &&
+            edge.properties['principal_id'] === scope &&
+            EDGE_LABELS.has(edge.label) &&
+            Object.keys(edge.properties).every((key) => PROPERTY_KEY.test(key)),
+        );
+        if (!movable) throw new MergeRefused("another principal's evidence touches the meeting");
+        const person = await this.findPrincipalPerson();
+        for (const { edge, other, outward } of edges) {
+          if (!isEdge(edge) || typeof other !== 'string') continue;
+          if (!outward && edge.label === 'ATTENDED' && other === person?.id) {
+            await this.foldAttendance(other, intoId, edge.properties, context, tx);
+            continue;
+          }
+          const [from, to] = outward ? [intoId, other] : [other, intoId];
+          const present = await read(
+            `MATCH (a {id: $from})-[r:${edge.label}]->(b {id: $to}) WHERE ${own('r')} RETURN count(r)`,
+            { from, to },
+          );
+          if (Number(present[0]?.[0] ?? 0) > 0) continue;
+          const keys = Object.keys(edge.properties).sort();
+          const assignments = keys.map((key, index) => `${key}: $p${String(index)}`).join(', ');
+          const values = Object.fromEntries(
+            keys.map((key, index) => [`p${String(index)}`, edge.properties[key]]),
+          );
+          await this.apply(
+            `MATCH (a {id: $from}), (b {id: $to}) CREATE (a)-[r:${edge.label} {${assignments}}]->(b) RETURN r`,
+            { ...values, from, to },
+            context,
+            { tx },
+          );
+        }
+        // The check again, in the same transaction, just before the delete.
+        const foreign = await read(
+          `MATCH (m:Meeting {id: $id})-[r]-() WHERE NOT (coalesce(r.layer, '') = 'private' AND coalesce(r.principal_id, '') = $${SCOPE_PARAM}) RETURN count(r)`,
+          { id: fromId },
+        );
+        if (Number(foreign[0]?.[0] ?? 0) > 0) {
+          throw new MergeRefused("another principal's evidence reached the meeting");
+        }
+        await this.apply(
+          `MATCH (m:Meeting {id: $id}) WHERE (m.layer = 'shared' OR ${own('m')}) AND m.ical_uid IS NULL DETACH DELETE m`,
+          { id: fromId },
+          context,
+          { tx },
+        );
+      });
+      return true;
+    } catch (error) {
+      if (error instanceof MergeRefused) return false;
+      throw error;
+    }
+  }
+
+  /**
+   * Every edge on a node, whoever owns it, for a merge to decide whether
+   * it may move them. It returns nothing to a caller of the repository.
+   */
+  private async edgesOf(
+    read: (
+      query: string,
+      params: CypherParams,
+      columns?: readonly string[],
+    ) => Promise<unknown[][]>,
+    nodeId: string,
+  ): Promise<{ edge: unknown; other: unknown; outward: boolean }[]> {
+    const outgoing = await read(
       'MATCH (m:Meeting {id: $id})-[r]->(o) RETURN r, o.id',
-      { id: fromId },
+      { id: nodeId },
       ['edge', 'other'],
     );
-    const incoming = await this.read(
+    const incoming = await read(
       'MATCH (o)-[r]->(m:Meeting {id: $id}) RETURN r, o.id',
-      { id: fromId },
+      { id: nodeId },
       ['edge', 'other'],
     );
-    const edges = [
+    return [
       ...outgoing.map(([edge, other]) => ({ edge, other, outward: true })),
       ...incoming.map(([edge, other]) => ({ edge, other, outward: false })),
     ];
-    const scope = this.scope.principalId;
-    const movable = edges.every(
-      ({ edge, other }) =>
-        isEdge(edge) &&
-        typeof other === 'string' &&
-        edge.properties['layer'] === 'private' &&
-        edge.properties['principal_id'] === scope &&
-        EDGE_LABELS.has(edge.label) &&
-        Object.keys(edge.properties).every((key) => PROPERTY_KEY.test(key)),
-    );
-    if (!movable) return false;
-    const person = await this.findPrincipalPerson();
-    for (const { edge, other, outward } of edges) {
-      if (!isEdge(edge) || typeof other !== 'string') continue;
-      if (!outward && edge.label === 'ATTENDED' && other === person?.id) {
-        await this.foldAttendance(other, intoId, edge.properties, context);
-        continue;
-      }
-      const [from, to] = outward ? [intoId, other] : [other, intoId];
-      const present = await this.read(
-        `MATCH (a {id: $from})-[r:${edge.label}]->(b {id: $to}) WHERE ${own('r')} RETURN count(r)`,
-        { from, to },
-      );
-      if (Number(present[0]?.[0] ?? 0) > 0) continue;
-      const keys = Object.keys(edge.properties).sort();
-      const assignments = keys.map((key, index) => `${key}: $p${String(index)}`).join(', ');
-      const values = Object.fromEntries(
-        keys.map((key, index) => [`p${String(index)}`, edge.properties[key]]),
-      );
-      await this.apply(
-        `MATCH (a {id: $from}), (b {id: $to}) CREATE (a)-[r:${edge.label} {${assignments}}]->(b) RETURN r`,
-        { ...values, from, to },
-        context,
-      );
-    }
-    await this.apply(
-      "MATCH (m:Meeting {id: $id}) WHERE m.layer = 'shared' AND m.ical_uid IS NULL DETACH DELETE m",
-      { id: fromId },
-      context,
-    );
-    return true;
   }
 
   /** Folds one `ATTENDED` edge's context into the principal's own edge to another meeting. */
@@ -1049,6 +1149,7 @@ export class OntologyRepository {
     meetingId: string,
     context: Record<string, unknown>,
     mutation: MutationContext,
+    tx?: Tx,
   ): Promise<void> {
     const current = (await this.ownAttendance(personId, meetingId)) ?? {};
     await this.writeAttendance(
@@ -1068,6 +1169,8 @@ export class OntologyRepository {
       },
       typeof current['confidence'] === 'number' ? current['confidence'] : 1,
       mutation,
+      false,
+      tx,
     );
   }
 
@@ -1101,6 +1204,7 @@ export class OntologyRepository {
     confidence: number,
     context: MutationContext,
     removeFromNode = false,
+    tx?: Tx,
   ): Promise<void> {
     // MERGE keys on the principal, so each principal's edge to one meeting
     // is its own, whoever else attended.
@@ -1122,6 +1226,7 @@ export class OntologyRepository {
         ts: this.now(),
       },
       context,
+      { locks: [meetingId], ...(tx === undefined ? {} : { tx }) },
     );
   }
 
@@ -1359,6 +1464,10 @@ export class OntologyRepository {
     assertLabel(edge, EDGE_LABELS, 'edge');
     const [from, to] = await Promise.all([this.getNode(fromId), this.getNode(toId)]);
     const layer = edgeLayerBetween(edge, layerOf(from), layerOf(to));
+    // An edge to a Meeting waits for any merge of that meeting (`mergeMeeting`).
+    const locks = [from, to].flatMap((node) =>
+      node !== null && node.label === 'Meeting' ? [node.id] : [],
+    );
     const merge =
       layer === 'private'
         ? `MERGE (a)-[r:${edge} {principal_id: $${SCOPE_PARAM}}]->(b)`
@@ -1376,6 +1485,7 @@ export class OntologyRepository {
         ts: this.now(),
       },
       context,
+      { locks },
     );
   }
 
@@ -1529,9 +1639,11 @@ export class OntologyRepository {
         continue;
       }
       await this.apply(
-        'MATCH (m:Meeting {id: $id}) WHERE m.ical_uid IS NULL SET m.ical_uid = $icalUid, m.updated_at = $ts RETURN m.id',
-        { id: meetingId, icalUid, ts: this.now() },
+        // An iCalUId makes the meeting shared, as `upsertMeeting` does.
+        'MATCH (m:Meeting {id: $id}) WHERE m.ical_uid IS NULL SET m.ical_uid = $icalUid, m.layer = $layer, m.principal_id = $owner, m.updated_at = $ts RETURN m.id',
+        { id: meetingId, icalUid, ts: this.now(), ...this.stamp(nodeLayer('Meeting')) },
         context,
+        { locks: [meetingId] },
       );
       result.meetingKeys += 1;
     }
@@ -1730,13 +1842,16 @@ export class OntologyRepository {
     cypher: string,
     params: CypherParams,
     context: MutationContext,
+    options: ApplyOptions = {},
   ): Promise<void> {
     const bound = this.scoped(params);
     // One transaction: the graph write and the ledger event that makes it
-    // replayable commit together, or neither does (spec 5.2).
-    await this.db.transaction(async (tx) => {
+    // replayable commit together, or neither does (spec 5.2). A caller's
+    // transaction, when given, is that transaction.
+    const run = async (tx: Tx): Promise<void> => {
       const runner = drizzleRunner(tx);
       await runner.query('SET LOCAL search_path = ag_catalog, "$user", public');
+      await lockNodes(runner, options.locks ?? []);
       await runCypher(runner, cypher, bound);
       await this.writer.append(
         {
@@ -1749,7 +1864,8 @@ export class OntologyRepository {
         },
         tx,
       );
-    });
+    };
+    await (options.tx === undefined ? this.db.transaction(run) : run(options.tx));
   }
 }
 

@@ -8,11 +8,13 @@ import {
   type Db,
 } from '@lance/db';
 import { openFixtureDb, openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
+import { LedgerWriter } from '@lance/ledger';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { OntologyRepository, type SourceRef } from './repository.js';
+import { runCypher, sqlRunnerOf, type CypherParams } from './cypher.js';
+import { MUTATION_KIND, OntologyRepository, type SourceRef } from './repository.js';
 import { graphSnapshot } from './testing.js';
 
 /**
@@ -27,6 +29,7 @@ const BEA = '01K5S9V6QW3SWCCPVB0N0E301B';
 
 let container: StartedPostgreSqlContainer;
 let dbDom: Db;
+let dbBea: Db;
 let dom: OntologyRepository;
 let bea: OntologyRepository;
 
@@ -59,7 +62,7 @@ beforeAll(async () => {
   const fixtures = openFixtureDb(connectionString);
   await fixtures.insert(principals).values({ id: BEA, upn: 'bea@valliance.ai' });
   await fixtures.$client.end();
-  const dbBea = scopedDb(dbDom, { principalId: BEA });
+  dbBea = scopedDb(dbDom, { principalId: BEA });
   await dbBea.insert(principalState).values({});
   dom = repository(dbDom, DOM, '01D0M', 'Dom Selvon');
   bea = repository(dbBea, BEA, '01BEA', 'Bea Example');
@@ -145,6 +148,7 @@ describe('shared meetings and Jamie ids', () => {
       context(),
     );
     expect((await dom.getNode(jamieOnly.id))?.properties['jamie_id']).toBe('jm-scope');
+    expect(await bea.getNode(jamieOnly.id)).toBeNull();
     const keyed = await dom.upsertMeeting(
       {
         title: 'Contoso scoping',
@@ -161,6 +165,9 @@ describe('shared meetings and Jamie ids', () => {
     const node = await dom.getNode(keyed.id);
     expect(node?.properties['ical_uid']).toBe('ical-scope');
     expect(node?.properties).not.toHaveProperty('jamie_id');
+    expect(node?.properties['layer']).toBe('shared');
+    expect(node?.properties['principal_id'] ?? null).toBeNull();
+    expect(await bea.getNode(keyed.id)).toMatchObject({ id: keyed.id });
     expect(await dom.meetingContext(keyed.id)).toMatchObject({ jamieId: 'jm-scope' });
   });
 
@@ -255,17 +262,7 @@ describe('shared meetings and Jamie ids', () => {
     );
   });
 
-  it("does not merge a Jamie-keyed Meeting that another principal's edges touch", async () => {
-    await bea.upsertMeeting(
-      {
-        title: 'Contoso retro',
-        start: '2026-09-27T10:00:00.000Z',
-        end: '2026-09-27T11:00:00.000Z',
-        icalUid: 'ical-retro',
-        sourceRef: ref('graph', 'evt-bea-retro'),
-      },
-      context(),
-    );
+  it("keeps a meeting only one principal's Jamie saw private to them", async () => {
     const jamie = await dom.upsertMeeting(
       {
         title: 'Contoso retro',
@@ -276,8 +273,16 @@ describe('shared meetings and Jamie ids', () => {
       },
       context(),
     );
-    // Bea's Jamie account shares the recording and finds Dom's node by its Jamie id.
-    const shared = await bea.upsertMeeting(
+    expect((await dom.getNode(jamie.id))?.properties).toMatchObject({
+      layer: 'private',
+      principal_id: DOM,
+      title: 'Contoso retro',
+    });
+    expect(await bea.getNode(jamie.id)).toBeNull();
+    expect(await bea.findMeeting({ jamieId: 'jm-retro' })).toBeNull();
+    expect((await bea.search('Contoso retro')).map((node) => node.id)).not.toContain(jamie.id);
+    // Bea's Jamie account seeing the same recording makes her own node.
+    const hers = await bea.upsertMeeting(
       {
         title: 'Contoso retro',
         start: '2026-09-27T10:00:00.000Z',
@@ -287,22 +292,155 @@ describe('shared meetings and Jamie ids', () => {
       },
       context(),
     );
-    expect(shared.id).toBe(jamie.id);
+    expect(hers.id).not.toBe(jamie.id);
+    expect(await dom.getNode(hers.id)).toBeNull();
+  });
 
-    const keyed = await dom.upsertMeeting(
+  it("never lets one principal's Jamie rename a shared meeting, and lets the calendar", async () => {
+    const calendar = await bea.upsertMeeting(
       {
-        title: 'Contoso retro',
-        start: '2026-09-27T10:00:00.000Z',
-        end: '2026-09-27T11:00:00.000Z',
-        icalUid: 'ical-retro',
-        jamieId: 'jm-retro',
-        sourceRef: ref('jamie', 'jm-retro'),
+        title: 'Contoso plan',
+        start: '2026-09-28T10:00:00.000Z',
+        end: '2026-09-28T11:00:00.000Z',
+        icalUid: 'ical-plan',
+        graphEventId: 'evt-bea-plan',
+        sourceRef: ref('graph', 'evt-bea-plan'),
       },
       context(),
     );
-    expect(keyed.id).not.toBe(jamie.id);
-    expect(await dom.getNode(jamie.id)).toMatchObject({ id: jamie.id });
-    expect(await bea.meetingContext(jamie.id)).toMatchObject({ jamieId: 'jm-retro' });
+    await dom.upsertMeeting(
+      {
+        title: 'Dom and Contoso, notes',
+        start: '2026-09-28T10:04:00.000Z',
+        end: '2026-09-28T10:52:00.000Z',
+        icalUid: 'ical-plan',
+        jamieId: 'jm-plan',
+        sourceRef: ref('jamie', 'jm-plan'),
+      },
+      context(),
+    );
+    expect((await bea.getNode(calendar.id))?.properties).toMatchObject({
+      title: 'Contoso plan',
+      start: '2026-09-28T10:00:00.000Z',
+      end_at: '2026-09-28T11:00:00.000Z',
+    });
+    await bea.upsertMeeting(
+      {
+        title: 'Contoso plan, moved',
+        start: '2026-09-28T14:00:00.000Z',
+        end: '2026-09-28T15:00:00.000Z',
+        icalUid: 'ical-plan',
+        graphEventId: 'evt-bea-plan',
+        sourceRef: ref('graph', 'evt-bea-plan'),
+      },
+      context(),
+    );
+    expect((await dom.getNode(calendar.id))?.properties).toMatchObject({
+      title: 'Contoso plan, moved',
+      start: '2026-09-28T14:00:00.000Z',
+    });
+  });
+
+  it("refuses to merge a Jamie-keyed Meeting another principal's edge touches, moving nothing", async () => {
+    // A shared Jamie-keyed Meeting as the graph held them before private
+    // Jamie meetings: Dom's edge and Bea's edge both reach it.
+    const legacyId = '01LEGACYMEET0000000000000A';
+    // Recorded as the repository records a mutation, so the rebuild replays them.
+    const recorded = async (db: Db, cypher: string, params: CypherParams) => {
+      await runCypher(sqlRunnerOf(db), cypher, params);
+      await new LedgerWriter(db).append({
+        ts: '2026-09-24T09:00:00.000Z',
+        actor: 'system:ontology',
+        kind: 'resolved',
+        sourceSystem: 'lance',
+        correlationId: newUlid(),
+        payload: { kind: MUTATION_KIND, cypher, params },
+      });
+    };
+    await recorded(
+      dbDom,
+      "CREATE (m:Meeting {id: $id, title: 'Contoso legacy', jamie_id: 'jm-legacy', layer: 'shared', principal_id: null, source_refs: []}) RETURN m.id",
+      { id: legacyId },
+    );
+    const holder = await bea.upsertMeeting(
+      {
+        title: 'Contoso legacy',
+        start: '2026-09-29T10:00:00.000Z',
+        end: '2026-09-29T11:00:00.000Z',
+        icalUid: 'ical-legacy',
+        sourceRef: ref('graph', 'evt-bea-legacy'),
+      },
+      context(),
+    );
+    const domPerson = await dom.findPrincipalPerson();
+    const beaPerson = await bea.findPrincipalPerson();
+    if (domPerson === null || beaPerson === null) throw new Error('Both principals should exist.');
+    for (const [person, principal, db] of [
+      [domPerson.id, DOM, dbDom],
+      [beaPerson.id, BEA, dbBea],
+    ] as const) {
+      await recorded(
+        db,
+        "MATCH (p:Person {id: $person}), (m:Meeting {id: $id}) CREATE (p)-[r:ATTENDED {layer: 'private', principal_id: $owner, jamie_id: 'jm-legacy'}]->(m) RETURN r",
+        { person, id: legacyId, owner: principal },
+      );
+    }
+    const commitment = newUlid();
+    await dom.ensureCommitment(commitment, context());
+    await dom.link(commitment, 'DERIVED_FROM', legacyId, {}, context());
+
+    const result = await dom.upsertMeeting(
+      {
+        title: 'Contoso legacy',
+        start: '2026-09-29T10:00:00.000Z',
+        end: '2026-09-29T11:00:00.000Z',
+        icalUid: 'ical-legacy',
+        jamieId: 'jm-legacy',
+        sourceRef: ref('jamie', 'jm-legacy'),
+      },
+      context(),
+    );
+    expect(result.id).toBe(holder.id);
+    expect(await dom.getNode(legacyId)).toMatchObject({ id: legacyId });
+    const { edges } = await graphSnapshot(dbDom);
+    expect(edges.filter((edge) => edge.to === holder.id && edge.label === 'DERIVED_FROM')).toEqual(
+      [],
+    );
+    expect(edges.filter((edge) => edge.to === legacyId).map((edge) => edge.principalId)).toEqual(
+      expect.arrayContaining([DOM, BEA]),
+    );
+  });
+});
+
+describe('merging a meeting', () => {
+  it('holds back an edge to a Meeting while a merge of it holds the lock, so none lands between check and delete', async () => {
+    const meeting = await bea.upsertMeeting(
+      {
+        title: 'Contoso lock',
+        start: '2026-09-30T10:00:00.000Z',
+        end: '2026-09-30T11:00:00.000Z',
+        icalUid: 'ical-lock',
+        sourceRef: ref('graph', 'evt-bea-lock'),
+      },
+      context(),
+    );
+    const person = await bea.findPrincipalPerson();
+    if (person === null) throw new Error('Bea should have a Person node.');
+    let landed = false;
+    let write: Promise<void> | null = null;
+    await dbDom.transaction(async (tx) => {
+      // What mergeMeeting holds from its edge scan to its delete.
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`ontology-node:${meeting.id}`}))`,
+      );
+      write = bea.link(person.id, 'ATTENDED', meeting.id, {}, context()).then(() => {
+        landed = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(landed).toBe(false);
+    });
+    await write;
+    expect(landed).toBe(true);
   });
 });
 

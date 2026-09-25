@@ -300,6 +300,7 @@ const INTERNAL_METHODS = [
   'wouldViolateRuleThree',
   'findOwnJamieKeyedMeeting',
   'mergeMeeting',
+  'edgesOf',
   'foldAttendance',
   'recordMeetingContext',
   'writeAttendance',
