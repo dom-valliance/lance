@@ -39,7 +39,7 @@ The bundle is signed with an Ed25519 key held in Lance's Key Vault (`evidence-si
 
 | Environment | Key id | Created |
 |---|---|---|
-| dev | *to be recorded when the key is set* | |
+| dev | `66b767c9166e7bfc` | 2026-09-25 |
 | prod | *to be recorded when the key is set* | |
 
 To check a bundle, with OpenSSL 3 (on a Mac, `/opt/homebrew/bin/openssl`; the built-in `openssl` cannot) and `jq`:

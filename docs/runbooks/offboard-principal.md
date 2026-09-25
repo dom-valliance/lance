@@ -152,7 +152,28 @@ For the principal whose UPN is `DOM_EMAIL`, the pre-ADR 0022 secrets `graph-refr
 
 ## Rehearse in dev with a synthetic principal
 
-Once per environment, before the first real offboarding: give a test account the `Lance.User` role (`scripts/entra/grant-access.sh dev <test UPN> user`), sign in to the web app once with it (which creates an `onboarding` principal), then run steps 2 to 5 for that account and step 1 last. Record the date and the principal id in `docs/adr/0000-phase-log.md`, Multi-user track, row "Offboarding is defined and exercised".
+Once per environment, before the first real offboarding and before the pilot (`deploy.md`, Phase 5 checklist step 13). It onboards a test account end to end and then offboards it, so every step of both runs against real Entra, Key Vault and Slack.
+
+**The test account.** A Microsoft 365 user in the Valliance tenant, created for this and holding no one's real mail, so the rehearsal processes no personal data before the DPO signs off the LIA. It needs an Exchange Online licence (Graph consent and the mailbox-settings read need a mailbox), a Slack account in `valliance-ai.slack.com` whose profile email is its UPN, and, to finish onboarding, a Jamie account with its own API key. Never enter Dom's Jamie key for it: the worker would read Dom's meetings into the test principal. Without Jamie the checklist stops at that step; offboarding still runs, and the `secrets` step finds no Jamie secret to delete. Capture the UPN: `TEST_UPN=<test UPN>`, then `echo "$TEST_UPN"`.
+
+Onboard, as the test account in a private browser window:
+
+1. As an app owner, assign the test account `Lance.User` in the portal: Enterprise applications, Lance (Valliance), Users and groups, Add user/group, the test account, role Lance.User (`entra-setup.md` section 8). `scripts/entra/grant-access.sh` does the same for an Entra administrator.
+2. Sign in to the web app. Lance creates an `onboarding` principal and opens the checklist at `/onboarding`.
+3. Accept the data-processing notice.
+4. Connect Microsoft 365 and consent. The ledger records `graph_connected`; within a few minutes the worker reads the mailbox settings and prefills quiet hours.
+5. Enter the test account's Jamie key.
+6. In Slack, signed in as the test account, send `/lance login` and follow the link. Lance creates the private channel `lance-<first name>` and posts there from now on.
+7. Confirm the preferences. The checklist completes and the principal starts its five working days in dry run.
+8. From Dom's account, the admin page lists the test principal with its status. Capture its id as in step 2 above: `PRINCIPAL=<id>`, then `echo "$PRINCIPAL"`.
+
+Offboard, from Dom's account:
+
+9. Steps 3 to 5 above: offboard the test principal from the admin page, watch the worker log for `principal offboarded`, and run the checks. Expected differences from a colleague: `slack_channel:done` for the test channel, and few or no observations, since the mailbox is empty.
+10. Step 1 last: remove the role in the portal (the same Users and groups page, select the assignment, Remove), revoke the account's sessions, and delete its Jamie key in Jamie.
+11. In the test browser window, sign in again: Microsoft refuses it.
+
+Record the date, the test UPN and the principal id in `docs/adr/0000-phase-log.md` under Phase 5. To rehearse again with the same account, follow "Re-onboarding after offboarding" below first.
 
 ## Worked example: local rehearsal, 2026-09-24
 

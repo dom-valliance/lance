@@ -24,7 +24,7 @@ Dev runs Phase 4 (migrations 0000 to 0010). The Phase 5 build adds per-request i
 10. **Retire the Slack fallback**: set `slackAllowedUserId = ''` in `infra/params/dev.bicepparam` and let the next deploy carry it.
 11. **Evidence signing key**: set `evidence-signing-key` with the commands in step 4 below, then restart the api revision.
 12. **Notion**: rename the integration from "Dom's Lance" to "Lance" in Notion; the token is unchanged.
-13. **Before the pilot**: rehearse offboarding with a test account (`offboard-principal.md`, "Rehearse in dev"), and send `docs/compliance/` to the DPO; the LIA must be signed off.
+13. **Before the pilot**: rehearse onboarding and offboarding with a test account (`offboard-principal.md`, "Rehearse in dev with a synthetic principal"), and send `docs/compliance/` to the DPO; the LIA must be signed off.
 
 Jobs the old image queued without a principal are adopted when the new worker starts, before it fetches anything. Each one still waiting (`created` or `retry`) on a per-principal queue (`execute`, `triage`, `bulk-mail`, `chase`, `brief-morning` and every other queue the job registry declares per principal) is sent again with the owner's id and group, and the original is completed with the id of its replacement. The owner is the only principal, or the only principal that existed when the job was queued; in dev before the pilot that is Dom. The worker log says `jobs queued without a principal adopted` with a count, and Dom's ledger holds one `jobs_adopted` event listing each queue, old id and new id. Step 3's pause still matters: it keeps the old watchers idle while the old image runs against the new schema, and the adopted jobs wait behind the pause like any other until step 7.
 
