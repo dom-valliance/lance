@@ -216,3 +216,22 @@ Not measured; each needs its own run.
 4. Option D still stands: queue latency p95 under 60 s is met by every queue that does not wait on the model except brief-morning (96 s), so the acceptance row should measure those queues and give the model backlog a target of its own.
 
 One thing this run cannot show: every principal here is in dry run, so the bulk proposals were held and nothing reached the `execute` queue. In live mode each bulk message adds two approved proposals to `execute`, which runs one job at a time at pg-boss's default fetch interval. Its order matters (the category before the move, because the move gives the message a new id), so speed it up with a faster poll rather than more concurrency.
+
+## After raising model concurrency to 16
+
+One run on 25 September 2026, same machine, seed and scenario, at `06478d4`: `MODEL_CONCURRENCY` 16 and `MODEL_QUEUE_CONCURRENCY` 16, chosen after reading the account's limits (10,000 requests and 10 million input tokens a minute for Haiku and Sonnet; the thirty-principal morning used about 31 requests a minute at 4). Run by the lead, once, capped at the harness's 60-minute window; it finished in 23.5 minutes.
+
+| Target | At 4 (after ADR 0034) | At 16 | Verdict |
+|---|---|---|---|
+| Briefs stored by 06:35 | 30, last 06:32:18 | 30, p50 62 s and max 124 s after 06:30 | Pass |
+| Briefs posted within the push budget | 30, 0 pushes used | 30, at most 1 push per principal | Pass |
+| Queue latency p95, all jobs | 1,007 s | 305 s (p50 12 s, p99 395 s) | Fail |
+| The Monday backlog cleared | not within the hour; 53 triage jobs left | every queue empty at 06:52, 22 minutes after 06:30 | |
+| Failures | none | none | |
+
+- By queue: `watcher-graph-mail` p95 547 s (30 polls, each running about 500 s because it labels its 45 messages one after another); `triage` p95 351 s over 957 jobs, none left; `brief-morning` p95 97 s; every queue that does not wait on the model p95 under 41 s.
+- Model: 2,607 calls (1,350 of them mail labels, 957 triage); median wait for a slot 5.3 s, the worst principal 7.2 s, so the fair share held.
+- Postgres: active sessions peak 9, connections 12; clients waiting for a pool connection peak 53, mean 4.47 (36 and 1.79 at 4). The pool of 10 is now the next thing a larger worker will queue on.
+- Worker: 14 per cent of one core, 400 MB, event-loop delay p99 101 ms.
+
+What is left, not measured: the latency target still fails because a Monday is a burst of about a thousand model jobs, and any finite concurrency makes the last of them wait. The mail watcher is the longest wait, and half the calls are Haiku labels made one per message. Batching the label calls (several messages to one call) is the next change; it alters how labelling works, so it needs its own ADR and a label eval first. Raising the pool size with it. Neither blocks the two-principal pilot, where the same morning is a fifteenth of this load.
