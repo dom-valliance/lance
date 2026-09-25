@@ -103,7 +103,21 @@ Dom's token from before ADR 0022 is in the static vault as `graph-refresh-token`
 
 ADR 0020 and its amendment: access to Lance is granted by the Entra app roles `Lance.User` and `Lance.Admin`, assigned to people directly on the enterprise application, and the enterprise application requires assignment, so nobody without a Lance role gets a token. Groups are not used: assigning a group to an app role needs Entra ID P1, which the tenant does not have (known values above). `ALLOWED_UPN` is retired.
 
-**What must exist first.** The app registration and its service principal (section 1), and the environment's static Key Vault `kv-lance-<env>-<suffix>` holding `entra-client-id` (created by `infra/main.bicep` through `deploy.md` steps 1 to 4, filled in section 5). The person running the script signs in to `az` as an Entra administrator who may edit the app registration and assign app roles; the script gives that person both roles, so for dev it is Dom.
+**What must exist first.** The app registration and its service principal (section 1), and the environment's static Key Vault `kv-lance-<env>-<suffix>` holding `entra-client-id` (created by `infra/main.bicep` through `deploy.md` steps 1 to 4, filled in section 5). The person running the script must own both the app registration and the enterprise application, because the script gives the signed-in person both roles and that person must be the one who will use Lance. In dev, on 2026-09-25, both objects had no owner and `dom@valliance.ai` holds only Power Platform Administrator, so the first run stopped at step 1 with "Insufficient privileges". Make Dom an owner once, signed in to `az` as the tenant administrator ("365 Admin - Dom Selvon"), then sign back in as Dom and run the script:
+
+```
+az login   # as the tenant administrator
+az ad app owner add --id d72a4e64-a707-4387-b7e3-fdfd3e75a64b \
+  --owner-object-id 19fb2afd-6814-4600-8697-eb798ec5691f
+az rest --method POST \
+  --uri 'https://graph.microsoft.com/v1.0/servicePrincipals/6a1e3a1b-e37e-44fc-aa47-a30fa68f2c80/owners/$ref' \
+  --headers 'Content-Type=application/json' \
+  --body '{"@odata.id":"https://graph.microsoft.com/v1.0/directoryObjects/19fb2afd-6814-4600-8697-eb798ec5691f"}'
+az login   # as dom@valliance.ai
+az ad app owner list --id d72a4e64-a707-4387-b7e3-fdfd3e75a64b --query "[].userPrincipalName" -o tsv
+```
+
+The last command prints `dom@valliance.ai`. Admin consent for the role check (below) still needs the tenant administrator.
 
 **Run it before merging the build that carries ADR 0020.** The old build admits by UPN and ignores roles, so the script changes nothing Dom sees. The new build refuses a token without a Lance role, so deployed first it would keep Dom out of the web app until the script had run (recoverable, since the script needs only `az`). The full upgrade order is at the top of `deploy.md`.
 
