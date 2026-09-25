@@ -1,4 +1,6 @@
+import type { ReactNode } from 'react';
 import { signIn, signOut } from '@/auth';
+import { AsciiMorph } from '@/components/ascii-morph';
 import { Wordmark } from '@/components/shell/wordmark';
 import { SubmitButton } from '@/components/submit-button';
 import type { SearchParams } from '@/lib/filters';
@@ -28,6 +30,16 @@ async function signOutAndRetry(): Promise<void> {
   await signOut({ redirectTo: '/sign-in' });
 }
 
+/** The robot-to-star morph above whichever card the visit calls for. */
+function WithMorph({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex w-full flex-col items-center gap-6">
+      <AsciiMorph className="w-full max-w-[336px]" />
+      {children}
+    </div>
+  );
+}
+
 export default async function SignInPage({
   searchParams,
 }: {
@@ -46,47 +58,51 @@ export default async function SignInPage({
 
   if (errorCode === ACCESS_DENIED) {
     return (
-      <div className={CARD}>
-        <Wordmark name={agentDisplayName()} className="h-6" />
-        <h1 className="text-xl font-semibold">This account has no Lance access</h1>
-        <p role="alert" className="text-[13px] text-sem-red-fg">
-          Access comes from a Lance role in Entra. Ask a Lance admin to give you the Lance.User
-          role, then sign in again. Nothing was recorded.
-        </p>
-        <form action={signOutAndRetry}>
-          <SubmitButton variant="outline" size="lg" className="w-full" pendingLabel="Signing out">
-            Sign out and try another account
-          </SubmitButton>
-        </form>
-      </div>
+      <WithMorph>
+        <div className={CARD}>
+          <Wordmark name={agentDisplayName()} className="h-6" />
+          <h1 className="text-xl font-semibold">This account has no Lance access</h1>
+          <p role="alert" className="text-[13px] text-sem-red-fg">
+            Access comes from a Lance role in Entra. Ask a Lance admin to give you the Lance.User
+            role, then sign in again. Nothing was recorded.
+          </p>
+          <form action={signOutAndRetry}>
+            <SubmitButton variant="outline" size="lg" className="w-full" pendingLabel="Signing out">
+              Sign out and try another account
+            </SubmitButton>
+          </form>
+        </div>
+      </WithMorph>
     );
   }
 
   const failed = errorCode !== undefined && errorCode !== '';
 
   return (
-    <div className={CARD}>
-      <Wordmark name={agentDisplayName()} className="h-6" />
-      <h1 className="text-xl font-semibold">
-        {failed ? 'Sign-in did not complete' : 'Sign in with your Valliance account'}
-      </h1>
-      {failed ? (
-        <p role="alert" className="text-[13px] text-sem-red-fg">
-          Microsoft did not finish the sign-in. Try again.
-        </p>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          Lance is open to people a Lance admin has given a Lance role. You will be sent to
-          Microsoft and back.
-        </p>
-      )}
-      <form action={continueWithMicrosoft}>
-        <SubmitButton size="lg" className="w-full" pendingLabel="Redirecting">
-          <MicrosoftGlyph />
-          Continue with Microsoft
-        </SubmitButton>
-      </form>
-    </div>
+    <WithMorph>
+      <div className={CARD}>
+        <Wordmark name={agentDisplayName()} className="h-6" />
+        <h1 className="text-xl font-semibold">
+          {failed ? 'Sign-in did not complete' : 'Sign in with your Valliance account'}
+        </h1>
+        {failed ? (
+          <p role="alert" className="text-[13px] text-sem-red-fg">
+            Microsoft did not finish the sign-in. Try again.
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Lance is open to people a Lance admin has given a Lance role. You will be sent to
+            Microsoft and back.
+          </p>
+        )}
+        <form action={continueWithMicrosoft}>
+          <SubmitButton size="lg" className="w-full" pendingLabel="Redirecting">
+            <MicrosoftGlyph />
+            Continue with Microsoft
+          </SubmitButton>
+        </form>
+      </div>
+    </WithMorph>
   );
 }
 
