@@ -14,7 +14,7 @@ import {
 import { eq } from 'drizzle-orm';
 import { recordPush, remainingPushes } from '../alerts/engine/budget.js';
 import type { CriticVerdict } from '../critic/index.js';
-import { policyTarget } from './target.js';
+import { moveDestinationRefusal, policyTarget } from './target.js';
 
 export interface ProposalContext {
   correlationId: string;
@@ -78,7 +78,15 @@ export function createProposalHandler(
       ...(context.labels === undefined ? {} : { labels: context.labels }),
       ...(target === undefined ? {} : { target }),
     };
-    const evaluation = evaluate(input, await deps.loadRules());
+    const evaluated = evaluate(input, await deps.loadRules());
+    // A move whose destination is ambiguous or a deletion folder is refused
+    // before any rule can grant it, like a hard floor.
+    const moveRefusal =
+      draft.actionClass === 'move_mail' ? moveDestinationRefusal(draft.payload) : null;
+    const evaluation =
+      moveRefusal === null
+        ? evaluated
+        : { ...evaluated, decision: 'forbid' as const, ruleId: null, unmetConditions: [] };
 
     const decisionId = newUlid();
     await deps.db.insert(policyDecisions).values({
@@ -86,9 +94,10 @@ export function createProposalHandler(
       decision: evaluation.decision,
       ruleId: evaluation.ruleId,
       reason:
-        evaluation.unmetConditions.length > 0
+        moveRefusal ??
+        (evaluation.unmetConditions.length > 0
           ? `${evaluation.reason}: ${evaluation.unmetConditions.join(', ')}`
-          : evaluation.reason,
+          : evaluation.reason),
       input,
       evaluatedAt: new Date(ts),
     });
@@ -101,7 +110,7 @@ export function createProposalHandler(
     if (evaluation.decision === 'forbid') {
       status = 'rejected';
       decidedBy = POLICY_ACTOR;
-      decisionNote = 'Forbidden by policy.';
+      decisionNote = moveRefusal ?? 'Forbidden by policy.';
     } else {
       // The critic reads every proposal that could reach Dom or the
       // executor (spec 7.4), so a draft's voice and provenance checks run

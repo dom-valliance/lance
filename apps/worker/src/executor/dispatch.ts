@@ -8,7 +8,7 @@ import {
   type Proposal,
 } from '@lance/shared';
 import type { ConnectorWrite } from './index.js';
-import { policyTarget } from './target.js';
+import { moveDestinationRefusal, policyTarget } from './target.js';
 
 /** The connector operations the executor may perform, as adapters built in main from the real connectors. */
 type Written = { id: string; webLink?: string | undefined };
@@ -147,6 +147,10 @@ export function createConnectorWrite(deps: DispatchDeps): ConnectorWrite {
         ...proposal.payload,
         ...(proposal.editedPayload ?? {}),
       };
+      if (proposal.actionClass === 'move_mail') {
+        const refusal = moveDestinationRefusal(payload);
+        if (refusal !== null) throw new ExecutionRefusedError('forbidden_at_execution', refusal);
+      }
       const target = policyTarget(proposal.actionClass, payload);
       const labels = await deps.loadLabels(proposal);
       const decision = evaluate(
