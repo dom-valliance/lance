@@ -31,3 +31,4 @@ One file per decision, numbered, never edited after acceptance except to add a `
 | 0032 | Migrations run before the apps move | Accepted |
 | 0033 | Shared nodes carry no private provenance | Accepted |
 | 0034 | Bulk mail skips model triage | Accepted |
+| 0035 | Principal identity per context, and who may change shared facts | Accepted |
