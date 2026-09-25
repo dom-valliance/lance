@@ -283,6 +283,8 @@ export const EvidenceInputSchema = z.object({
 export const OffboardInputSchema = z.object({
   principalId: UlidSchema,
   reason: z.string().trim().min(1).max(500),
+  /** Needed to offboard the organisation's owner or the last active Lance.Admin. */
+  confirmProtected: z.boolean().optional(),
 });
 
 /** A request the admin store refused, as the 400 it is rather than a 500. */
@@ -397,6 +399,9 @@ export const appRouter = router({
           reason: input.reason,
           actor: ctx.deps.actor,
           callerId: ctx.caller.principal.id,
+          ...(input.confirmProtected === undefined
+            ? {}
+            : { confirmProtected: input.confirmProtected }),
         }),
       ),
     ),

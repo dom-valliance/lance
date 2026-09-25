@@ -261,6 +261,7 @@ export const createServerDeps = (options: ServerRuntimeOptions): ServerDeps => {
     admin: createAdminStore(options.root, directory, {
       usdToGbp: options.config.cost.usdToGbp,
       timeZone: options.config.timeZone,
+      ownerUpn: options.config.dom.email,
       enqueueOffboard: (job) => executeQueue.enqueueOffboard(job),
     }),
     ...(options.evidenceSigner === undefined || options.evidenceSigner === null

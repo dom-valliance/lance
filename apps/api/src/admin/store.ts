@@ -30,6 +30,8 @@ import { ageMinutesBetween, shiftLocalDays, startOfLocalDay } from '../status.js
 export interface AdminStoreOptions {
   usdToGbp: number;
   timeZone: string;
+  /** `config.dom.email`: the organisation's owner, whose offboarding needs a second confirmation. */
+  ownerUpn: string;
   /**
    * Puts an offboarding on the worker's queue and returns the job id. The
    * worker holds the vault and Slack rights the steps need; the api does not.
@@ -91,6 +93,28 @@ interface HealthRow extends Record<string, unknown> {
 }
 
 const roundGbp = (value: number): number => Math.round(value * 10_000) / 10_000;
+
+/**
+ * Why offboarding `target` needs a second confirmation, or null when it
+ * does not: they are the organisation's owner (`config.dom.email`), or the
+ * last active principal whose recorded roles hold Lance.Admin, after whom
+ * nobody could reach the admin page or receive organisation alerts.
+ */
+export function offboardingNeedsConfirmation(
+  target: PrincipalRef,
+  everyone: readonly PrincipalRef[],
+  ownerUpn: string,
+): string | null {
+  if (target.upn.toLowerCase() === ownerUpn.toLowerCase()) {
+    return `${target.upn} is the organisation's owner (DOM_EMAIL), who receives organisation alerts when no admin role is recorded`;
+  }
+  const isActiveAdmin = (principal: PrincipalRef): boolean =>
+    principal.status === 'active' && principal.lanceRoles.includes('Lance.Admin');
+  if (isActiveAdmin(target) && !everyone.some((p) => p.id !== target.id && isActiveAdmin(p))) {
+    return `${target.upn} is the last active Lance.Admin, after whom nobody could use the admin page`;
+  }
+  return null;
+}
 
 export function createAdminStore(
   root: Db,
@@ -284,12 +308,17 @@ export function createAdminStore(
           'An admin cannot offboard themselves from the admin page. Ask another Lance admin, or follow docs/runbooks/offboard-principal.md.',
         );
       }
-      const target = (await directory.list()).find(
-        (principal) => principal.id === request.principalId,
-      );
+      const everyone = await directory.list();
+      const target = everyone.find((principal) => principal.id === request.principalId);
       if (target === undefined) {
         throw new BadRequestError(
           `No principal has id ${request.principalId}. Take the id from the principals list on this page.`,
+        );
+      }
+      const protectedBecause = offboardingNeedsConfirmation(target, everyone, options.ownerUpn);
+      if (protectedBecause !== null && request.confirmProtected !== true) {
+        throw new BadRequestError(
+          `${protectedBecause}. Tick "Offboard them anyway" and submit again to confirm, or give another principal Lance.Admin first. Nothing was changed.`,
         );
       }
       await new LedgerWriter(scopedDb(root, { principalId: target.id, admin: true })).append({

@@ -31,7 +31,11 @@ export async function offboardAction(
   if (reason === '') return 'Give a reason for the ledger before offboarding. Nothing was changed.';
   try {
     const client = await apiClient();
-    await client.admin.offboard.mutate({ principalId, reason });
+    await client.admin.offboard.mutate({
+      principalId,
+      reason,
+      ...(form.get('confirmProtected') === 'on' ? { confirmProtected: true } : {}),
+    });
     return null;
   } catch (error) {
     return messageOf(error, 'The offboarding could not be queued. Check the api logs.');

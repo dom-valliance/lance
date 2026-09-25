@@ -461,6 +461,11 @@ export interface OffboardingRequest {
   actor: string;
   /** The admin's own principal, who may not offboard themselves. */
   callerId: string;
+  /**
+   * The second confirmation offboarding the organisation's owner or the
+   * last active Lance.Admin needs; refused without it.
+   */
+  confirmProtected?: boolean;
 }
 
 export interface OffboardingQueued {

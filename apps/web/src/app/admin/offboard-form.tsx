@@ -48,6 +48,13 @@ export function OffboardForm({
           maxLength={500}
         />
       </Field>
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" name="confirmProtected" className="mt-1 size-4" />
+        <span>
+          Offboard them anyway if they are the organisation&apos;s owner or the last active
+          Lance.Admin. Lance refuses those without this second confirmation.
+        </span>
+      </label>
       <SubmitButton
         variant="destructive"
         pendingLabel="Offboarding"

@@ -1,4 +1,4 @@
-import { scopedDb, type Db } from '@lance/db';
+import { principals, scopedDb, type Db, type Principal } from '@lance/db';
 import {
   applyRetention,
   type RetentionResult,
@@ -6,6 +6,7 @@ import {
   type RetentionWindows,
 } from '@lance/ledger';
 import type { Config } from '@lance/shared';
+import { eq } from 'drizzle-orm';
 import { GRAPH_MAIL_WATCHER_NAME } from '../watchers/graph/index.js';
 
 /**
@@ -44,10 +45,30 @@ export interface RetentionRun {
   now?: () => string;
 }
 
+/**
+ * The windows one run applies. An offboarded principal's nightly run keeps
+ * the offboarding windows, so content that reached their scope after the
+ * offboarding run (a late watcher write, a restored row) goes the next
+ * night rather than after the normal window.
+ */
+export function retentionWindowsFor(
+  config: Pick<Config, 'retention'>,
+  trigger: RetentionTrigger,
+  status: Principal['status'] | null,
+): RetentionWindows {
+  return trigger === 'offboarding' || status === 'offboarded'
+    ? offboardingWindows(config)
+    : nightlyWindows(config);
+}
+
 export async function runRetention(run: RetentionRun): Promise<RetentionResult> {
+  const rows = await run.root
+    .select({ status: principals.status })
+    .from(principals)
+    .where(eq(principals.id, run.principalId))
+    .limit(1);
   return applyRetention(scopedDb(run.root, { principalId: run.principalId }), {
-    windows:
-      run.trigger === 'offboarding' ? offboardingWindows(run.config) : nightlyWindows(run.config),
+    windows: retentionWindowsFor(run.config, run.trigger, rows[0]?.status ?? null),
     trigger: run.trigger,
     mailWatcher: GRAPH_MAIL_WATCHER_NAME,
     ...(run.actor === undefined ? {} : { actor: run.actor }),

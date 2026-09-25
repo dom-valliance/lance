@@ -757,6 +757,17 @@ describe('the admin router', () => {
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
+  it('passes the second confirmation for a protected principal through to the store', async () => {
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    const target = '01K5S9V6QW3SWCCPVB0N0E3A02';
+
+    await admin.admin.offboard({ principalId: target, reason: 'left', confirmProtected: true });
+
+    expect((harness.server.admin as FakeAdminStore).offboardings.at(-1)?.confirmProtected).toBe(
+      true,
+    );
+  });
+
   it('refuses the evidence export, naming the secret, while no signing key is configured', async () => {
     const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
     await expect(

@@ -42,6 +42,18 @@ scripts/entra/grant-access.sh dev <their UPN> user --remove
 
 It removes `Lance.User` and `Lance.Admin` wherever the person holds them and prints each removal. Offboarding does not depend on this step, but without it the person could still sign in and would meet the app's refusal for an offboarded principal rather than Microsoft's.
 
+Then end the sessions and tokens they already hold. Removing a role stops new sign-ins, but a refresh token Entra issued before stays valid until it is revoked. Lance does not run this; an Entra administrator (User Administrator or higher) runs it, with the person's object id read from the CLI:
+
+```
+USER_ID=$(az ad user show --id '<their UPN>' --query id -o tsv)
+echo "$USER_ID"
+az rest --method POST --url "https://graph.microsoft.com/v1.0/users/$USER_ID/revokeSignInSessions"
+```
+
+Expected: `{"value": true}`. Every refresh token Entra issued to them, including the one behind their Lance Graph consent, stops working; their other Microsoft 365 sessions end too, so tell them first if they are staying at Valliance.
+
+Last, revoke their Jamie key in Jamie itself. Lance deletes its copy (step 3 of the table above) but cannot revoke the key: the person, or a Jamie workspace admin, opens Jamie, Settings, Developers, API Keys, and deletes the key they created for Lance.
+
 ## 2. Find the principal
 
 Open the admin page (`https://<web hostname>/admin`, in the navigation as Admin). The Principals table lists every principal with their status. Note the UPN exactly as it appears; step 3 asks you to type it.
@@ -228,3 +240,21 @@ $ psql -f offboard-check.sql                              # the step 5 queries
 ```
 
 The first run's `retention_applied` counts were `mailBodies 1, transcripts 1, derivedFromMail 1, observations 2`. The membership check from `deploy.md` step 9 returned `id-lance-worker-local | f | t`, and no row for `lance_app`. Remove the container with `docker rm -f lance-offboard-drill`.
+
+## Re-onboarding after offboarding
+
+A principal who comes back keeps their principal row, set back to `onboarding` by an admin, and runs onboarding again. Their three secrets are still in the principal vault, soft-deleted, and Key Vault refuses to write a secret whose name is soft-deleted (HTTP 409, `Secret is currently in a deleted but recoverable state`), so the Microsoft 365 consent and the Jamie key step fail until a Key Vault Secrets Officer on the principal vault deals with them. Purge protection means they cannot be purged before their `scheduledPurgeDate`; recover them instead. Onboarding then writes a new current version over each one, and step 1's session revocation has already made the old refresh token useless.
+
+Run as a Secrets Officer on the principal vault, with the id from step 2:
+
+```
+VAULT=$(az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-p-')].name" -o tsv)
+echo "$VAULT"
+az keyvault secret list-deleted --vault-name "$VAULT" \
+  --query "[?contains(name, '$PRINCIPAL')].{name:name, purged:scheduledPurgeDate}" -o table
+for name in graph-refresh-token jamie-api-key foundry-refresh-token; do
+  az keyvault secret recover --vault-name "$VAULT" --name "$name--$PRINCIPAL" || true
+done
+```
+
+A secret that was never stored has nothing to recover and the command says so; that is expected. Once the purge date has passed, the secret is gone and there is nothing to do. If the vault ever runs without purge protection, `az keyvault secret purge --vault-name "$VAULT" --name "<name>--$PRINCIPAL"` removes a deleted secret outright instead.
