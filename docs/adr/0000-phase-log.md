@@ -211,6 +211,8 @@ Opened 2026-09-24 on branch `feat/phase-5-multi-user`. ADRs 0020 to 0025 and 003
 | 5.4 Slack linking, private channels, nonce store (ADR 0021, 0023) | to `cf200c0` | 0014 |
 | 5.2 Credentials per principal, second vault, rotation lock (ADR 0022) | to `106b2ae` | 0015 |
 
+Decided by Dom on 2026-09-24 and 25, after the thirty-principal load test (`docs/runbooks/load-test.md`): fix the Monday mail backlog at its cause rather than loosen the 60 second queue target, so mail and triage run concurrently, one job per principal at a time, and bulk mail skips model triage (ADR 0034); raise model concurrency from 4 to 16, which the account's limits of 10,000 requests and 10 million input tokens a minute allow for the same spend; default the organisation ceiling to GBP 30 with an admin control. Found while building ADR 0034: policy was never given a move's destination when a proposal was created, so seed rule 4 (move newsletters and notifications into `AI-Filed` automatically) never fired and every such move became a card. Fixed; Dom keeps the rule as the spec has it, so once live those moves run without a card.
+
 Found while merging: the executor set a proposal to held and recorded the hold as two statements, so a resume between them left the proposal held while running (the kill switch drill had flaked on it). The hold and its event now commit together under a per-principal lock that pause and resume take (`14dd959`); a race test in the ledger suite fails on every run with the lock removed. The readiness probe now names what it reports, `pausedGlobally` and `modeCeiling`. Test budgets were raised for full local runs, where fast suites timed out waiting their turn; three uncached root runs then passed in a row.
 
 | Criterion | Evidence | Date |
