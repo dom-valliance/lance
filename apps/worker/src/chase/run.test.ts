@@ -83,6 +83,7 @@ const harness = (
         agentDisplayName: 'Lance',
         models: { triage: { id: 'claude-sonnet-5', effort: 'medium' } } as never,
       },
+      principal: { name: 'Dom Selvon' },
       agent: {
         runner,
         recorder: new MemoryRunRecorder(),

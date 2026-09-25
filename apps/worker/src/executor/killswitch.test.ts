@@ -1,6 +1,6 @@
 import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { proposals, runMigrations, type Db } from '@lance/db';
+import { SEED_PRINCIPAL_ID, proposals, runMigrations, type Db } from '@lance/db';
 import { LedgerReader, SystemControl } from '@lance/ledger';
 import { newUlid, nowIso } from '@lance/shared';
 import { eq } from 'drizzle-orm';
@@ -9,7 +9,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createBoss, startBoss } from '../scheduler/boss.js';
 import { PauseGate } from '../scheduler/gate.js';
 import { QUEUES } from '../scheduler/queues.js';
-import { registerExecutor, type ConnectorWrite } from './index.js';
+import { ExecutePayloadSchema } from '../jobs/handlers.js';
+import { PrincipalContexts, workForPrincipal } from '../jobs/scoped.js';
+import { executeProposal, type ConnectorWrite, type ExecutorDeps } from './index.js';
 
 const FAILING_PROPOSAL_MARKER = 'fail-me';
 
@@ -75,7 +77,18 @@ beforeAll(async () => {
       ? Promise.reject(new Error('connector exploded'))
       : Promise.resolve({ targetRecordId: 'AAMk-message-1', url: null, compensation: null }),
   );
-  await registerExecutor(boss, { db, gate: new PauseGate(control), write: { perform } });
+  // The executor as the worker registers it: the payload names the
+  // principal, and the handler runs with that principal's context.
+  const executor: ExecutorDeps = { db, gate: new PauseGate(control), write: { perform } };
+  await workForPrincipal(
+    boss,
+    QUEUES.execute,
+    ExecutePayloadSchema,
+    new PrincipalContexts(db, () => Promise.resolve(executor)),
+    async (deps, data) => {
+      await executeProposal(deps, { proposalId: data.proposalId });
+    },
+  );
 }, 120000);
 
 afterAll(async () => {
@@ -89,7 +102,7 @@ describe('kill switch', () => {
     await control.setMode('dry_run', { actor: 'user:dom' });
     try {
       const id = await insertApprovedProposal('approved during dry run');
-      await boss.send(QUEUES.execute, { proposalId: id });
+      await boss.send(QUEUES.execute, { principalId: SEED_PRINCIPAL_ID, proposalId: id });
       expect(await waitForStatus(id, ['held', 'executed'])).toBe('held');
       expect(perform).not.toHaveBeenCalled();
     } finally {
@@ -103,7 +116,7 @@ describe('kill switch', () => {
     expect(await statusOf(id)).toBe('held');
 
     const queuedId = await insertApprovedProposal('queued after pause');
-    await boss.send(QUEUES.execute, { proposalId: queuedId });
+    await boss.send(QUEUES.execute, { principalId: SEED_PRINCIPAL_ID, proposalId: queuedId });
     expect(await waitForStatus(queuedId, ['held'])).toBe('held');
     expect(perform).not.toHaveBeenCalled();
   }, 30000);
@@ -111,7 +124,7 @@ describe('kill switch', () => {
   it('releases a proposal the executor held once the system resumes', async () => {
     await control.pause({ reason: 'drill', actor: 'user:dom' });
     const id = await insertApprovedProposal('held by executor');
-    await boss.send(QUEUES.execute, { proposalId: id });
+    await boss.send(QUEUES.execute, { principalId: SEED_PRINCIPAL_ID, proposalId: id });
     expect(await waitForStatus(id, ['held'])).toBe('held');
     const resumed = await control.resume({ actor: 'user:dom' });
     expect(resumed.releasedProposalIds).toContain(id);
@@ -124,7 +137,7 @@ describe('kill switch', () => {
     const resumed = await control.resume({ actor: 'user:dom' });
     expect(resumed.releasedProposalIds).toContain(id);
 
-    await boss.send(QUEUES.execute, { proposalId: id });
+    await boss.send(QUEUES.execute, { principalId: SEED_PRINCIPAL_ID, proposalId: id });
     expect(await waitForStatus(id, ['executed', 'failed'])).toBe('executed');
     expect(perform).toHaveBeenCalledWith(id);
 
@@ -138,7 +151,7 @@ describe('kill switch', () => {
   it('records a failed event and status when the connector write throws', async () => {
     const id = await insertApprovedProposal(FAILING_PROPOSAL_MARKER);
     perform.mockImplementationOnce(() => Promise.reject(new Error('connector exploded')));
-    await boss.send(QUEUES.execute, { proposalId: id });
+    await boss.send(QUEUES.execute, { principalId: SEED_PRINCIPAL_ID, proposalId: id });
     expect(await waitForStatus(id, ['executed', 'failed'])).toBe('failed');
     const trail = await new LedgerReader(db).query({ kind: 'failed' });
     expect(
@@ -150,7 +163,7 @@ describe('kill switch', () => {
     const id = await insertApprovedProposal('pending one');
     await db.update(proposals).set({ status: 'pending' }).where(eq(proposals.id, id));
     const before = perform.mock.calls.length;
-    await boss.send(QUEUES.execute, { proposalId: id });
+    await boss.send(QUEUES.execute, { principalId: SEED_PRINCIPAL_ID, proposalId: id });
     await new Promise((resolve) => setTimeout(resolve, 3000));
     expect(await statusOf(id)).toBe('pending');
     expect(perform.mock.calls.length).toBe(before);

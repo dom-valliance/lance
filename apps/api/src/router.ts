@@ -1,4 +1,9 @@
-import type { LedgerQuery, ProposalAction, ProposalFilter } from '@lance/ledger';
+import {
+  ModeChangeRefusedError,
+  type LedgerQuery,
+  type ProposalAction,
+  type ProposalFilter,
+} from '@lance/ledger';
 import {
   ActionClassSchema,
   AlertSeveritySchema,
@@ -14,7 +19,9 @@ import {
   SystemModeSchema,
   SystemSchema,
   UlidSchema,
+  isKnownTimeZone,
 } from '@lance/shared';
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { actorFromUpn } from './actor.js';
 import {
@@ -44,8 +51,10 @@ import {
 } from './commitments/service.js';
 import { listLedger, MAX_PAGE_SIZE as MAX_LEDGER_PAGE_SIZE } from './ledger/service.js';
 import { listProposals, proposalSummary } from './proposals/service.js';
+import { OnboardingRefusedError } from './onboarding/service.js';
 import { listTasks } from './tasks/service.js';
-import { procedure, router } from './trpc.js';
+import { BadRequestError } from './errors.js';
+import { adminProcedure, procedure, router, signedInProcedure } from './trpc.js';
 
 /**
  * The tRPC surface `apps/web` calls. `AppRouter` is exported as a type
@@ -54,6 +63,9 @@ import { procedure, router } from './trpc.js';
  */
 
 const TimestampSchema = z.string().datetime({ offset: true });
+
+/** A `/lance login` token; its shape and MAC are checked by the link service. */
+const SlackLinkTokenSchema = z.string().min(1).max(256);
 
 /** Mirrors `LedgerQuery` from `@lance/ledger`, validated at the boundary. */
 export const LedgerQueryInputSchema = z
@@ -189,6 +201,51 @@ export const InterruptionBudgetInputSchema = z.object({
 });
 export type InterruptionBudgetInput = z.infer<typeof InterruptionBudgetInputSchema>;
 
+/** The SHA-256 of the data-processing notice the web app rendered, as lowercase hex. */
+const NoticeSha256Schema = z
+  .string()
+  .regex(/^[0-9a-f]{64}$/, 'must be the SHA-256 of the notice as 64 lowercase hex characters');
+
+/**
+ * The api's own hash of the notice, after checking the page showed that
+ * notice. A client naming any other hash, from a stale page or of its
+ * own making, is refused: an acceptance records the text this build
+ * carries (docs/plans/multi-user.md M3).
+ */
+const currentNotice = (ctx: { server: { noticeSha256: string } }, claimed: string): string => {
+  if (claimed !== ctx.server.noticeSha256) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message:
+        'The data-processing notice on this page is not the current one. Reload the page, read the notice it shows, then accept it. Nothing was recorded.',
+    });
+  }
+  return ctx.server.noticeSha256;
+};
+
+/** Onboarding step 6: the quiet hours and time zone the principal confirms. */
+export const PreferencesInputSchema = z.object({
+  timeZone: z
+    .string()
+    .min(1)
+    .max(64)
+    .refine(isKnownTimeZone, 'must be a time zone name such as Europe/London'),
+  quietHoursStart: HhMmSchema,
+  quietHoursEnd: HhMmSchema,
+});
+
+/** A refusal written for the principal, passed to the web app with its message intact. */
+const precondition = async <T>(work: () => Promise<T>): Promise<T> => {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof OnboardingRefusedError || error instanceof ModeChangeRefusedError) {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: error.message, cause: error });
+    }
+    throw error;
+  }
+};
+
 /** The Alerts page's three tabs and its filters (spec 12). */
 export const AlertListInputSchema = z
   .object({
@@ -216,7 +273,195 @@ export const BriefListInputSchema = z
   .default({});
 export type BriefListInput = z.infer<typeof BriefListInputSchema>;
 
+/** An evidence export's period and optional principal (spec 4.4). */
+export const EvidenceInputSchema = z.object({
+  from: TimestampSchema,
+  to: TimestampSchema,
+  principalId: UlidSchema.nullable().default(null),
+});
+
+export const OffboardInputSchema = z.object({
+  principalId: UlidSchema,
+  reason: z.string().trim().min(1).max(500),
+  /** Needed to offboard the organisation's owner or the last active Lance.Admin. */
+  confirmProtected: z.boolean().optional(),
+});
+
+/** A request the admin store refused, as the 400 it is rather than a 500. */
+const asBadRequest = async <T>(work: () => Promise<T>): Promise<T> => {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof BadRequestError) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
+    }
+    throw error;
+  }
+};
+
 export const appRouter = router({
+  /**
+   * Who is signed in and whether Lance is open to them yet. The one
+   * procedure an onboarding principal may call; the web app reads it to
+   * decide between the app and the onboarding placeholder.
+   */
+  me: signedInProcedure.query(({ ctx }) => ({
+    principalId: ctx.caller.principal.id,
+    upn: ctx.caller.principal.upn,
+    status: ctx.caller.principal.status,
+    roles: ctx.caller.identity.roles,
+  })),
+  /**
+   * Health, never content (ADR 0024). Each principal's figures are read in
+   * that principal's own scope; nothing here returns a proposal, a brief, a
+   * commitment, a ledger payload or graph evidence.
+   */
+  /**
+   * The web app's `/link/slack` page (ADR 0021). Open to an onboarding
+   * principal, since linking Slack is one of their onboarding steps; the
+   * service refuses a paused or offboarded one. The token is the one
+   * `/lance login` put in the link, and nothing else travels with it.
+   */
+  slackLink: router({
+    preview: signedInProcedure
+      .input(z.object({ token: SlackLinkTokenSchema }))
+      .query(({ ctx, input }) => ctx.server.slack.links.preview(input.token, ctx.caller.principal)),
+    confirm: signedInProcedure
+      .input(z.object({ token: SlackLinkTokenSchema }))
+      .mutation(({ ctx, input }) => ctx.server.slack.links.confirm(input.token, ctx.caller)),
+    current: signedInProcedure.query(({ ctx }) =>
+      ctx.server.slack.links.current(ctx.caller.principal),
+    ),
+  }),
+  /**
+   * The onboarding checklist (docs/plans/multi-user.md M3). Open to any
+   * signed-in principal so the page can see who is already active and send
+   * them on; every write refuses a principal who is not onboarding.
+   */
+  onboarding: router({
+    state: signedInProcedure
+      .input(z.object({ noticeSha256: NoticeSha256Schema }))
+      .query(({ ctx, input }) =>
+        ctx.server.onboarding.state(ctx.caller.principal, currentNotice(ctx, input.noticeSha256)),
+      ),
+    acceptNotice: signedInProcedure
+      .input(z.object({ noticeSha256: NoticeSha256Schema }))
+      .mutation(({ ctx, input }) =>
+        precondition(() =>
+          ctx.server.onboarding.acceptNotice(
+            ctx.caller.principal,
+            currentNotice(ctx, input.noticeSha256),
+            actorFromUpn(ctx.upn),
+          ),
+        ),
+      ),
+    confirmPreferences: signedInProcedure
+      .input(PreferencesInputSchema)
+      .mutation(({ ctx, input }) =>
+        precondition(() =>
+          ctx.server.onboarding.confirmPreferences(
+            ctx.caller.principal,
+            input,
+            actorFromUpn(ctx.upn),
+          ),
+        ),
+      ),
+    complete: signedInProcedure
+      .input(z.object({ noticeSha256: NoticeSha256Schema }))
+      .mutation(({ ctx, input }) =>
+        precondition(() =>
+          ctx.server.onboarding.complete(
+            ctx.caller.principal,
+            currentNotice(ctx, input.noticeSha256),
+          ),
+        ),
+      ),
+  }),
+  admin: router({
+    /** Every principal with their status and which onboarding steps are done. */
+    principals: adminProcedure.query(({ ctx }) => ctx.server.admin.principals()),
+    /** Watchers, breakers, recorded secrets and cost, per principal. */
+    health: adminProcedure.query(({ ctx }) => ctx.server.admin.health()),
+    /** Changes to organisation-default rules, newest first. */
+    ruleChanges: adminProcedure.query(({ ctx }) => ctx.server.admin.ruleChanges()),
+    /** Alerts the organisation jobs raised for this admin. */
+    systemAlerts: adminProcedure.query(({ ctx }) =>
+      ctx.server.admin.systemAlerts(ctx.caller.principal.id),
+    ),
+    /**
+     * Offboards a principal (docs/runbooks/offboard-principal.md): recorded
+     * here, carried out by the worker, which holds the vault and Slack rights.
+     */
+    offboard: adminProcedure.input(OffboardInputSchema).mutation(({ ctx, input }) =>
+      asBadRequest(() =>
+        ctx.server.admin.requestOffboarding({
+          principalId: input.principalId,
+          reason: input.reason,
+          actor: ctx.deps.actor,
+          callerId: ctx.caller.principal.id,
+          ...(input.confirmProtected === undefined
+            ? {}
+            : { confirmProtected: input.confirmProtected }),
+        }),
+      ),
+    ),
+    /**
+     * The signed evidence bundle for a period (spec 4.4). A mutation, so the
+     * period travels in the request body; without a principal it covers
+     * system events only (ADR 0024).
+     */
+    evidence: adminProcedure.input(EvidenceInputSchema).mutation(({ ctx, input }) => {
+      const exporter = ctx.server.evidence;
+      if (exporter === undefined) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message:
+            'The evidence export has no signing key. Set evidence-signing-key in the static Key Vault to an Ed25519 key (docs/compliance/iso27001-access-review.md) and restart the api.',
+        });
+      }
+      return asBadRequest(() =>
+        exporter.export({
+          from: input.from,
+          to: input.to,
+          principalId: input.principalId,
+          actor: ctx.deps.actor,
+          callerId: ctx.caller.principal.id,
+        }),
+      );
+    }),
+    /**
+     * The organisation kill switch (multi-user plan M5): sets the global
+     * row, which pauses every principal. `Lance.Admin` only; the caller's
+     * own approved proposals are held at once, everyone else's when their
+     * executor next runs.
+     */
+    pauseAll: adminProcedure
+      .input(z.object({ reason: z.string().min(1) }))
+      .mutation(({ ctx, input }) =>
+        ctx.deps.control.pauseAll({ reason: input.reason, actor: ctx.deps.actor }),
+      ),
+    /**
+     * Lifts the global pause. Each principal's own pause stays, and proposals
+     * held under the global pause are released by that principal's resume.
+     */
+    resumeAll: adminProcedure.mutation(({ ctx }) =>
+      ctx.deps.control.resumeAll({ actor: ctx.deps.actor }),
+    ),
+    /** The organisation's daily spend ceiling across every principal (M5). */
+    organisationCeiling: adminProcedure.query(({ ctx }) =>
+      ctx.deps.control.readOrganisation().then((state) => ({
+        costCeilingGbp: state.costCeilingGbp,
+      })),
+    ),
+    setOrganisationCeiling: adminProcedure
+      .input(z.object({ costCeilingGbp: z.number().positive().max(10_000) }))
+      .mutation(({ ctx, input }) =>
+        ctx.deps.control.setOrganisationCostCeiling(
+          { costCeilingGbp: input.costCeilingGbp },
+          { actor: ctx.deps.actor },
+        ),
+      ),
+  }),
   systemState: router({
     get: procedure.query(({ ctx }) => ctx.deps.control.read()),
     /** The same payload as `GET /admin/status`: pause, mode, cursors, cost. */
@@ -231,7 +476,7 @@ export const appRouter = router({
     setMode: procedure
       .input(z.object({ mode: SystemModeSchema }))
       .mutation(({ ctx, input }) =>
-        ctx.deps.control.setMode(input.mode, { actor: actorFromUpn(ctx.upn) }),
+        precondition(() => ctx.deps.control.setMode(input.mode, { actor: actorFromUpn(ctx.upn) })),
       ),
     setInterruptionBudget: procedure
       .input(InterruptionBudgetInputSchema)

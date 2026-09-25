@@ -9,7 +9,7 @@ import {
 } from '@lance/agents';
 import { observations, proposals, type Db } from '@lance/db';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
-import { nowIso, type Config, type ProvenanceRef } from '@lance/shared';
+import { nowIso, type Config, type PrincipalIdentity, type ProvenanceRef } from '@lance/shared';
 import { and, eq } from 'drizzle-orm';
 import type { OntologyRepository } from '@lance/ontology';
 import { raiseAlert } from '../alerts/raise.js';
@@ -33,7 +33,8 @@ export interface TriageDeps {
   /** Phase 2 collaborators. Absent (tests, a process without them) means the step is skipped. */
   ontology?: OntologyRepository | null;
   extractCommitments?: CommitmentExtractor | null;
-  dom?: { name: string; email: string; notionUserId?: string | null } | null;
+  /** The principal this triage acts for, built once per principal context. */
+  principal?: PrincipalIdentity | null;
   debrief?: Pick<DebriefDeps, 'slack'> | null;
   now?: () => string;
 }
@@ -126,7 +127,8 @@ export function workingDaysBetween(start: Date, end: Date): number {
   return days;
 }
 
-function provenanceFor(
+/** The provenance of one record among a batch's observed events (non-negotiable 5). */
+export function provenanceFor(
   events: Array<{
     sourceSystem: string | null;
     sourceRecordId: string | null;
@@ -179,11 +181,16 @@ async function existingTaskProposals(db: Db, correlationId: string): Promise<Map
   return byTitle;
 }
 
-/** Deterministic conversion of a task candidate into a Notion create_task draft (ADR 0009). */
+/**
+ * Deterministic conversion of a task candidate into a Notion create_task
+ * draft (ADR 0009). The task is assigned to the principal: `assigneeId` is
+ * their `principals.notion_user_id` (ADR 0022).
+ */
 export function taskDraft(
   candidate: TaskCandidate,
   provenance: ProvenanceRef[],
   notion: Config['notion'],
+  assigneeId: string,
 ): ProposalDraft {
   const delegate =
     candidate.assigneeName !== null && candidate.assigneeName.trim().length > 0
@@ -196,7 +203,7 @@ export function taskDraft(
     // property names by the connector); the critic checks the same keys.
     input: {
       title,
-      assigneeIds: [notion.domUserId],
+      assigneeIds: [assigneeId],
       ...(candidate.dueDate === null ? {} : { due: candidate.dueDate }),
       ...(candidate.priority === null ? {} : { priority: candidate.priority }),
       ...(candidate.description === null ? {} : { description: candidate.description }),
@@ -217,6 +224,40 @@ export function taskDraft(
   };
 }
 
+/** Every label the batch's observations carry, once each, in first-seen order. */
+export function labelsOf(events: ReadonlyArray<{ payload: unknown }>): string[] {
+  return [
+    ...new Set(
+      events.flatMap((event) => {
+        const value = (event.payload as Record<string, unknown> | null)?.['labels'];
+        return Array.isArray(value)
+          ? value.filter((item): item is string => typeof item === 'string')
+          : [];
+      }),
+    ),
+  ];
+}
+
+/**
+ * The context every proposal for a batch is created in: its labels, for
+ * the label-gated seed rules, and whether the watcher is still in its
+ * dry-run window (spec 6.3). Triage and the bulk-mail filer (ADR 0034)
+ * both use it, so policy treats their proposals alike.
+ */
+export async function proposalContextFor(
+  deps: { db: Db; config: Pick<Config, 'watchers'>; now: () => string },
+  job: Pick<TriageJob, 'correlationId' | 'watcher'>,
+  events: ReadonlyArray<{ payload: unknown }>,
+  actor: string,
+): Promise<ProposalContext & { watcherDryRun: boolean }> {
+  const startedAt = await watcherStartedAt(deps.db, job.watcher);
+  const watcherDryRun =
+    startedAt !== null &&
+    workingDaysBetween(new Date(startedAt), new Date(deps.now())) <
+      deps.config.watchers.dryRunDaysForNewWatcher;
+  return { correlationId: job.correlationId, actor, labels: labelsOf(events), watcherDryRun };
+}
+
 /**
  * Triage for one correlation id (spec 7.2): the model reads the batch with
  * read tools and submits action proposals through create_proposal; task
@@ -233,27 +274,13 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
     throw new Error(`Triage job for ${job.correlationId} names no observed events that exist.`);
   }
 
-  const startedAt = await watcherStartedAt(deps.db, job.watcher);
-  const watcherDryRun =
-    startedAt !== null &&
-    workingDaysBetween(new Date(startedAt), new Date(now())) <
-      deps.config.watchers.dryRunDaysForNewWatcher;
-  const labels = [
-    ...new Set(
-      events.flatMap((event) => {
-        const value = (event.payload as Record<string, unknown> | null)?.['labels'];
-        return Array.isArray(value)
-          ? value.filter((item): item is string => typeof item === 'string')
-          : [];
-      }),
-    ),
-  ];
-  const context: ProposalContext = {
-    correlationId: job.correlationId,
-    actor: TRIAGE_ACTOR,
-    labels,
-    watcherDryRun,
-  };
+  const context = await proposalContextFor(
+    { db: deps.db, config: deps.config, now },
+    job,
+    events,
+    TRIAGE_ACTOR,
+  );
+  const { watcherDryRun } = context;
 
   const tools = [
     ...readTools({
@@ -296,7 +323,10 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
       name: 'triage',
       version: TRIAGE_VERSION,
       model: deps.config.models.triage,
-      system: triageSystemPrompt(deps.config.agentDisplayName),
+      system: triageSystemPrompt(
+        deps.config.agentDisplayName,
+        deps.principal?.name ?? 'the principal',
+      ),
       tools,
       outputSchema: TriageOutputSchema,
       maxIterations: 8,
@@ -311,10 +341,21 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   // correlation id is reported as that proposal rather than created again.
   const existing = await existingTaskProposals(deps.db, job.correlationId);
   const taskProposals: string[] = [];
+  // No principal falls back to config for callers built before ADR 0022;
+  // a principal with a null Notion user is unresolved, and a task nobody
+  // can be assigned is not proposed.
+  const assigneeId = deps.principal ? deps.principal.notionUserId : deps.config.notion.domUserId;
+  if (assigneeId === null && output.taskCandidates.length > 0) {
+    console.warn(
+      { correlationId: job.correlationId, candidates: output.taskCandidates.length },
+      'task candidates not proposed: the principal has no Notion user id yet (principals.notion_user_id)',
+    );
+  }
   for (const candidate of output.taskCandidates) {
+    if (assigneeId === null) break;
     const provenance = provenanceFor(events, candidate.recordId);
     if (provenance.length === 0) continue;
-    const draft = taskDraft(candidate, provenance, deps.config.notion);
+    const draft = taskDraft(candidate, provenance, deps.config.notion, assigneeId);
     const already = existing.get(taskTitleOf(draft));
     if (already !== undefined) {
       taskProposals.push(already);
@@ -402,7 +443,7 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   let commitmentCandidates: CommitmentCandidate[] = [...output.commitments];
   if (
     deps.extractCommitments &&
-    deps.dom &&
+    deps.principal &&
     newest !== null &&
     newest.transcriptReady &&
     newest.transcript !== null
@@ -411,7 +452,7 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
       {
         id: newest.recordId,
         kind: 'transcript',
-        dom: { name: deps.dom.name, email: deps.dom.email },
+        principal: { name: deps.principal.name, email: deps.principal.email },
         participants: directory,
         occurredAt: newest.startTime,
         text: newest.transcript,
@@ -435,7 +476,7 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   // quoted from (non-negotiable 5), so candidates are grouped by record: a
   // correlation id can carry a meeting and its action items together.
   const recordedCommitments: RecordedCommitment[] = [];
-  if (deps.ontology && deps.dom) {
+  if (deps.ontology && deps.principal) {
     const byRecord = new Map<string, CommitmentCandidate[]>();
     for (const candidate of commitmentCandidates) {
       const group = byRecord.get(candidate.recordId) ?? [];
@@ -444,7 +485,7 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
     }
     for (const [recordId, group] of byRecord) {
       const result = await recordCommitments(
-        { db: deps.db, ontology: deps.ontology, dom: deps.dom, now },
+        { db: deps.db, ontology: deps.ontology, principal: deps.principal, now },
         group,
         {
           correlationId: job.correlationId,
@@ -459,12 +500,18 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   }
 
   let debrief: DebriefResult | null = null;
-  if (deps.debrief && deps.dom && newest !== null && newest.transcriptReady && newest.domAttended) {
+  if (
+    deps.debrief &&
+    deps.principal &&
+    newest !== null &&
+    newest.transcriptReady &&
+    newest.domAttended
+  ) {
     debrief = await runDebrief(
       {
         db: deps.db,
         config: deps.config,
-        dom: deps.dom,
+        principal: deps.principal,
         agent: deps.agent,
         slack: deps.debrief.slack,
         createProposal: deps.createProposal,

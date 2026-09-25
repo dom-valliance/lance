@@ -31,3 +31,11 @@ export class BadRequestError extends HttpError {
     this.name = 'BadRequestError';
   }
 }
+
+/** 403. The caller proved who they are and may not do this. */
+export class ForbiddenError extends HttpError {
+  constructor(message: string) {
+    super(403, message);
+    this.name = 'ForbiddenError';
+  }
+}

@@ -21,5 +21,14 @@ One file per decision, numbered, never edited after acceptance except to add a `
 | 0015 | Principals and row-level security | Accepted |
 | 0017 | The ontology has reference, shared and private layers | Accepted |
 | 0019 | Policy evaluates in tiers | Accepted |
+| 0020 | Access is granted by Entra app roles | Accepted |
+| 0021 | Slack identity is bound to Entra once, by the user | Accepted |
+| 0022 | Connector credentials are per principal, except Notion | Accepted |
+| 0023 | Each principal has a private surface | Accepted |
+| 0024 | Admins see health, never content | Accepted |
+| 0025 | Jobs are a registry, and schedules live in the database | Accepted |
 | 0031 | Phase order after Phase 3 | Accepted |
 | 0032 | Migrations run before the apps move | Accepted |
+| 0033 | Shared nodes carry no private provenance | Accepted |
+| 0034 | Bulk mail skips model triage | Accepted |
+| 0035 | Principal identity per context, and who may change shared facts | Accepted |

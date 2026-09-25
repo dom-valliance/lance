@@ -110,8 +110,8 @@ export async function calendarWindow(context: DetectorContext): Promise<Calendar
 }
 
 /** Whether Dom has declined the invitation, in which case the meeting is not his problem. */
-export function domDeclined(event: CalendarEventRow, domEmail: string): boolean {
-  const email = domEmail.trim().toLowerCase();
+export function principalDeclined(event: CalendarEventRow, principalEmail: string): boolean {
+  const email = principalEmail.trim().toLowerCase();
   return event.attendees.some(
     (attendee) =>
       attendee.address?.trim().toLowerCase() === email && attendee.responseStatus === 'declined',

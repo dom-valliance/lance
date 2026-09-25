@@ -124,6 +124,34 @@ describe('deliverAlerts', () => {
     expect(updates).toHaveLength(1);
   });
 
+  it('refreshes the title as well as the body when an alert repeats', async () => {
+    const first = await raiseAlert(db, {
+      kind: 'watcher_failed',
+      severity: 'P1',
+      dedupeKey: 'title:refresh',
+      title: 'The watermark is 24.2 hours old',
+      body: 'first',
+      actor: 'system:test',
+      provenance: [{ system: 'lance', recordId: 'title', hash: 'h', observedAt: WORKING }],
+      now: () => RAISED,
+    });
+    await raiseAlert(db, {
+      kind: 'watcher_failed',
+      severity: 'P1',
+      dedupeKey: 'title:refresh',
+      title: 'The watermark is 28.7 hours old',
+      body: 'second',
+      actor: 'system:test',
+      provenance: [{ system: 'lance', recordId: 'title', hash: 'h', observedAt: WORKING }],
+      now: () => WORKING,
+    });
+    const [row] = await db
+      .select({ title: alerts.title, body: alerts.body })
+      .from(alerts)
+      .where(eq(alerts.id, first.alertId));
+    expect(row).toEqual({ title: 'The watermark is 28.7 hours old', body: 'second' });
+  });
+
   it('does not redraw an alert that was folded into a batch post when it repeats', async () => {
     const before = updates.length;
     await raise('watcher_failed', 'P1', 'watcher:b', '2026-09-22T06:35:30.000Z');

@@ -40,7 +40,7 @@ const post = async (
 
 beforeEach(() => {
   harness = fakeDeps();
-  server = buildServer(harness.deps);
+  server = buildServer(harness.server);
 });
 
 afterEach(async () => {

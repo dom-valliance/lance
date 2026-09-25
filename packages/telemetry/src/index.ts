@@ -7,9 +7,13 @@ export {
   ATTR_AGENT,
   ATTR_CONNECTOR,
   ATTR_CORRELATION_ID,
+  ATTR_PRINCIPAL,
   ATTR_PROPOSAL_ID,
   ATTR_REQUEST_HASH,
   currentTraceIds,
+  principalOf,
+  PrincipalSpanProcessor,
+  withPrincipal,
   withSpan,
 } from './span.js';
 

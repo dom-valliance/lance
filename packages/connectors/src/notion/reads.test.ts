@@ -72,6 +72,32 @@ describe('queryTasksEditedSince', () => {
     });
   });
 
+  it('keeps to the principal tasks when given their Notion user id', async () => {
+    let body: unknown;
+    server.use(
+      http.post(QUERY_URL, async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json(fixture('query-page-2'));
+      }),
+    );
+    await queryTasksEditedSince(connector(), {
+      dataSourceId: DATA_SOURCE_ID,
+      since: '2026-09-18T00:00:00.000Z',
+      assigneeId: 'a1b2c3d4-0000-4000-8000-000000000001',
+    });
+    expect(body).toMatchObject({
+      filter: {
+        and: [
+          {
+            timestamp: 'last_edited_time',
+            last_edited_time: { after: '2026-09-18T00:00:00.000Z' },
+          },
+          { property: 'Assignee', people: { contains: 'a1b2c3d4-0000-4000-8000-000000000001' } },
+        ],
+      },
+    });
+  });
+
   it('follows next_cursor across two pages and returns the tasks in order', async () => {
     const cursors: (string | undefined)[] = [];
     server.use(
@@ -113,6 +139,24 @@ describe('queryTasksEditedSince', () => {
 });
 
 describe('queryOpenTasks', () => {
+  it('keeps the open sweep to the principal tasks when given their Notion user id', async () => {
+    let body: { filter?: { and?: unknown[] } } = {};
+    server.use(
+      http.post(QUERY_URL, async ({ request }) => {
+        body = (await request.json()) as typeof body;
+        return HttpResponse.json(fixture('query-page-2'));
+      }),
+    );
+    await queryOpenTasks(connector(), {
+      dataSourceId: DATA_SOURCE_ID,
+      assigneeId: 'a1b2c3d4-0000-4000-8000-000000000001',
+    });
+    expect(body.filter?.and).toContainEqual({
+      property: 'Assignee',
+      people: { contains: 'a1b2c3d4-0000-4000-8000-000000000001' },
+    });
+  });
+
   it('asks for every task whose Status is not Done, Cancelled or Archived, and follows the paging to the end', async () => {
     const bodies: Record<string, unknown>[] = [];
     server.use(

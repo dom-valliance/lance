@@ -28,7 +28,13 @@ const sourceRefs = [
   { system: 'jamie', recordId: 'mt-1', hash: 'h1', observedAt: '2026-09-15T10:00:00.000Z' },
 ];
 
-const context = (): DetectorContext => ({ db, config, ontology, now: () => NOW });
+const context = (): DetectorContext => ({
+  db,
+  config,
+  principal: { email: 'dom@valliance.ai' },
+  ontology,
+  now: () => NOW,
+});
 
 async function commitment(values: {
   direction: 'outbound' | 'inbound';

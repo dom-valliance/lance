@@ -2,11 +2,8 @@ import { cursors, type Db } from '@lance/db';
 import { LedgerWriter, type SystemControl } from '@lance/ledger';
 import { hashRecord, idempotencyKey, nowIso, stableUlid } from '@lance/shared';
 import { and, eq } from 'drizzle-orm';
-import type { PgBoss } from 'pg-boss';
-import { work } from '../scheduler/boss.js';
 import { raiseAlert } from '../alerts/raise.js';
 import type { PauseGate } from '../scheduler/gate.js';
-import { QUEUES } from '../scheduler/queues.js';
 import type { Observation, PartitionRunSummary, Watcher, WatcherRunSummary } from './types.js';
 
 export const WATCHER_ACTOR_PREFIX = 'agent:watcher-';
@@ -24,15 +21,15 @@ export interface WatcherRunnerDeps {
   db: Db;
   gate: PauseGate;
   control: Pick<SystemControl, 'read'>;
-  /** Enqueues triage for a correlation id. The default sends to pg-boss with a singleton window so a burst on one thread triages once. */
+  /**
+   * Enqueues triage for a correlation id. The principal's context sends to
+   * pg-boss with the principal in the payload and a singleton window, so a
+   * burst on one thread triages once.
+   */
   enqueueTriage: (job: TriageJob) => Promise<void>;
+  /** Whose watcher this is, so two principals' partitions keep separate breakers. */
+  principalId?: string;
   now?: () => string;
-}
-
-export function pgBossTriageEnqueuer(boss: PgBoss): (job: TriageJob) => Promise<void> {
-  return async (job) => {
-    await boss.send(QUEUES.triage, job, { singletonKey: job.correlationId, singletonSeconds: 60 });
-  };
 }
 
 async function readCursor(db: Db, watcher: string, key: string): Promise<string | null> {
@@ -72,8 +69,15 @@ export async function watcherStartedAt(db: Db, watcher: string): Promise<string 
  */
 const partitionFailures = new Map<string, { count: number; open: boolean }>();
 
-export function resetPartitionBreaker(watcher: string, partition: string): void {
-  partitionFailures.delete(`${watcher}:${partition}`);
+const breakerKey = (principalId: string | undefined, watcher: string, partition: string): string =>
+  `${principalId ?? '-'}:${watcher}:${partition}`;
+
+export function resetPartitionBreaker(
+  watcher: string,
+  partition: string,
+  principalId?: string,
+): void {
+  partitionFailures.delete(breakerKey(principalId, watcher, partition));
 }
 
 function actorFor(watcher: Watcher): string {
@@ -112,7 +116,7 @@ async function runPartition(
   watcher: Watcher,
   partition: string,
 ): Promise<PartitionRunSummary> {
-  const key = `${watcher.name}:${partition}`;
+  const key = breakerKey(deps.principalId, watcher.name, partition);
   const state = partitionFailures.get(key) ?? { count: 0, open: false };
   if (state.open) {
     return { partition, status: 'skipped_breaker', polled: 0, inserted: 0, duplicates: 0 };
@@ -212,26 +216,4 @@ export async function runWatcher(
  */
 export function watcherQueue(watcher: Pick<Watcher, 'name'>): string {
   return `watcher-${watcher.name}`;
-}
-
-/** Registers the watcher's queue, schedules and handler with pg-boss. */
-export async function registerWatcher(
-  boss: PgBoss,
-  deps: WatcherRunnerDeps,
-  watcher: Watcher,
-  timeZone: string,
-): Promise<void> {
-  const queue = watcherQueue(watcher);
-  await boss.createQueue(queue);
-  for (const [index, cron] of watcher.schedules.entries()) {
-    await boss.schedule(
-      queue,
-      cron,
-      { schedule: index },
-      { tz: timeZone, key: `${queue}-${String(index)}` },
-    );
-  }
-  await work(boss, queue, async () => {
-    await runWatcher(deps, watcher);
-  });
 }

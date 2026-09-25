@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { NAV_ITEMS, SIGN_OUT_PATH, pageTitleFor, type NavCounts } from '@/components/shell/nav';
+import { SIGN_OUT_PATH, pageTitleFor, type NavCounts, type NavItem } from '@/components/shell/nav';
 import { NavLink } from '@/components/shell/nav-link';
 import { StarMark } from '@/components/shell/star-mark';
 import { StatusLine } from '@/components/shell/status-line';
@@ -17,9 +17,11 @@ import type { ShellStatusLine } from '@/lib/shell-status';
  * out; every target is 44px tall.
  */
 export function MobileNav({
+  items,
   counts,
   status,
 }: {
+  items: readonly NavItem[];
   counts: NavCounts;
   status: ShellStatusLine | null;
 }) {
@@ -67,7 +69,7 @@ export function MobileNav({
           aria-label="Pages"
           className="absolute inset-x-0 top-14 flex h-[calc(100dvh-3.5rem)] flex-col gap-0.5 overflow-y-auto border-t border-border bg-background p-2"
         >
-          {NAV_ITEMS.map((item) => (
+          {items.map((item) => (
             <NavLink
               key={item.href}
               href={item.href}

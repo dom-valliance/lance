@@ -201,4 +201,17 @@ describe('runWatcher', () => {
     resetPartitionBreaker('broken', 'inbox');
     expect((await runWatcher(deps(), failing)).partitions[0]?.status).toBe('failed');
   });
+
+  it("keeps one principal's open breaker from stopping another principal's partition", async () => {
+    const failing = fakeWatcher({
+      name: 'shared-name',
+      records: [],
+      poll: () => Promise.reject(new Error('remote exploded')),
+    });
+    const first = { ...deps(), principalId: '01K5S9V6QW3SWCCPVB0N0E3Q7H' };
+    for (let i = 0; i < 3; i += 1) await runWatcher(first, failing);
+    expect((await runWatcher(first, failing)).partitions[0]?.status).toBe('skipped_breaker');
+    const second = { ...deps(), principalId: '01K5S9V6QW3SWCCPVB0N0E3Q7J' };
+    expect((await runWatcher(second, failing)).partitions[0]?.status).toBe('failed');
+  });
 });

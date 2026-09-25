@@ -172,11 +172,13 @@ jobs:
           bicep lint infra/main.bicep
           bicep lint infra/deployer.bicep
 
-      # The parameter files take the image tag from the shell (LANCE_IMAGE_TAG) and
-      # refuse to compile without it; any value proves the files compile.
+      # The parameter files take the image tag (LANCE_IMAGE_TAG) and the names of the
+      # static secrets that already exist (LANCE_EXISTING_SECRETS) from the shell and
+      # refuse to compile without them; any values prove the files compile.
       - name: Compile the parameter files
         env:
           LANCE_IMAGE_TAG: ci
+          LANCE_EXISTING_SECRETS: ci
         run: |
           bicep build-params infra/params/dev.bicepparam --stdout > /dev/null
           bicep build-params infra/params/prod.bicepparam --stdout > /dev/null

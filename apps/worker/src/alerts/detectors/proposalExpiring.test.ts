@@ -21,7 +21,13 @@ const config = {
   briefs: { minFreeBlockHours: 2 },
 };
 
-const context = (): DetectorContext => ({ db, config, ontology, now: () => NOW });
+const context = (): DetectorContext => ({
+  db,
+  config,
+  principal: { email: 'dom@valliance.ai' },
+  ontology,
+  now: () => NOW,
+});
 
 const provenance = [
   { system: 'graph', recordId: 'm1', hash: 'h1', observedAt: '2026-09-21T08:00:00.000Z' },

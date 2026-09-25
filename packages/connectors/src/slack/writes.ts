@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { CallContext } from '../core/connector.js';
-import { slackWriteAccess, type SlackClient } from './client.js';
+import { isSlackApiError, slackWriteAccess, type SlackClient } from './client.js';
 
 const PostedSchema = z
   .object({ ok: z.literal(true), channel: z.string(), ts: z.string() })
@@ -9,6 +9,12 @@ const ViewOpenedSchema = z
   .object({ ok: z.literal(true), view: z.object({ id: z.string() }).passthrough() })
   .passthrough();
 const EphemeralSchema = z.object({ ok: z.literal(true), message_ts: z.string() }).passthrough();
+const ConversationSchema = z
+  .object({
+    ok: z.literal(true),
+    channel: z.object({ id: z.string(), name: z.string() }).passthrough(),
+  })
+  .passthrough();
 
 export interface PostMessageInput {
   channel: string;
@@ -18,7 +24,9 @@ export interface PostMessageInput {
 }
 
 /**
- * The four Slack writes spec 8 allows: post, update, ephemeral, open modal.
+ * The four Slack writes spec 8 allows: post, update, ephemeral, open modal;
+ * the two that give a principal their private channel (ADR 0023); and the
+ * one that archives it at offboarding.
  * Lance posts as its own bot user, never as Dom (spec 4.1). Reachable only
  * from the executor and the proposal router through the writes entry point,
  * and the write capability comes from `slackWriteAccess`, which no barrel
@@ -84,6 +92,59 @@ export function slackWrites(client: SlackClient) {
         ViewOpenedSchema,
       );
       return { viewId: opened.view.id };
+    },
+    /**
+     * `conversations.create` with `is_private`. Creating is not idempotent,
+     * so it retries only on 429; a taken name fails with `name_taken`.
+     */
+    async createPrivateChannel(
+      input: { name: string },
+      context?: CallContext,
+    ): Promise<{ id: string; name: string }> {
+      const created = await write(
+        'conversations.create',
+        { name: input.name, is_private: true },
+        context,
+        ConversationSchema,
+      );
+      return { id: created.channel.id, name: created.channel.name };
+    },
+    /** `conversations.invite`. Inviting someone already in the channel is a no-op. */
+    async inviteToChannel(
+      input: { channel: string; users: string[] },
+      context?: CallContext,
+    ): Promise<void> {
+      try {
+        await write(
+          'conversations.invite',
+          { channel: input.channel, users: input.users.join(',') },
+          context,
+          undefined,
+          { idempotent: true },
+        );
+      } catch (error) {
+        if (isSlackApiError(error, 'already_in_channel')) return;
+        throw error;
+      }
+    },
+    /**
+     * `conversations.archive`, for a principal's private channel when they
+     * are offboarded (ADR 0023). Archiving twice is answered
+     * `already_archived`, which is the state asked for, so it counts as done.
+     */
+    async archiveChannel(
+      input: { channel: string },
+      context?: CallContext,
+    ): Promise<'archived' | 'already_archived'> {
+      try {
+        await write('conversations.archive', { channel: input.channel }, context, undefined, {
+          idempotent: true,
+        });
+      } catch (error) {
+        if (isSlackApiError(error, 'already_archived')) return 'already_archived';
+        throw error;
+      }
+      return 'archived';
     },
   };
 }

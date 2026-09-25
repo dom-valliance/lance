@@ -7,6 +7,7 @@ import {
   nowIso,
   ProvenanceRefSchema,
   type Config,
+  type PrincipalIdentity,
   type ProvenanceRef,
 } from '@lance/shared';
 import { eq } from 'drizzle-orm';
@@ -32,6 +33,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export interface ChaseDeps {
   db: Db;
   config: Pick<Config, 'agentDisplayName' | 'models'>;
+  /** The principal the chase is sent for, named in the draft's instructions. */
+  principal: Pick<PrincipalIdentity, 'name'>;
   agent: AgentDeps;
   ontology: Pick<OntologyRepository, 'getNode'>;
   createProposal: ReturnType<typeof createProposalHandler>;
@@ -158,7 +161,7 @@ export async function runChase(deps: ChaseDeps, input: ChaseInput): Promise<Chas
       name: 'chase-draft',
       version: CHASE_VERSION,
       model: deps.config.models.triage,
-      system: chaseSystemPrompt(deps.config.agentDisplayName),
+      system: chaseSystemPrompt(deps.config.agentDisplayName, deps.principal.name),
       tools: [],
       outputSchema: ChaseDraftSchema,
       maxIterations: 1,

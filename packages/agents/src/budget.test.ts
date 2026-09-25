@@ -55,6 +55,7 @@ describe('checkDailyBudget', () => {
       usdToGbp: USD_TO_GBP,
     });
     expect(check).toEqual({
+      scope: 'principal',
       spentGbp: 12,
       ceilingGbp: CEILING_GBP,
       fraction: 0.8,

@@ -2,6 +2,8 @@
 export const QUEUES = {
   execute: 'execute',
   triage: 'triage',
+  /** Mail the labeller called bulk, filed without model triage (ADR 0034). */
+  bulkMail: 'bulk-mail',
   chase: 'chase',
   tick: 'tick',
 } as const;

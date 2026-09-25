@@ -14,9 +14,16 @@ import {
 } from '@lance/db';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { eq } from 'drizzle-orm';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { SystemControl, type PauseResult, type ResumeResult } from './control.js';
+import {
+  ModeChangeRefusedError,
+  SystemControl,
+  liveModeOpensAt,
+  type PauseResult,
+  type ResumeResult,
+} from './control.js';
 
 /**
  * The kill switch against a real container (spec 4.3, non-negotiable 7).
@@ -367,6 +374,88 @@ describe('SystemControl.setMode', () => {
   });
 });
 
+describe('SystemControl.setMode for a newly onboarded principal (multi-user M3)', () => {
+  const NEWCOMER_ID = '01K5S9V6QW3SWCCPVB0N0E3N09';
+  const ONBOARDING_ID = '01K5S9V6QW3SWCCPVB0N0E3N0A';
+  // Monday 28 September 2026, 10:00 in London.
+  const ACTIVATED_AT = new Date('2026-09-28T09:00:00.000Z');
+
+  const controlAt = (principalId: string, now: string): SystemControl =>
+    new SystemControl(scopedDb(appRoot, { principalId }), { now: () => new Date(now) });
+
+  const modeOf = async (principalId: string): Promise<string> => {
+    const rows = await migratorDb
+      .select({ mode: principalState.mode })
+      .from(principalState)
+      .where(eq(principalState.principalId, principalId));
+    return rows[0]?.mode ?? 'missing';
+  };
+
+  beforeAll(async () => {
+    await migratorDb.insert(principals).values([
+      {
+        id: NEWCOMER_ID,
+        upn: 'newcomer@example.test',
+        status: 'active',
+        activatedAt: ACTIVATED_AT,
+      },
+      { id: ONBOARDING_ID, upn: 'still.onboarding@example.test', status: 'onboarding' },
+    ]);
+    for (const principalId of [NEWCOMER_ID, ONBOARDING_ID]) {
+      await scopedDb(migratorDb, { principalId }).insert(principalState).values({});
+    }
+  });
+
+  it('opens live at London midnight five working days after activation', () => {
+    expect(liveModeOpensAt(ACTIVATED_AT).toISOString()).toBe('2026-10-04T23:00:00.000Z');
+  });
+
+  it('refuses live inside the five working days and names the date it opens', async () => {
+    const early = controlAt(NEWCOMER_ID, '2026-10-02T16:00:00.000Z');
+
+    const refusal = await early
+      .setMode('live', { actor: 'user:newcomer' })
+      .catch((e: unknown) => e);
+
+    expect(refusal).toBeInstanceOf(ModeChangeRefusedError);
+    expect((refusal as Error).message).toContain('Live mode opens on Monday 5 October 2026');
+    expect((refusal as Error).message).toContain('Monday 28 September 2026');
+    expect(await modeOf(NEWCOMER_ID)).toBe('dry_run');
+  });
+
+  it('allows live once the five working days have passed', async () => {
+    const later = controlAt(NEWCOMER_ID, '2026-10-05T07:00:00.000Z');
+
+    const result = await later.setMode('live', { actor: 'user:newcomer' });
+
+    expect(result.changed).toBe(true);
+    expect(await modeOf(NEWCOMER_ID)).toBe('live');
+  });
+
+  it('always allows a switch back to dry run', async () => {
+    const early = controlAt(NEWCOMER_ID, '2026-09-29T09:00:00.000Z');
+    await early.setMode('dry_run', { actor: 'user:newcomer' });
+    expect(await modeOf(NEWCOMER_ID)).toBe('dry_run');
+  });
+
+  it('refuses live to a principal who is still onboarding', async () => {
+    const onboarding = controlAt(ONBOARDING_ID, '2027-01-04T09:00:00.000Z');
+
+    await expect(onboarding.setMode('live', { actor: 'user:onboarding' })).rejects.toThrow(
+      'Finish the onboarding checklist first',
+    );
+    expect(await modeOf(ONBOARDING_ID)).toBe('dry_run');
+  });
+
+  it('exempts the seed principal, who was never onboarded and has no activation time', async () => {
+    const dom = controlAt(SEED_PRINCIPAL_ID, '2026-09-28T09:00:00.000Z');
+    await dom.setMode('dry_run', { actor: DOM });
+    const result = await dom.setMode('live', { actor: DOM });
+    expect(await dom.read()).toMatchObject({ mode: 'live' });
+    expect(result.eventId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+  });
+});
+
 describe('SystemControl.setInterruptionBudget', () => {
   const budget = { quietHoursStart: '20:00', quietHoursEnd: '06:30', pushBudgetPerHour: 5 };
 
@@ -463,5 +552,72 @@ describe('the kill switch across principals', () => {
     const resumed = await control.resume({ actor: DOM });
     expect(resumed.releasedProposalIds).toContain(approvedId);
     expect(await statusOf(approvedId)).toBe('approved');
+  });
+});
+
+describe("the executor's hold against a racing resume", () => {
+  it('never leaves a proposal held once the principal is running again', async () => {
+    const liveOrNot = (state: { paused: boolean }): boolean => !state.paused;
+    for (let round = 0; round < 15; round += 1) {
+      const id = await insertProposal('approved');
+      await control.pause({ reason: `race ${String(round)}`, actor: DOM });
+      // The pause already held it; put it back as the executor would find a
+      // proposal approved a moment after the pause.
+      await appDb.update(proposals).set({ status: 'approved' }).where(eq(proposals.id, id));
+      const [, hold] = await Promise.all([
+        control.resume({ actor: DOM }),
+        control.holdUnlessRunnable(
+          { id, from: 'approved', current: ['approved', 'edited'] },
+          { actor: 'agent:executor@0.1.0', reason: 'paused', runnable: liveOrNot },
+        ),
+      ]);
+      const state = await control.read();
+      expect(state.paused).toBe(false);
+      // Either the hold committed before the resume read the ledger and the
+      // resume released it, or the resume came first and nothing was held.
+      expect({ round, held: hold.held, status: await statusOf(id) }).toMatchObject({
+        round,
+        status: 'approved',
+      });
+    }
+  }, 60000);
+
+  it('holds nothing once a resume has landed, so the executor goes on to the write', async () => {
+    const id = await insertProposal('approved');
+    const hold = await control.holdUnlessRunnable(
+      { id, from: 'approved', current: ['approved', 'edited'] },
+      { actor: 'agent:executor@0.1.0', reason: 'paused', runnable: () => true },
+    );
+    expect(hold).toEqual({ held: false, eventId: null });
+    expect(await statusOf(id)).toBe('approved');
+  });
+});
+
+describe('the organisation ceiling', () => {
+  it('sets the global row and records the change with the old value', async () => {
+    const before = await control.readOrganisation();
+    const result = await control.setOrganisationCostCeiling(
+      { costCeilingGbp: before.costCeilingGbp + 10 },
+      { actor: DOM },
+    );
+    expect(result.changed).toBe(true);
+    expect((await otherControl.readOrganisation()).costCeilingGbp).toBe(before.costCeilingGbp + 10);
+    const event = await eventById(result.eventId);
+    expect(event.payload).toMatchObject({
+      change: 'organisation_cost_ceiling',
+      costCeilingGbp: before.costCeilingGbp + 10,
+      previousCostCeilingGbp: before.costCeilingGbp,
+    });
+    await control.setOrganisationCostCeiling(
+      { costCeilingGbp: before.costCeilingGbp },
+      { actor: DOM },
+    );
+  });
+
+  it('defaults to 30 pounds on a fresh database', async () => {
+    const fresh = await superuser.query<{ column_default: string }>(
+      "SELECT column_default FROM information_schema.columns WHERE table_name = 'system_state' AND column_name = 'cost_ceiling_gbp'",
+    );
+    expect(fresh.rows[0]?.column_default).toBe('30');
   });
 });

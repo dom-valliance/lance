@@ -8,7 +8,7 @@ let server: FastifyInstance;
 
 beforeEach(() => {
   harness = fakeDeps();
-  server = buildServer(harness.deps);
+  server = buildServer(harness.server);
 });
 
 afterEach(async () => {
@@ -33,7 +33,7 @@ describe('GET /health/ready', () => {
     const response = await server.inject({ method: 'GET', url: '/health/ready' });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true, paused: true, mode: 'live' });
+    expect(response.json()).toEqual({ ok: true, pausedGlobally: true, modeCeiling: 'live' });
   });
 
   it('answers 503 when system_state cannot be read', async () => {

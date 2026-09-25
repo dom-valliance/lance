@@ -7,9 +7,11 @@
 //
 // One user-assigned managed identity, id-lance-github-deploy-<env>, trusting GitHub's
 // OIDC issuer for this repository's GitHub environment only, so there is no client
-// secret anywhere. It runs .github/workflows/deploy.yml: what-if, image pushes, the
+// secret anywhere. It also defines the custom "Lance principal secret writer" role
+// that main.bicep assigns to the api, since the deploy identity may not create roles.
+// It runs .github/workflows/deploy.yml: what-if, image pushes, the
 // main.bicep deployment and the migration job. Contributor on the resource group,
-// Role Based Access Control Administrator on the group limited to the four roles
+// Role Based Access Control Administrator on the group limited to the five roles
 // main.bicep assigns, and the custom "Lance deployment writer" role at subscription
 // scope so it can create subscription-scope deployments.
 //
@@ -48,16 +50,25 @@ param githubRepositoryId string
 @description('GitHub Actions environment that deploy.yml deploys through. Its OIDC subject is the only one the deploy identity trusts.')
 param githubEnvironment string = environmentName
 
-// The built-in roles main.bicep assigns, one per module that assigns it. The deploy
-// identity may assign these and no others; a new role assignment in main.bicep needs
-// its id added here first, and scripts/check-deployer-roles.sh fails CI otherwise.
-// Ids from: az role definition list --name "<role>" --query "[0].name" -o tsv
+// The roles main.bicep assigns, one per module that assigns it. The deploy identity
+// may assign these and no others; a new role assignment in main.bicep needs its id
+// added here first, and scripts/check-deployer-roles.sh fails CI otherwise.
+// Built-in ids from: az role definition list --name "<role>" --query "[0].name" -o tsv
 var assignableRoleIds = [
   '7f951dda-4ed3-4680-a7ca-43fe172d538d' // AcrPull, modules/registry.bicep
   '4633458b-17de-408a-b874-0445c86b69e6' // Key Vault Secrets User, modules/keyvault.bicep
-  'b86a8fe4-44ce-4948-aee5-eccb2c155cd7' // Key Vault Secrets Officer, modules/keyvault.bicep
+  'b86a8fe4-44ce-4948-aee5-eccb2c155cd7' // Key Vault Secrets Officer, modules/keyvault.bicep and modules/principal-vault.bicep
   '73c42c96-874c-492b-b04d-ab87d138a893' // Log Analytics Reader, modules/containerapps.bicep
+  'dcd10611-553f-42e2-911d-2904e3716c5e' // Lance principal secret writer (custom, below), modules/principal-vault.bicep
 ]
+
+// The custom role the api holds on the principal vault (ADR 0022), defined in
+// roles.bicep. Its id is fixed here rather than derived with guid(), because
+// modules/principal-vault.bicep must name the same id and
+// scripts/check-deployer-roles.sh compares literals. Role definition ids are unique
+// in the tenant: a copy of this template in another subscription of the same tenant
+// needs a new id here, in roles.bicep's caller and in principal-vault.bicep.
+var principalSecretWriterRoleId = 'dcd10611-553f-42e2-911d-2904e3716c5e'
 
 var deployIdentityName = 'id-lance-github-deploy-${environmentName}'
 
@@ -113,6 +124,17 @@ resource deploymentWriterRole 'Microsoft.Authorization/roleDefinitions@2022-04-0
         notDataActions: []
       }
     ]
+  }
+}
+
+// The custom role the api holds on the principal vault (ADR 0022). It lives in its
+// own subscription-scope template so that deploy.md can create it on a subscription
+// before the first main.bicep deployment, which assigns it; this template deploys
+// the same definition, so either run keeps it current.
+module roles 'roles.bicep' = {
+  name: 'lance-roles'
+  params: {
+    writerRoleId: principalSecretWriterRoleId
   }
 }
 

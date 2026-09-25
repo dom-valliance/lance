@@ -10,7 +10,9 @@ cp .env.example .env.local # then fill in the Entra and Auth.js values
 pnpm --filter @lance/web dev
 ```
 
-Sign-in is restricted to the single UPN in `ALLOWED_UPN`. See
+Sign-in admits anyone whose Entra id token carries the `Lance.User` or
+`Lance.Admin` app role (ADR 0020); a principal still onboarding sees only
+`/onboarding`. See
 `docs/runbooks/entra-setup.md` at the repo root for registering the Entra
 app, and `public/fonts/README.md` for the Satoshi font files this app
 expects but does not ship.
@@ -30,8 +32,8 @@ expects but does not ship.
 ## Structure
 
 - `src/app`: routes. Each of the ten sidebar pages is a server component.
-- `src/auth.ts`, `src/auth/allowlist.ts`: Auth.js configuration and the
-  allowlist decision function.
+- `src/auth.ts`, `src/auth/roles.ts`, `src/auth/principal.ts`: Auth.js configuration, the
+  role-gated sign-in decision and the onboarding redirect.
 - `src/proxy.ts`: the Next.js 16 proxy (formerly `middleware.ts`) that
   guards every route except `/api/auth/*`, `/fonts/*` and `/_next/*`.
 - `src/lib/api.ts`, `src/lib/sse.ts`: the API base URL helper and an SSE

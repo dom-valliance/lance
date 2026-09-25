@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { ConnectorError } from '../core/errors.js';
 import * as packageRoot from '../index.js';
 import { FakeClock } from '../core/testing.js';
-import { createSlackClient } from './client.js';
+import { createSlackClient, isSlackApiError } from './client.js';
 import { slackReads } from './reads.js';
+import { createSlackChannelProvisioner } from './surface.js';
 import { slackWrites } from './writes.js';
 
 interface Captured {
@@ -139,13 +140,16 @@ describe('Slack connector', () => {
     expect(captured[0]?.url).toBe('https://slack.com/api/auth.test');
   });
 
-  it('exposes exactly the four writes spec 8 allows', () => {
+  it('exposes the four writes spec 8 allows, the two a private channel needs and its archive', () => {
     const client = createSlackClient({
       token: 't',
       fetchImpl: stubFetch([]).fetchImpl,
       clock: new FakeClock(),
     });
     expect(Object.keys(slackWrites(client)).sort()).toEqual([
+      'archiveChannel',
+      'createPrivateChannel',
+      'inviteToChannel',
       'openView',
       'postEphemeral',
       'postMessage',
@@ -215,5 +219,88 @@ describe('write retries', () => {
       slackWrites(ephemeralClient).postEphemeral({ channel: 'C1', user: 'U1', text: 'only you' }),
     ).rejects.toThrow('HTTP 503');
     expect(ephemeral.captured).toHaveLength(1);
+  });
+});
+
+describe('Slack channel provisioning', () => {
+  it('creates a private channel and returns its id and name', async () => {
+    const { fetchImpl, captured } = stubFetch([
+      { body: { ok: true, channel: { id: 'G0NEW', name: 'lance-tarek' } } },
+    ]);
+    const provisioner = createSlackChannelProvisioner({
+      token: 'xoxb-test',
+      fetchImpl,
+      clock: new FakeClock(),
+    });
+    const created = await provisioner.createPrivateChannel({ name: 'lance-tarek' });
+    expect(created).toEqual({ id: 'G0NEW', name: 'lance-tarek' });
+    expect(captured[0]?.url).toBe('https://slack.com/api/conversations.create');
+    expect(captured[0]?.body).toEqual({ name: 'lance-tarek', is_private: true });
+  });
+
+  it('says which Slack error refused a channel name, so a caller can try another', async () => {
+    const { fetchImpl } = stubFetch([{ body: { ok: false, error: 'name_taken' } }]);
+    const provisioner = createSlackChannelProvisioner({
+      token: 't',
+      fetchImpl,
+      clock: new FakeClock(),
+    });
+    const error: unknown = await provisioner
+      .createPrivateChannel({ name: 'lance-dom' })
+      .catch((caught: unknown) => caught);
+    expect(isSlackApiError(error, 'name_taken')).toBe(true);
+    expect(error).toBeInstanceOf(ConnectorError);
+  });
+
+  it('invites the principal and treats someone already in the channel as done', async () => {
+    const { fetchImpl, captured } = stubFetch([
+      { body: { ok: false, error: 'already_in_channel' } },
+    ]);
+    const provisioner = createSlackChannelProvisioner({
+      token: 't',
+      fetchImpl,
+      clock: new FakeClock(),
+    });
+    await provisioner.invite({ channel: 'G0NEW', user: 'U0TAREK' });
+    expect(captured[0]?.url).toBe('https://slack.com/api/conversations.invite');
+    expect(captured[0]?.body).toEqual({ channel: 'G0NEW', users: 'U0TAREK' });
+  });
+
+  it("reads a person's first name and best display name", async () => {
+    const { fetchImpl, captured } = stubFetch([
+      {
+        body: {
+          ok: true,
+          user: {
+            id: 'U0TAREK',
+            name: 'tarek',
+            profile: { first_name: 'Tarek', real_name: 'Tarek Example', display_name: '' },
+          },
+        },
+      },
+    ]);
+    const client = createSlackClient({ token: 't', fetchImpl, clock: new FakeClock() });
+    expect(await slackReads(client).userProfile('U0TAREK')).toEqual({
+      id: 'U0TAREK',
+      firstName: 'Tarek',
+      displayName: 'Tarek Example',
+      email: null,
+    });
+    expect(captured[0]?.url).toBe('https://slack.com/api/users.info');
+  });
+
+  it("reads the profile's email when the token holds users:read.email", async () => {
+    const { fetchImpl } = stubFetch([
+      {
+        body: {
+          ok: true,
+          user: { id: 'U0TAREK', profile: { email: ' Tarek@Valliance.ai ' } },
+        },
+      },
+    ]);
+    const client = createSlackClient({ token: 't', fetchImpl, clock: new FakeClock() });
+    expect(await slackReads(client).userProfile('U0TAREK')).toMatchObject({
+      email: 'Tarek@Valliance.ai',
+    });
   });
 });

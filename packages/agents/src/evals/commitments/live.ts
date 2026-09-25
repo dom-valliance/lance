@@ -40,7 +40,7 @@ async function main(): Promise<void> {
         {
           id: record.id,
           kind: record.kind,
-          dom: record.dom,
+          principal: record.dom,
           participants: record.participants,
           occurredAt: null,
           text: record.text,

@@ -18,8 +18,21 @@ import { startPostgresContainer } from './testing.js';
 
 const OTHER_PRINCIPAL_ID = '01K5S9V6QW3SWCCPVB0N0E3Q7H';
 
-/** Tables that deliberately carry no principal. */
-const UNSCOPED_TABLES = ['principals', 'system_state', 'users'];
+/**
+ * Tables outside forced row-level security. principals and slack_links are
+ * the lookups a request is resolved through before it has a scope; both
+ * have policies but are not forced (migrations 0012 and 0014), and
+ * slack_links, though it names a principal, is readable by every session.
+ * The two Slack nonce tables name no principal.
+ */
+const UNSCOPED_TABLES = [
+  'principals',
+  'slack_link_tokens',
+  'slack_links',
+  'slack_request_nonces',
+  'system_state',
+  'users',
+];
 
 /**
  * insufficient_privilege: what a failed WITH CHECK raises, including for an
@@ -140,7 +153,9 @@ beforeAll(async () => {
      WHERE table_schema = 'public' AND column_name = 'principal_id'
      ORDER BY table_name`,
   );
-  principalTables = tables.rows.map((row) => row.table_name);
+  principalTables = tables.rows
+    .map((row) => row.table_name)
+    .filter((name) => !UNSCOPED_TABLES.includes(name));
 
   const columnRows = await admin.query<ColumnRow>(
     `SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default
@@ -307,7 +322,7 @@ describe('organisation rows in policy_rules', () => {
 });
 
 describe('the principal lookup', () => {
-  it('lets the apps read principals and write none', async () => {
+  it('lets the apps read principals and refuses an insert or update outside first sign-in', async () => {
     const seeded = scopedDb(appDb, { principalId: SEED_PRINCIPAL_ID });
     const read = await seeded.$client.query('SELECT count(*)::int AS n FROM principals');
     expect(read.rows[0]).toEqual({ n: 2 });

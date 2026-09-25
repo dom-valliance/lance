@@ -31,7 +31,7 @@ Branch `feat/phase-1-connectors`. Built 2026-09-21: connector framework, Graph a
 | Zero duplicate observations across a full re-poll | `apps/worker/src/watchers/runner.test.ts`: a second poll over the same records inserts nothing; the Graph watcher integration test repeats it with delta fixtures. Production re-poll evidence pending the first live week. | 2026-09-21 (test), live pending |
 | Every proposal in Slack resolves to a ledger trail in the UI Ledger page | The Ledger page follows a correlation id end to end; pending a live proposal. | pending |
 | Dom has approved at least 20 proposals live | Pending five dry-run working days then live use. | pending |
-| Inbox agent's Slack posting retired in favour of Lance | Pending, end of Phase 1 (`docs/runbooks/slack-app-setup.md` section 7). | pending |
+| Inbox agent's Slack posting retired in favour of Lance | Dom changed his Cowork inbox task on 2026-09-23 so it keeps tagging mail and no longer posts to `dom-claude-agent`; its last watermark there reads 2026-09-23T14:01:29Z. The stale watermark alert that then fired is off by default from `1f3e2e4` (`INBOX_AGENT_WATERMARK_ALERT`). | 2026-09-23 |
 
 ### Phase 1 review, 2026-09-21
 
@@ -201,8 +201,41 @@ Decisions taken while building, recorded in ADR 0015: the scope is set on each c
 
 ## Phase 5. Multi-user
 
+Opened 2026-09-24 on branch `feat/phase-5-multi-user`. ADRs 0020 to 0025 and 0033 written first. Packages built by Opus agents in worktrees under `../lance-worktrees/`, each rebased onto the phase branch and verified again there.
+
+| Package | Commits | Migration |
+|---|---|---|
+| 5.0 Shared layer carries no private provenance (ADR 0033) | `bf3d61c`, `396d440` | 0011 |
+| 5.1 Identity and roles (ADR 0020, 0024) | `b2163db` to `2a0d2e7` | 0012 |
+| 5.3 Scheduler, job registry, fan-out, budgets, fair share (ADR 0025) | to `a38a79e` | 0013 |
+| 5.4 Slack linking, private channels, nonce store (ADR 0021, 0023) | to `cf200c0` | 0014 |
+| 5.2 Credentials per principal, second vault, rotation lock (ADR 0022) | to `106b2ae` | 0015 |
+
+Decided by Dom on 2026-09-24 and 25, after the thirty-principal load test (`docs/runbooks/load-test.md`): fix the Monday mail backlog at its cause rather than loosen the 60 second queue target, so mail and triage run concurrently, one job per principal at a time, and bulk mail skips model triage (ADR 0034); raise model concurrency from 4 to 16, which the account's limits of 10,000 requests and 10 million input tokens a minute allow for the same spend; default the organisation ceiling to GBP 30 with an admin control. Found while building ADR 0034: policy was never given a move's destination when a proposal was created, so seed rule 4 (move newsletters and notifications into `AI-Filed` automatically) never fired and every such move became a card. Fixed; Dom keeps the rule as the spec has it, so once live those moves run without a card.
+
+Found while merging: the executor set a proposal to held and recorded the hold as two statements, so a resume between them left the proposal held while running (the kill switch drill had flaked on it). The hold and its event now commit together under a per-principal lock that pause and resume take (`14dd959`); a race test in the ledger suite fails on every run with the lock removed. The readiness probe now names what it reports, `pausedGlobally` and `modeCeiling`. Test budgets were raised for full local runs, where fast suites timed out waiting their turn; three uncached root runs then passed in a row.
+
 | Criterion | Evidence | Date |
 |---|---|---|
+
+### Phase 5 review, 2026-09-25
+
+Three independent Opus reviews of `790af1a..2eb1079` (the first, and two that covered what it had delegated and not received) found no critical issue and no path by which one principal's rows reached another's session through SQL. They found, and the branch fixes:
+
+| Finding | Fix |
+|---|---|
+| High. Policy read a move's folder name and the executor moved to its folder id, so a triage proposal naming AI-Filed with the id `deleteditems` could be auto-approved and soft-delete a message | A move names its destination one way, at proposal and execution; a move into Deleted Items or the recoverable-items folders is refused whatever the rules say (`5f67569`) |
+| High. Graph consent was tied only to its state, so a forwarded consent link stored another person's token under the sender's principal | The state is bound to an HttpOnly cookie on the api's hostname and kept in Postgres; the callback verifies the id token's `oid` and `tid` against the principal; ledger events precede the secret write (`0b90a71` to `36b00e0`) |
+| High. Every principal's triage, commitments, debrief, detectors and briefs acted as Dom, rewriting Dom's shared Person with another principal's Notion id | Each context builds its own principal's identity and passes it everywhere `config.dom` stood for the principal; the prompts name the principal (`b0d8268`, `60a546e`, ADR 0035) |
+| High. Retention could not act after the first deploy, because the migration job ran its new command only on the next deploy | The Deploy workflow runs the job again after the apps move (`6c35c82`) |
+| Found by the lead: the tenant has no Entra ID P1, so the setup script's group assignment would fail | Roles are assigned to people directly; `grant-access.sh`; ADR 0020 amendment (`a684ce9`) |
+| Medium. A `/lance login` link bound whoever opened it | A link binds only when the Slack profile email equals the signing-in UPN, never replaces an existing link silently, and `/lance unlink` exists (`231bca4`) |
+| Medium. The legacy backfill ran in every principal's context; single-principal Jamie meetings were shared; a Jamie observation could rename a shared meeting; meeting merges were not atomic | Backfill once, for the legacy owner, before any context; single-principal meetings private; the calendar wins; merges in one locked transaction (`c338c07`, `32a80a5`) |
+| Medium. Organisation-wide telemetry and the whole shared Notion database were recorded in every principal's ledger | Spans carry `lance.principal` and the query filters on it; Notion reads filter on the principal as assignee (`2fdf999`, `f3d78df`) |
+| Medium. Jobs the Phase 4 image queued without a principal would fail on deploy; upgrade steps were spread over three runbooks; consent state was in memory under two api replicas; retention after offboarding kept late rows | Adoption at boot; one ordered checklist in `deploy.md`; consent state in Postgres; offboarded principals retained at zero days (`b36b96f`, `a9b4b93`, `3f1cab8`) |
+| Low. The raw id token reached browser JavaScript; the api trusted the client's notice hash; the last admin or Dom could be offboarded without confirmation; organisation rule changes had no ledger writer; the evidence export carried source record hashes; job groups and budget alert recipients | Each fixed (`f3cc484`, `c671957`, `3f1cab8`, `9dfe28e`, `9d85ed2`, `d357ece`), with the Slack re-link, role-check grace and onboarding-principal fixes (`d607701` to `c62d4f3`) |
+
+Every check at `32cffac`: lint, typecheck, format, the full suite uncached, build, the migration guard, the deployer-role check, the Bicep build, and the three images with their smoke tests.
 
 ## Pilot
 

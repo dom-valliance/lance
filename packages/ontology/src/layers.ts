@@ -32,6 +32,7 @@ export const EDGE_LABEL_VALUES = [
   'PARTICIPATED_IN',
   'RELATES_TO',
   'SAME_AS',
+  'OBSERVED',
 ] as const;
 
 export type EdgeLabel = (typeof EDGE_LABEL_VALUES)[number];
@@ -75,6 +76,9 @@ export const ONTOLOGY_LAYERS = {
     OWES: 'private',
     OWED_TO: 'private',
     ASSIGNED_TO: 'private',
+    // ADR 0033: a principal's sighting of a shared node, from their own
+    // Person node, carrying the record id and URL the shared node drops.
+    OBSERVED: 'private',
     WORKS_AT: 'shared',
     ORGANISED: 'shared',
     RELATES_TO: 'shared',
@@ -100,4 +104,15 @@ export function nodeLayer(label: NodeLabel, source?: string | null): Layer {
 
 export function edgeLayer(label: EdgeLabel): Layer {
   return ONTOLOGY_LAYERS.edges[label];
+}
+
+/**
+ * The layer an edge between two nodes is written to: the label's layer,
+ * unless either end is private, in which case the edge is that
+ * principal's evidence too (ADR 0033). A `SAME_AS` candidate from a
+ * principal's name-only Person to a shared one is private for this reason.
+ */
+export function edgeLayerBetween(label: EdgeLabel, from: Layer | null, to: Layer | null): Layer {
+  if (from === 'private' || to === 'private') return 'private';
+  return edgeLayer(label);
 }

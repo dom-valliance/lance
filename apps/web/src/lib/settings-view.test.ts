@@ -40,6 +40,16 @@ describe('retentionRunSummary', () => {
     );
   });
 
+  it('reads the counts the retention job records under counts', () => {
+    expect(
+      retentionRunSummary({
+        trigger: 'nightly',
+        windows: { mailBodiesDays: 90 },
+        counts: { mailBodies: 41, transcripts: 12 },
+      }),
+    ).toBe('41 mail bodies and 12 transcripts');
+  });
+
   it('humanises snake case keys the same way', () => {
     expect(retentionRunSummary({ mail_bodies: 41 })).toBe('41 mail bodies');
   });

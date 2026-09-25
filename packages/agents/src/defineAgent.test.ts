@@ -152,6 +152,48 @@ describe('runAgent', () => {
     expect(runner.calls).toHaveLength(0);
   });
 
+  it('refuses to run when the organisation ceiling is exceeded though the principal has headroom', async () => {
+    const runner = new ScriptedRunner([[textMessage('{"importance":0.4,"summary":"fine"}')]]);
+    const { deps: d } = deps(runner);
+    const refused = runAgent(
+      {
+        ...d,
+        checkOrganisationBudget: () =>
+          Promise.resolve({
+            scope: 'organisation',
+            spentGbp: 45,
+            ceilingGbp: 45,
+            fraction: 1,
+            state: 'exceeded',
+          }),
+      },
+      definition,
+      input,
+    );
+    await expect(refused).rejects.toBeInstanceOf(BudgetExceededError);
+    await expect(refused).rejects.toThrow(/paused for everyone/);
+    expect(runner.calls).toHaveLength(0);
+  });
+
+  it('runs each model loop through the limiter it is given', async () => {
+    const runner = new ScriptedRunner([[textMessage('{"importance":0.4,"summary":"fine"}')]]);
+    const { deps: d } = deps(runner);
+    let admitted = 0;
+    const result = await runAgent(
+      {
+        ...d,
+        limit: async (work) => {
+          admitted += 1;
+          return work();
+        },
+      },
+      definition,
+      input,
+    );
+    expect(result.output.summary).toBe('fine');
+    expect(admitted).toBe(1);
+  });
+
   it('reads the ceiling Settings set rather than the configured default', async () => {
     const runner = new ScriptedRunner([[textMessage('{"importance":0.4,"summary":"fine"}')]]);
     const { deps: d } = deps(runner, 20);

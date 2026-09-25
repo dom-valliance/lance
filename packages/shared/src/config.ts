@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SystemModeSchema, type SystemMode } from './enums.js';
+import { MailLabelSchema, SystemModeSchema, type MailLabel, type SystemMode } from './enums.js';
 
 /**
  * Config loader. Reads `process.env` (or an injected env object, for tests)
@@ -85,6 +85,19 @@ export interface Config {
   scheduler: {
     tickSeconds: number;
   };
+  /**
+   * The per-process model limiter (docs/plans/multi-user.md M5): every
+   * model run waits for one of `concurrency` slots, shared by every
+   * principal, and each principal draws from their own token bucket of
+   * `principalBurst` runs refilled at `principalRunsPerMinute`. Slots go to
+   * waiting principals in turn, so one principal's backfill cannot starve
+   * another's morning brief.
+   */
+  modelLimiter: {
+    concurrency: number;
+    principalBurst: number;
+    principalRunsPerMinute: number;
+  };
   proposals: {
     expiryHours: number;
   };
@@ -100,6 +113,34 @@ export interface Config {
   watchers: {
     dryRunDaysForNewWatcher: number;
   };
+  inboxAgent: {
+    /**
+     * Whether the agent-logs watcher alerts on a stale inbox agent
+     * watermark. Off by default since Dom's inbox agent stopped posting its
+     * digest to Slack on 2026-09-23 (Phase 1: its posting retired in favour
+     * of Lance), which left the watermark with nothing to read.
+     */
+    watermarkAlert: boolean;
+    watermarkMaxAgeHours: number;
+  };
+  triage: {
+    /**
+     * ADR 0034: a mail observation whose labels all fall in this set skips
+     * model triage and is filed by deterministic code under the seed rules.
+     * Default `Newsletters` and `Notifications`, the labels seed rules 3
+     * and 4 file automatically.
+     */
+    bulkLabels: readonly MailLabel[];
+  };
+  /**
+   * The queues whose jobs wait on the model: `watcher-graph-mail` and
+   * `triage` (load-test option A, ADR 0034). `concurrency` is how many of
+   * each queue's jobs one worker runs at once; a principal never has more
+   * than one in flight on either.
+   */
+  modelQueues: {
+    concurrency: number;
+  };
   briefs: {
     minFreeBlockHours: number;
   };
@@ -108,6 +149,14 @@ export interface Config {
     transcriptsDays: number;
     ledgerDays: number;
     modelLogsDays: number;
+  };
+  offboarding: {
+    /**
+     * Days a principal paused by the nightly role check may go on holding
+     * no Lance role before the check offboards them (package 5.6). The
+     * first night only pauses, so a mistaken group change costs nothing.
+     */
+    afterRoleLossDays: number;
   };
   featureFlags: {
     graphWrites: boolean;
@@ -396,6 +445,41 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
   };
 
+  // 16 concurrent model calls: the account's limits read on 2026-09-25 are
+  // 10,000 requests and 10 million input tokens a minute for Haiku and
+  // Sonnet, and the thirty-principal Monday used about 31 requests a
+  // minute at 4 (docs/runbooks/load-test.md). Concurrency changes how fast
+  // the backlog clears, not what it costs.
+  const modelLimiter: Config['modelLimiter'] = {
+    concurrency: readField(
+      errors,
+      env,
+      'MODEL_CONCURRENCY',
+      z.number().int().positive(),
+      16,
+      'must be a positive integer',
+      toNumber,
+    ),
+    principalBurst: readField(
+      errors,
+      env,
+      'MODEL_PRINCIPAL_BURST',
+      z.number().int().positive(),
+      6,
+      'must be a positive integer',
+      toNumber,
+    ),
+    principalRunsPerMinute: readField(
+      errors,
+      env,
+      'MODEL_PRINCIPAL_RUNS_PER_MINUTE',
+      z.number().positive(),
+      12,
+      'must be a positive number',
+      toNumber,
+    ),
+  };
+
   const proposals: Config['proposals'] = {
     expiryHours: readField(
       errors,
@@ -469,6 +553,55 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
   };
 
+  const inboxAgent: Config['inboxAgent'] = {
+    watermarkAlert:
+      readField(
+        errors,
+        env,
+        'INBOX_AGENT_WATERMARK_ALERT',
+        z.enum(['true', 'false']),
+        'false',
+        'must be true or false',
+        (value) => value,
+      ) === 'true',
+    watermarkMaxAgeHours: readField(
+      errors,
+      env,
+      'INBOX_AGENT_WATERMARK_MAX_AGE_HOURS',
+      z.number().positive(),
+      24,
+      'must be a positive number of hours',
+      toNumber,
+    ),
+  };
+
+  const triage: Config['triage'] = {
+    bulkLabels: readField(
+      errors,
+      env,
+      'TRIAGE_BULK_LABELS',
+      z.array(MailLabelSchema).min(1),
+      ['Newsletters', 'Notifications'],
+      'must be a comma-separated list of mail labels, at least one',
+      toCommaList,
+    ),
+  };
+
+  // As many jobs on each queue as the limiter has slots: each job holds at
+  // most one model slot at a time, so sixteen of each keeps the sixteen
+  // slots busy while some jobs are between calls (docs/runbooks/load-test.md).
+  const modelQueues: Config['modelQueues'] = {
+    concurrency: readField(
+      errors,
+      env,
+      'MODEL_QUEUE_CONCURRENCY',
+      z.number().int().positive(),
+      16,
+      'must be a positive integer',
+      toNumber,
+    ),
+  };
+
   const briefs: Config['briefs'] = {
     minFreeBlockHours: readField(
       errors,
@@ -515,6 +648,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       'RETENTION_MODEL_LOGS_DAYS',
       z.number().int().positive(),
       30,
+      'must be a positive integer',
+      toNumber,
+    ),
+  };
+
+  const offboarding: Config['offboarding'] = {
+    afterRoleLossDays: readField(
+      errors,
+      env,
+      'OFFBOARD_AFTER_ROLE_LOSS_DAYS',
+      z.number().int().positive(),
+      7,
       'must be a positive integer',
       toNumber,
     ),
@@ -570,13 +715,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       'Dom Selvon',
       'must be a non-empty name',
     ),
-    // ALLOWED_UPN is the same address in every environment, so it doubles as the default.
+    // Dom's UPN is the same address in every environment.
     email: readField(
       errors,
       env,
       'DOM_EMAIL',
       z.string().min(3),
-      env['ALLOWED_UPN'] && env['ALLOWED_UPN'] !== '' ? env['ALLOWED_UPN'] : 'dom@valliance.ai',
+      'dom@valliance.ai',
       'must be an email address',
     ),
   };
@@ -652,12 +797,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     prices,
     cost,
     scheduler,
+    modelLimiter,
     proposals,
     interruption,
     promotion,
     watchers,
+    inboxAgent,
+    triage,
+    modelQueues,
     briefs,
     retention,
+    offboarding,
     featureFlags,
     slack,
     dom,

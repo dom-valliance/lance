@@ -1,4 +1,4 @@
-import type { SystemControl } from '@lance/ledger';
+import type { RunState, SystemControl } from '@lance/ledger';
 
 export type GateVerdict = { runnable: true } | { runnable: false; reason: string };
 
@@ -26,16 +26,20 @@ export class PauseGate {
    * asks this question.
    */
   async checkWrite(): Promise<GateVerdict> {
-    const state = await this.control.read();
-    if (state.paused) {
-      return { runnable: false, reason: state.pausedReason ?? 'paused' };
-    }
-    if (state.mode !== 'live') {
-      return {
-        runnable: false,
-        reason: `${state.mode} mode: external writes are held until the mode is live`,
-      };
-    }
-    return { runnable: true };
+    return writeVerdict(await this.control.read());
   }
+}
+
+/** The write check as a function of the run state, for use under a lock. */
+export function writeVerdict(state: RunState): GateVerdict {
+  if (state.paused) {
+    return { runnable: false, reason: state.pausedReason ?? 'paused' };
+  }
+  if (state.mode !== 'live') {
+    return {
+      runnable: false,
+      reason: `${state.mode} mode: external writes are held until the mode is live`,
+    };
+  }
+  return { runnable: true };
 }

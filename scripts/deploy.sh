@@ -9,6 +9,11 @@
 # which is how a deploy is found again in the portal or with
 # `az deployment sub show -n lance-<env>-<tag>`.
 #
+# Before the deployment it reads which static secrets exist
+# (scripts/existing-secrets.sh) so the template creates only missing ones as
+# placeholders; after it, it removes the vault-wide grants the template no
+# longer declares (scripts/remove-legacy-vault-grants.sh).
+#
 # The deployment never runs the migration job; scripts/run-migration-job.sh does,
 # and scripts/verify-deploy.sh reads the result. deploy.yml runs the three in order.
 #
@@ -49,6 +54,13 @@ done
 export LANCE_IMAGE_TAG="${tag}"
 location="${LANCE_LOCATION:-uksouth}"
 
+# The static secrets that exist already, so the template writes a placeholder
+# only for a missing one and never over a real value (ADR 0022). Read now,
+# immediately before the what-if and the deployment that use it.
+LANCE_EXISTING_SECRETS=$("${repo_root}/scripts/existing-secrets.sh" "${environment}")
+export LANCE_EXISTING_SECRETS
+echo "Secrets already in the static vault: ${LANCE_EXISTING_SECRETS:-none}"
+
 # The plan first, in the same log as the deployment it describes. A what-if runs
 # the same authorisation pre-flight as a deployment, so it cannot run under a
 # read-only identity on a pull request; here it runs under the deploying one.
@@ -67,8 +79,12 @@ az deployment sub create \
   --parameters "${parameters}" \
   --query "properties.provisioningState" -o tsv
 
+# The vault-wide grants the template made before ADR 0022 are not declared any
+# more, and an incremental deployment does not delete them.
+"${repo_root}/scripts/remove-legacy-vault-grants.sh" "${environment}"
+
 az deployment sub show --name "${deployment_name}" \
-  --query "properties.outputs.{web:webFqdn.value, api:apiFqdn.value, registry:registryName.value, keyVault:keyVaultName.value, postgres:postgresServerName.value, migrateJob:migrateJobName.value}" \
+  --query "properties.outputs.{web:webFqdn.value, api:apiFqdn.value, registry:registryName.value, keyVault:keyVaultName.value, principalVault:principalKeyVaultName.value, postgres:postgresServerName.value, migrateJob:migrateJobName.value}" \
   -o table
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then

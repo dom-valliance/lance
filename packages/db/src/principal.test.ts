@@ -2,7 +2,7 @@ import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, type Db } from './client.js';
 import { runMigrations } from './migrate.js';
-import { waitForSinglePrincipal } from './principal.js';
+import { waitForPrincipalByUpn, waitForSinglePrincipal } from './principal.js';
 import { SEED_PRINCIPAL_ID, seed } from './seed.js';
 import { startPostgresContainer } from './testing.js';
 
@@ -77,5 +77,21 @@ describe('waitForSinglePrincipal', () => {
       await emptyDb.$client.end();
       await empty.stop();
     }
+  });
+});
+
+describe('waitForPrincipalByUpn', () => {
+  it('finds the named principal beside others, whatever the case of the UPN', async () => {
+    await db.$client.query(
+      "INSERT INTO principals (id, upn) VALUES ('01K5S9V6QW3SWCCPVB0N0E3Q7H', 'second.principal@example.test') ON CONFLICT DO NOTHING",
+    );
+    const principal = await waitForPrincipalByUpn(db, 'Dom@Valliance.ai', { waitSeconds: 0 });
+    expect(principal.id).toBe(SEED_PRINCIPAL_ID);
+  });
+
+  it('gives up with a message naming the UPN when no principal has it', async () => {
+    await expect(
+      waitForPrincipalByUpn(db, 'nobody@valliance.ai', { waitSeconds: 0 }),
+    ).rejects.toThrow(/No principal has the UPN nobody@valliance.ai/);
   });
 });

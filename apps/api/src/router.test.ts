@@ -1,13 +1,20 @@
+import { ModeChangeRefusedError } from '@lance/ledger';
 import type { MorningBriefContent } from '@lance/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { actorFromUpn } from './actor.js';
+import { OnboardingRefusedError } from './onboarding/service.js';
 import { appRouter } from './router.js';
 import {
   fakeBrief,
+  fakeContext,
+  FakeAdminStore,
   fakeDeps,
+  fakePrincipal,
   fakeProposal,
   fakeSnapshot,
+  fakeOnboardingState,
   TEST_COMMITMENT_ID,
+  TEST_PRINCIPAL_ID,
   TEST_UPN,
   type FakeDeps,
 } from './test-fakes.js';
@@ -57,7 +64,7 @@ let caller: ReturnType<typeof createCaller>;
 beforeEach(() => {
   harness = fakeDeps();
   harness.proposals.rows = [fakeProposal({ id: PROPOSAL_ID, correlationId: CORRELATION_ID })];
-  caller = createCaller({ deps: harness.deps, upn: TEST_UPN });
+  caller = createCaller(fakeContext(harness));
 });
 
 describe('actorFromUpn', () => {
@@ -331,6 +338,17 @@ describe('systemState.setMode', () => {
     expect(result.changed).toBe(true);
   });
 
+  it("passes a new principal's dry-run refusal to the web app with its message", async () => {
+    harness.control.refuseLive = new ModeChangeRefusedError(
+      'Live mode opens on Monday 5 October 2026.',
+      new Date('2026-10-04T23:00:00.000Z'),
+    );
+    await expect(caller.systemState.setMode({ mode: 'live' })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'Live mode opens on Monday 5 October 2026.',
+    });
+  });
+
   it('rejects a mode the schema does not know', async () => {
     await expect(
       caller.systemState.setMode({ mode: 'yolo' } as unknown as { mode: 'live' }),
@@ -495,5 +513,265 @@ describe('briefs.regenerate', () => {
   it('queues a morning brief on the worker rather than building one itself', async () => {
     expect(await caller.briefs.regenerate()).toEqual({ enqueued: true, jobId: 'job-brief' });
     expect(harness.briefRequests).toHaveLength(1);
+  });
+});
+
+/** Every procedure path in the router, `admin.health` style. */
+const procedurePaths = Object.keys(appRouter._def.procedures);
+
+/** Calls a procedure by its path with no input, as a client that ignores the schema would. */
+const callPath = (target: unknown, path: string): Promise<unknown> => {
+  const procedureFn = path
+    .split('.')
+    .reduce<unknown>((node, key) => (node as Record<string, unknown>)[key], target);
+  return (procedureFn as (input?: unknown) => Promise<unknown>)();
+};
+
+const codeOf = async (work: Promise<unknown>): Promise<string> => {
+  try {
+    await work;
+  } catch (error) {
+    return (error as { code?: string }).code ?? 'unknown';
+  }
+  return 'succeeded';
+};
+
+describe('me', () => {
+  it('names the signed-in principal, their status and their roles', async () => {
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.User', 'Lance.Admin'] }));
+    await expect(admin.me()).resolves.toEqual({
+      principalId: harness.deps.principalId,
+      upn: TEST_UPN,
+      status: 'active',
+      roles: ['Lance.User', 'Lance.Admin'],
+    });
+  });
+});
+
+describe('an onboarding principal', () => {
+  const onboarding = (): ReturnType<typeof createCaller> =>
+    createCaller(
+      fakeContext(harness, {
+        principal: fakePrincipal({ status: 'onboarding', upn: 'new.person@valliance.ai' }),
+      }),
+    );
+
+  it('reaches me, which says onboarding', async () => {
+    await expect(onboarding().me()).resolves.toMatchObject({ status: 'onboarding' });
+  });
+
+  it('reaches the Slack link procedures, since linking Slack is an onboarding step', async () => {
+    harness.links.confirmResult = {
+      status: 'linked',
+      slackUserId: 'U0NEW',
+      slackTeamId: 'T0VALLIANCE',
+      channel: { status: 'ready', channelId: 'G0NEW', name: 'lance-new', created: true },
+      warnings: [],
+    };
+    await expect(onboarding().slackLink.current()).resolves.toBeNull();
+    await expect(onboarding().slackLink.preview({ token: 'v1.token' })).resolves.toEqual({
+      status: 'invalid',
+    });
+    await expect(onboarding().slackLink.confirm({ token: 'v1.token' })).resolves.toMatchObject({
+      status: 'linked',
+    });
+    expect(harness.links.confirmed[0]?.caller.principal.status).toBe('onboarding');
+  });
+
+  it('is refused by every other procedure with FORBIDDEN', async () => {
+    const codes = await Promise.all(
+      procedurePaths
+        .filter(
+          (path) =>
+            path !== 'me' && !path.startsWith('slackLink.') && !path.startsWith('onboarding.'),
+        )
+        .map(async (path) => [path, await codeOf(callPath(onboarding(), path))] as const),
+    );
+    expect(codes.filter(([, code]) => code !== 'FORBIDDEN')).toEqual([]);
+    expect([harness.control.pauseCalls, harness.control.modeCalls, harness.enqueued]).toEqual([
+      [],
+      [],
+      [],
+    ]);
+  });
+});
+
+describe('the onboarding procedures', () => {
+  const NOTICE = 'a'.repeat(64);
+  const onboarding = (): ReturnType<typeof createCaller> =>
+    createCaller(
+      fakeContext(harness, {
+        principal: fakePrincipal({ status: 'onboarding', upn: 'new.person@valliance.ai' }),
+      }),
+    );
+
+  it("answers the checklist's state from the server for an onboarding principal", async () => {
+    harness.onboarding.current = fakeOnboardingState({ missing: ['slack'] });
+    await expect(onboarding().onboarding.state({ noticeSha256: NOTICE })).resolves.toMatchObject({
+      status: 'onboarding',
+      missing: ['slack'],
+    });
+  });
+
+  it('records the notice acceptance as the signed-in principal', async () => {
+    await onboarding().onboarding.acceptNotice({ noticeSha256: NOTICE });
+    expect(harness.onboarding.accepted).toEqual([
+      { principalId: TEST_PRINCIPAL_ID, noticeSha256: NOTICE, actor: 'user:newperson' },
+    ]);
+  });
+
+  it('refuses a notice hash that is not a SHA-256', async () => {
+    await expect(
+      onboarding().onboarding.acceptNotice({ noticeSha256: 'not-a-hash' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(harness.onboarding.accepted).toEqual([]);
+  });
+
+  it('refuses a well-formed hash that is not the notice this api carries', async () => {
+    const stale = 'b'.repeat(64);
+
+    await expect(
+      onboarding().onboarding.acceptNotice({ noticeSha256: stale }),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: expect.stringContaining('not the current one') as unknown,
+    });
+    await expect(onboarding().onboarding.complete({ noticeSha256: stale })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
+    expect(harness.onboarding.accepted).toEqual([]);
+  });
+
+  it('refuses a time zone that does not exist', async () => {
+    await expect(
+      onboarding().onboarding.confirmPreferences({
+        timeZone: 'Europe/Atlantis',
+        quietHoursStart: '19:00',
+        quietHoursEnd: '07:00',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(harness.onboarding.confirmed).toEqual([]);
+  });
+
+  it('passes a refused completion to the web app with the steps it names', async () => {
+    harness.onboarding.completion = new OnboardingRefusedError(
+      'Onboarding is not finished: link Slack with /lance login. Nothing was changed.',
+    );
+    await expect(onboarding().onboarding.complete({ noticeSha256: NOTICE })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'Onboarding is not finished: link Slack with /lance login. Nothing was changed.',
+    });
+  });
+});
+
+describe('the admin router', () => {
+  const adminPaths = procedurePaths.filter((path) => path.startsWith('admin.'));
+
+  it('covers the principals, health, rules, alerts, offboarding, evidence, the kill switch and the organisation ceiling', () => {
+    expect(adminPaths.sort()).toEqual([
+      'admin.evidence',
+      'admin.health',
+      'admin.offboard',
+      'admin.organisationCeiling',
+      'admin.pauseAll',
+      'admin.principals',
+      'admin.resumeAll',
+      'admin.ruleChanges',
+      'admin.setOrganisationCeiling',
+      'admin.systemAlerts',
+    ]);
+  });
+
+  it('refuses a Lance.User without Lance.Admin on every admin procedure', async () => {
+    const codes = await Promise.all(adminPaths.map((path) => codeOf(callPath(caller, path))));
+    expect(codes).toEqual(adminPaths.map(() => 'FORBIDDEN'));
+  });
+
+  it('lets a Lance.Admin list principals and read their health', async () => {
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    await expect(admin.admin.principals()).resolves.toMatchObject([
+      {
+        id: harness.deps.principalId,
+        upn: TEST_UPN,
+        status: 'active',
+        createdAt: '2026-09-20T09:00:00.000Z',
+        onboarding: { complete: false },
+      },
+    ]);
+    await expect(admin.admin.health()).resolves.toHaveLength(1);
+  });
+
+  it('lets a Lance.Admin pause and resume every principal, and nobody else', async () => {
+    await expect(caller.admin.pauseAll({ reason: 'drill' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+    expect(harness.control.pauseAllCalls).toEqual([]);
+
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    await admin.admin.pauseAll({ reason: 'drill' });
+    await admin.admin.resumeAll();
+    expect(harness.control.pauseAllCalls).toEqual([{ reason: 'drill', actor: 'user:dom' }]);
+    expect(harness.control.resumeAllCalls).toEqual([{ actor: 'user:dom' }]);
+  });
+
+  it('lets a Lance.Admin read and set the organisation ceiling, and nobody else', async () => {
+    await expect(caller.admin.setOrganisationCeiling({ costCeilingGbp: 45 })).rejects.toMatchObject(
+      { code: 'FORBIDDEN' },
+    );
+    expect(harness.control.organisationCeilingCalls).toEqual([]);
+
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    await expect(admin.admin.organisationCeiling()).resolves.toEqual({ costCeilingGbp: 30 });
+    await admin.admin.setOrganisationCeiling({ costCeilingGbp: 45 });
+    expect(harness.control.organisationCeilingCalls).toEqual([
+      { costCeilingGbp: 45, actor: 'user:dom' },
+    ]);
+    await expect(admin.admin.organisationCeiling()).resolves.toEqual({ costCeilingGbp: 45 });
+    await expect(admin.admin.setOrganisationCeiling({ costCeilingGbp: 0 })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
+  });
+
+  it("reads system alerts in the admin's own scope", async () => {
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    await admin.admin.systemAlerts();
+    expect((harness.server.admin as FakeAdminStore).alertsFor).toEqual([harness.deps.principalId]);
+  });
+
+  it('queues an offboarding with the admin as the actor, and refuses self-offboarding as a 400', async () => {
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    const target = '01K5S9V6QW3SWCCPVB0N0E3A01';
+    await expect(
+      admin.admin.offboard({ principalId: target, reason: 'left Valliance' }),
+    ).resolves.toEqual({ status: 'queued', principalId: target, jobId: 'job-offboard' });
+    expect((harness.server.admin as FakeAdminStore).offboardings).toEqual([
+      {
+        principalId: target,
+        reason: 'left Valliance',
+        actor: 'user:dom',
+        callerId: harness.deps.principalId,
+      },
+    ]);
+    await expect(
+      admin.admin.offboard({ principalId: harness.deps.principalId, reason: 'test' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('passes the second confirmation for a protected principal through to the store', async () => {
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    const target = '01K5S9V6QW3SWCCPVB0N0E3A02';
+
+    await admin.admin.offboard({ principalId: target, reason: 'left', confirmProtected: true });
+
+    expect((harness.server.admin as FakeAdminStore).offboardings.at(-1)?.confirmProtected).toBe(
+      true,
+    );
+  });
+
+  it('refuses the evidence export, naming the secret, while no signing key is configured', async () => {
+    const admin = createCaller(fakeContext(harness, { roles: ['Lance.Admin'] }));
+    await expect(
+      admin.admin.evidence({ from: '2026-09-01T00:00:00Z', to: '2026-09-24T00:00:00Z' }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: /evidence-signing-key/ });
   });
 });

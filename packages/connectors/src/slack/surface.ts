@@ -1,5 +1,6 @@
 import type { CallContext } from '../core/connector.js';
 import { createSlackClient, type SlackClient, type SlackClientOptions } from './client.js';
+import { slackReads, type SlackUserProfile } from './reads.js';
 import { slackWrites } from './writes.js';
 
 export interface SlackSurfaceOptions extends SlackClientOptions {
@@ -31,3 +32,26 @@ export function createSlackSurface(options: SlackSurfaceOptions) {
 }
 
 export type SlackSurface = ReturnType<typeof createSlackSurface>;
+
+/**
+ * What the api needs to give a principal their private channel on their
+ * first Slack link (ADR 0023): look the person up, create a private
+ * channel and invite them. Lance's own surface management, like the
+ * surface above, and not a connector write policy governs: it creates a
+ * channel holding only the principal and the bot, and posts nothing.
+ */
+export function createSlackChannelProvisioner(options: SlackClientOptions) {
+  const client: SlackClient = createSlackClient(options);
+  const writes = slackWrites(client);
+  const reads = slackReads(client);
+  return {
+    connector: client.connector,
+    userProfile: (user: string): Promise<SlackUserProfile> => reads.userProfile(user),
+    createPrivateChannel: (input: { name: string }, context?: CallContext) =>
+      writes.createPrivateChannel(input, context),
+    invite: (input: { channel: string; user: string }, context?: CallContext) =>
+      writes.inviteToChannel({ channel: input.channel, users: [input.user] }, context),
+  };
+}
+
+export type SlackChannelProvisioner = ReturnType<typeof createSlackChannelProvisioner>;

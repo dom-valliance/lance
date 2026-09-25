@@ -115,8 +115,12 @@ function humaniseCountKey(key: string): string {
  */
 export function retentionRunSummary(payload: unknown): string | null {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  // The job records its counts under `counts` (packages/ledger/src/retention.ts).
+  const nested = (payload as Record<string, unknown>)['counts'];
+  const counts =
+    nested !== null && typeof nested === 'object' && !Array.isArray(nested) ? nested : payload;
   const parts: string[] = [];
-  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+  for (const [key, value] of Object.entries(counts as Record<string, unknown>)) {
     if (typeof value !== 'number' || !Number.isFinite(value)) continue;
     const label = humaniseCountKey(key);
     if (label === '') continue;

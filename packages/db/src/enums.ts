@@ -96,6 +96,12 @@ export const PRINCIPAL_STATUS_VALUES = ['onboarding', 'active', 'paused', 'offbo
 
 export const AGENT_RUN_STATUS_VALUES = ['running', 'succeeded', 'failed'] as const;
 
+/**
+ * Where a job came from (docs/plans/jobs.md section 4). Only `system` exists
+ * in Phase 5; `user`, `library` and `import` arrive with the jobs track.
+ */
+export const JOB_ORIGIN_VALUES = ['system'] as const;
+
 export const ledgerKind = pgEnum('ledger_kind', LEDGER_KIND_VALUES);
 export const actionClass = pgEnum('action_class', ACTION_CLASS_VALUES);
 export const counterpartyClass = pgEnum('counterparty_class', COUNTERPARTY_CLASS_VALUES);
@@ -112,3 +118,4 @@ export const ruleCreator = pgEnum('rule_creator', RULE_CREATOR_VALUES);
 export const briefKind = pgEnum('brief_kind', BRIEF_KIND_VALUES);
 export const agentRunStatus = pgEnum('agent_run_status', AGENT_RUN_STATUS_VALUES);
 export const principalStatus = pgEnum('principal_status', PRINCIPAL_STATUS_VALUES);
+export const jobOrigin = pgEnum('job_origin', JOB_ORIGIN_VALUES);

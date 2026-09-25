@@ -3,7 +3,10 @@
 // Manual steps that this template deliberately does not do:
 //   - Entra app registration (docs/runbooks/entra-setup.md)
 //   - Slack app creation (docs/runbooks/slack-app-setup.md)
-//   - Key Vault secret values (docs/runbooks/deploy.md, step 4)
+//   - Key Vault secret values (docs/runbooks/deploy.md, step 4). The template creates
+//     each static secret as a placeholder when it is missing and never writes one that
+//     exists (modules/keyvault.bicep, ADR 0022)
+//   - The custom role the api holds on the principal vault, defined in deployer.bicep
 //   - Postgres principals for the managed identities (docs/runbooks/deploy.md, step 7)
 //   - The GitHub Actions identities that deploy this template (deployer.bicep,
 //     docs/runbooks/github-deploy-setup.md), which CI cannot grant to itself
@@ -47,8 +50,8 @@ param containerImageTag string = 'bootstrap'
 @description('When true the three apps and the migration job run the public quickstart image, so the environment can stand up before any image is pushed. Flip to false once the real images are in the registry.')
 param useBootstrapImage bool = true
 
-@description('The single UPN allowed to sign in to the web app in v1. Spec 4.1.')
-param allowedUpn string
+@description('Names of the secrets already in the static vault. scripts/deploy.sh reads them from the control plane just before the deployment and passes them through LANCE_EXISTING_SECRETS; a secret in infra/secrets.json that is missing here is created as a placeholder, one that is present is never written.')
+param existingStaticSecretNames array
 
 @description('The one Slack user id that may run /lance status, pause and resume. Not a secret.')
 param slackAllowedUserId string
@@ -103,13 +106,21 @@ module keyVault 'modules/keyvault.bicep' = {
     location: location
     tags: tags
     uniqueSuffix: uniqueSuffix
-    secretsUserPrincipalIds: identity.outputs.principalIds
-    graphTokenWriterPrincipalIds: [
-      identity.outputs.identities.api.principalId
-      identity.outputs.identities.worker.principalId
-    ]
-    // The placeholder secret is set during deploy.md step 4, after the bootstrap deploy.
-    graphTokenSecretExists: !useBootstrapImage
+    identities: identity.outputs.identities
+    existingSecretNames: existingStaticSecretNames
+    vaultWriterObjectId: postgresEntraAdminObjectId
+  }
+}
+
+module principalVault 'modules/principal-vault.bicep' = {
+  scope: resourceGroup
+  name: 'principal-vault'
+  params: {
+    environmentName: environmentName
+    location: location
+    tags: tags
+    uniqueSuffix: uniqueSuffix
+    identities: identity.outputs.identities
     vaultWriterObjectId: postgresEntraAdminObjectId
   }
 }
@@ -153,12 +164,12 @@ module containerApps 'modules/containerapps.bicep' = {
     logAnalyticsWorkspaceName: monitoring.outputs.logAnalyticsWorkspaceName
     applicationInsightsConnectionString: monitoring.outputs.applicationInsightsConnectionString
     keyVaultUri: keyVault.outputs.vaultUri
+    principalKeyVaultUri: principalVault.outputs.vaultUri
     registryLoginServer: registry.outputs.loginServer
     postgresFqdn: postgres.outputs.fqdn
     identities: identity.outputs.identities
     containerImageTag: containerImageTag
     useBootstrapImage: useBootstrapImage
-    allowedUpn: allowedUpn
     slackAllowedUserId: slackAllowedUserId
     graphWritesEnabled: graphWritesEnabled
     notionWritesEnabled: notionWritesEnabled
@@ -179,6 +190,7 @@ module migrateJob 'modules/migrate-job.bicep' = {
     registryLoginServer: registry.outputs.loginServer
     postgresFqdn: postgres.outputs.fqdn
     migrateIdentity: identity.outputs.identities.migrate
+    retentionMemberName: identity.outputs.identities.worker.name
     containerImageTag: containerImageTag
     useBootstrapImage: useBootstrapImage
   }
@@ -186,6 +198,7 @@ module migrateJob 'modules/migrate-job.bicep' = {
 
 output resourceGroupNameOut string = resourceGroup.name
 output keyVaultName string = keyVault.outputs.vaultName
+output principalKeyVaultName string = principalVault.outputs.vaultName
 output registryLoginServer string = registry.outputs.loginServer
 output registryName string = registry.outputs.registryName
 output postgresFqdn string = postgres.outputs.fqdn

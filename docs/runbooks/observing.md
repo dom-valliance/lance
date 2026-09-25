@@ -27,12 +27,17 @@ az containerapp logs show -g rg-lance-dev -n ca-lance-worker-dev --type console 
 az containerapp logs show -g rg-lance-dev -n ca-lance-api-dev --type console --tail 100
 ```
 
+## Reading principal-bearing tables
+
+Every table that holds a principal's data is under forced row-level security (ADR 0015), and the Entra administrator `scripts/psql-admin.sh` signs in as is not a superuser on Flexible Server, so an unscoped query reads no rows and an unscoped delete removes none, without any error. Every query below therefore scopes the session to the principal first, in the same `psql` call. For another principal, change the UPN.
+
 ## 4. Model runs and spend
 
 `agent_runs` has one row per model call with its status, tokens, cost and error. The Agents page shows the same by agent. To see who spent the day's budget:
 
 ```
 scripts/psql-admin.sh lance -X -P pager=off \
+  -c "select set_config('app.principal', (select id from principals where upn = 'dom@valliance.ai'), false);" \
   -c "select agent, status, count(*), round(sum(estimated_cost_usd)::numeric, 2) as usd from agent_runs where started_at >= date_trunc('day', now() at time zone 'Europe/London') at time zone 'Europe/London' group by agent, status order by usd desc;"
 ```
 
@@ -48,6 +53,7 @@ A watcher's cursor is one row in `cursors`, keyed by watcher and partition. Dele
 
 ```
 scripts/psql-admin.sh lance -X -P pager=off \
+  -c "select set_config('app.principal', (select id from principals where upn = 'dom@valliance.ai'), false);" \
   -c "select watcher, key, updated_at from cursors order by watcher, key;" \
   -c "delete from cursors where watcher = 'graph-calendar' and key = 'calendar';"
 ```

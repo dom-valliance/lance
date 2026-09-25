@@ -6,7 +6,15 @@ import {
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { ATTR_AGENT, ATTR_CORRELATION_ID, currentTraceIds, withSpan } from './span.js';
+import {
+  ATTR_AGENT,
+  ATTR_CORRELATION_ID,
+  ATTR_PRINCIPAL,
+  currentTraceIds,
+  PrincipalSpanProcessor,
+  withPrincipal,
+  withSpan,
+} from './span.js';
 
 const exporter = new InMemorySpanExporter();
 const contextManager = new AsyncHooksContextManager();
@@ -97,5 +105,42 @@ describe('currentTraceIds', () => {
 
     expect(ids.traceId).toMatch(/^[0-9a-f]{32}$/);
     expect(ids.spanId).toMatch(/^[0-9a-f]{16}$/);
+  });
+});
+
+describe('withPrincipal', () => {
+  it('stamps the principal on its own span and on every withSpan beneath it', async () => {
+    await withPrincipal(
+      '01K5S9V6QW3SWCCPVB0N0E3T01',
+      'job.triage',
+      { 'lance.queue': 'triage' },
+      () => withSpan('agent.triage', { [ATTR_AGENT]: 'triage@1' }, () => undefined),
+    );
+
+    const spans = exporter.getFinishedSpans();
+    expect(spans.map((span) => [span.name, span.attributes[ATTR_PRINCIPAL]])).toEqual([
+      ['agent.triage', '01K5S9V6QW3SWCCPVB0N0E3T01'],
+      ['job.triage', '01K5S9V6QW3SWCCPVB0N0E3T01'],
+    ]);
+  });
+
+  it('leaves a span outside any principal unstamped', async () => {
+    await withSpan('planner.run', {}, () => undefined);
+
+    expect(exporter.getFinishedSpans()[0]?.attributes[ATTR_PRINCIPAL]).toBeUndefined();
+  });
+
+  it('stamps spans an instrumentation opens beneath it through the span processor', async () => {
+    const processor = new PrincipalSpanProcessor();
+    const tracer = trace.getTracer('instrumentation-under-test');
+
+    await withPrincipal('01K5S9V6QW3SWCCPVB0N0E3T02', 'job.execute', {}, () => {
+      const span = tracer.startSpan('pg.query');
+      processor.onStart(span, context.active());
+      span.end();
+    });
+
+    const pg = exporter.getFinishedSpans().find((span) => span.name === 'pg.query');
+    expect(pg?.attributes[ATTR_PRINCIPAL]).toBe('01K5S9V6QW3SWCCPVB0N0E3T02');
   });
 });

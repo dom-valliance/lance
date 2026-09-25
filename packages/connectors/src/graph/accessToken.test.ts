@@ -153,4 +153,52 @@ describe('the access token provider', () => {
 
     expect(error.message).not.toContain('a-secret-refresh-token');
   });
+
+  it('holds the rotation lock across the read, the refresh and the write', async () => {
+    const events: string[] = [];
+    const inner = new InMemoryTokenStore('refresh-0');
+    const store = {
+      getRefreshToken: async () => {
+        events.push('read');
+        return inner.getRefreshToken();
+      },
+      setRefreshToken: async (token: string) => {
+        events.push('write');
+        await inner.setRefreshToken(token);
+      },
+    };
+    const stub = respondsWith([{ status: 200, body: tokenPair(1) }]);
+    const accessToken = createAccessTokenProvider({
+      store,
+      tenantId: TENANT,
+      clientId: 'a-client-id',
+      clientSecret: 'a-client-secret',
+      fetchImpl: stub.fetchImpl,
+      rotationLock: async (work) => {
+        events.push('lock');
+        try {
+          return await work();
+        } finally {
+          events.push('unlock');
+        }
+      },
+    });
+
+    await Promise.all([accessToken(), accessToken()]);
+
+    expect(events).toEqual(['lock', 'read', 'write', 'unlock']);
+  });
+
+  it("uses the caller's not-connected message when one is given", async () => {
+    const accessToken = createAccessTokenProvider({
+      store: new InMemoryTokenStore(),
+      tenantId: TENANT,
+      clientId: 'a-client-id',
+      clientSecret: 'a-client-secret',
+      fetchImpl: respondsWith([]).fetchImpl,
+      notConnectedMessage: 'graph token: principal X has not connected Microsoft 365.',
+    });
+
+    await expect(accessToken()).rejects.toThrow('principal X has not connected');
+  });
 });

@@ -47,12 +47,16 @@ const cypherImports = [
 const workerFixturePath = 'apps/worker/src/__boundary_fixture__.ts';
 const ontologyFixturePath = 'packages/ontology/src/__boundary_fixture__.ts';
 
+// One instance for the whole file: each ESLint builds the type-aware
+// project service on first use, which is slow when every package tests at
+// once, and the config under test is the same for every fixture.
+const eslint = new ESLint({ cwd: repoRoot });
+
 function restrictedImportErrors(messages: Linter.LintMessage[]): Linter.LintMessage[] {
   return messages.filter((message) => message.ruleId === 'no-restricted-imports');
 }
 
 async function lintFixture(fixture: Fixture): Promise<Linter.LintMessage[]> {
-  const eslint = new ESLint({ cwd: repoRoot });
   const results = await eslint.lintText(fixture.content, {
     filePath: path.join(repoRoot, fixture.relPath),
   });
@@ -109,7 +113,6 @@ describe('import boundary rules', () => {
   }, 30000);
 
   it('rejects createDb outside the composition roots and tests', async () => {
-    const eslint = new ESLint({ cwd: repoRoot });
     const results = await eslint.lintText("import { createDb } from '@lance/db';\n", {
       filePath: path.join(repoRoot, workerFixturePath),
     });
@@ -121,7 +124,6 @@ describe('import boundary rules', () => {
   }, 30000);
 
   it('allows createDb in an app composition root', async () => {
-    const eslint = new ESLint({ cwd: repoRoot });
     const results = await eslint.lintText("import { createDb } from '@lance/db';\n", {
       filePath: path.join(repoRoot, 'apps/worker/src/main.ts'),
     });

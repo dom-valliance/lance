@@ -28,10 +28,10 @@ export type { SlackAgentLogRecord, SlackChannelOptions, SlackHistoryReads } from
 export {
   STEP_SKIPPED_DIMENSION,
   TELEMETRY_PARTITION,
-  TELEMETRY_QUERY,
   TELEMETRY_SOURCE_SYSTEM,
   normaliseTelemetryRow,
   pollTelemetry,
+  telemetryQuery,
   telemetryRecordSchema,
   telemetryRowToRaw,
   telemetryWindowStart,
@@ -43,6 +43,7 @@ export { WEBHOOK_PARTITION, pollWebhook } from './webhook.js';
 export {
   AGENT_LOGS_DETECTOR_SCHEDULE,
   STALE_WATERMARK_DEDUPE_KEY,
+  watermarkThreshold,
   createAgentLogsDetector,
   readLatestWatermark,
   readRecentTelemetry,

@@ -10,7 +10,7 @@ import {
 } from './view.js';
 
 const DOM_NOTION_USER_ID = '1fdd872b-594c-8146-b22f-00028f1f5a41';
-const options = { domNotionUserId: DOM_NOTION_USER_ID };
+const options = { principalNotionUserId: DOM_NOTION_USER_ID };
 
 const notionRow = (payload: Record<string, unknown> = {}): ObservationRecord => ({
   id: '01K5S9V6QW3SWCCPVB0N0E303A',

@@ -30,15 +30,21 @@ export type {
 } from './auth.js';
 
 export {
-  GRAPH_REFRESH_TOKEN_SECRET_NAME,
+  graphRefreshTokenSecretName,
   InMemoryTokenStore,
-  KeyVaultTokenStore,
+  LEGACY_GRAPH_REFRESH_TOKEN_SECRET_NAME,
   PENDING_FIRST_CONSENT,
+  PrincipalTokenStore,
+  principalTokenWriter,
 } from './tokenStore.js';
-export type { GraphTokenStore, SecretClientLike } from './tokenStore.js';
+export type { GraphTokenStore, GraphTokenWriter } from './tokenStore.js';
 
 export { createAccessTokenProvider } from './accessToken.js';
-export type { AccessTokenProvider, AccessTokenProviderOptions } from './accessToken.js';
+export type {
+  AccessTokenProvider,
+  AccessTokenProviderOptions,
+  RotationLock,
+} from './accessToken.js';
 
 export { createGraphConnector, GRAPH_BASE_URL, GRAPH_POLICY } from './client.js';
 export type { GraphConnector, GraphConnectorOptions, GraphRequest } from './client.js';

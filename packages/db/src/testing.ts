@@ -1,5 +1,6 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createDb, scopedDb, type Db } from './client.js';
+import { grantRetentionMember } from './grants.js';
 import { SEED_PRINCIPAL_ID, seed } from './seed.js';
 
 /** The local image built by `docker compose build`, PostgreSQL 16 with AGE and pgvector (ADR 0004). */
@@ -7,7 +8,9 @@ export const POSTGRES_TEST_IMAGE = 'lance-postgres:16';
 
 function isTransientDockerError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /pull access denied|404|EOF|socket hang up|ECONNRESET/i.test(message);
+  return /pull access denied|404|EOF|socket hang up|ECONNRESET|waiting for container ports to be bound/i.test(
+    message,
+  );
 }
 
 /**
@@ -39,13 +42,13 @@ const TEST_APP_ROLE = 'lance_test_app';
 const TEST_APP_PASSWORD = 'lance_test_app';
 
 /**
- * A migrated test database's handle, seeded and scoped to the seed
- * principal (ADR 0015), which is how the apps see the database. It logs in
- * as a member of lance_app rather than as the container's superuser, who
- * would bypass row-level security, so a suite that passes has passed under
- * the same policies the apps run under.
+ * A migrated test database's unscoped handle, seeded, logged in as a member
+ * of lance_app rather than as the container's superuser, who would bypass
+ * row-level security. For code under test that scopes handles itself, as
+ * the api's per-principal dependency cache does; everything else takes
+ * `openSeededTestDb`.
  */
-export async function openSeededTestDb(connectionString: string): Promise<Db> {
+export async function openAppTestDb(connectionString: string): Promise<Db> {
   const root = createDb({ connectionString, password: 'postgres' });
   try {
     await seed(root);
@@ -63,8 +66,48 @@ export async function openSeededTestDb(connectionString: string): Promise<Db> {
   const url = new URL(connectionString);
   url.username = TEST_APP_ROLE;
   url.password = TEST_APP_PASSWORD;
-  const app = createDb({ connectionString: url.toString(), password: TEST_APP_PASSWORD });
-  return scopedDb(app, { principalId: SEED_PRINCIPAL_ID });
+  return createDb({ connectionString: url.toString(), password: TEST_APP_PASSWORD });
+}
+
+const TEST_WORKER_ROLE = 'lance_test_worker';
+const TEST_WORKER_PASSWORD = 'lance_test_worker';
+
+/**
+ * Like `openAppTestDb`, logged in as a role that is also a member of
+ * lance_retention for SET ROLE only, as the worker's identity is after the
+ * migration job's grant (packages/db/src/grants.ts). For the retention and
+ * offboarding suites; everything else takes `openAppTestDb`.
+ */
+export async function openWorkerTestDb(connectionString: string): Promise<Db> {
+  const root = createDb({ connectionString, password: 'postgres' });
+  try {
+    await seed(root);
+    await root.$client.query(
+      `DO $$ BEGIN
+         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${TEST_WORKER_ROLE}') THEN
+           CREATE ROLE ${TEST_WORKER_ROLE} LOGIN PASSWORD '${TEST_WORKER_PASSWORD}';
+         END IF;
+       END $$`,
+    );
+    await root.$client.query(`GRANT lance_app TO ${TEST_WORKER_ROLE}`);
+    await grantRetentionMember(root, TEST_WORKER_ROLE);
+  } finally {
+    await root.$client.end();
+  }
+  const url = new URL(connectionString);
+  url.username = TEST_WORKER_ROLE;
+  url.password = TEST_WORKER_PASSWORD;
+  return createDb({ connectionString: url.toString(), password: TEST_WORKER_PASSWORD });
+}
+
+/**
+ * A migrated test database's handle, seeded and scoped to the seed
+ * principal (ADR 0015), which is how the apps see the database. It logs in
+ * as a member of lance_app, so a suite that passes has passed under the
+ * same policies the apps run under.
+ */
+export async function openSeededTestDb(connectionString: string): Promise<Db> {
+  return scopedDb(await openAppTestDb(connectionString), { principalId: SEED_PRINCIPAL_ID });
 }
 
 /**

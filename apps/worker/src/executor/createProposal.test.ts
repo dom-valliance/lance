@@ -89,6 +89,58 @@ describe('createProposal', () => {
     expect(trail[0]?.policyDecisionId).not.toBeNull();
   });
 
+  it('auto-approves a newsletter move into AI-Filed, reading the folder from the draft', async () => {
+    const outcome = await handler()(
+      draft({
+        actionClass: 'move_mail',
+        payload: { destinationFolderName: 'AI-Filed', sourceFolderId: 'inbox' },
+        preview: 'Move to AI-Filed',
+      }),
+      { ...context, labels: ['Newsletters'] },
+    );
+    expect(outcome).toMatchObject({ decision: 'auto', status: 'approved' });
+  });
+
+  it('forbids a newsletter move that names AI-Filed but carries another folder id', async () => {
+    // A prompt-injected draft that would pass rule 4 by name and move by id.
+    const before = posted.length;
+    const outcome = await handler()(
+      draft({
+        actionClass: 'move_mail',
+        payload: { destinationFolderName: 'AI-Filed', destinationFolderId: 'deleteditems' },
+        preview: 'Move to AI-Filed',
+      }),
+      { ...context, labels: ['Newsletters'] },
+    );
+    expect(outcome).toMatchObject({ decision: 'forbid', status: 'rejected' });
+    expect(executed).not.toContain(outcome.proposalId);
+    expect(posted).toHaveLength(before);
+    const row = (await db.select().from(proposals).where(eq(proposals.id, outcome.proposalId)))[0];
+    expect(row?.decisionNote).toContain('both folder name and folder id');
+  });
+
+  it('forbids a move into Deleted Items whatever the rules say', async () => {
+    const outcome = await handler()(
+      draft({ actionClass: 'move_mail', payload: { destinationFolderName: 'Deleted Items' } }),
+      { ...context, labels: ['Newsletters'] },
+    );
+    expect(outcome).toMatchObject({ decision: 'forbid', status: 'rejected' });
+    expect(outcome.note).toContain('is a delete');
+  });
+
+  it('proposes a newsletter move into any folder but AI-Filed', async () => {
+    const outcome = await handler()(
+      draft({
+        actionClass: 'move_mail',
+        payload: { destinationFolderName: 'Archive' },
+        preview: 'Move to Archive',
+      }),
+      { ...context, labels: ['Newsletters'] },
+    );
+    expect(outcome).toMatchObject({ decision: 'propose', status: 'pending' });
+    expect(outcome.note).toContain('targetAnyOf');
+  });
+
   it('posts a card and leaves the proposal pending when policy says propose', async () => {
     const outcome = await handler()(draft({ counterpartyClass: 'client' }), {
       ...context,

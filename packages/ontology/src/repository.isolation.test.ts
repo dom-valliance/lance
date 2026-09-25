@@ -44,14 +44,19 @@ interface Evidence {
   thread: string;
   commitment: string;
   task: string;
+  /** The private Person made for a transcript attendee known only by name (ADR 0033). */
+  nameOnly: string;
   /** Edge property values only this principal's edges carry. */
   edgeValues: string[];
+  /** Record ids of this principal's sightings, which no shared node may carry (ADR 0033). */
+  recordIds: string[];
 }
 
 let domEvidence: Evidence;
 let beaEvidence: Evidence;
 let ann: string;
 let carol: string;
+let dana: string;
 let before: GraphSnapshot;
 
 function repository(db: Db, principalId: string, prefix: string, name: string) {
@@ -97,6 +102,24 @@ async function writeEvidence(
     await repo.link(resolved.id, 'ATTENDED', meeting.id, {}, context);
     people.push(resolved.id);
   }
+  // Both principals hear an attendee Jamie names without an address, and
+  // both see Dana in a message of their own.
+  const nameOnly = await repo.resolvePerson(
+    { displayName: 'Erin Nokey', sourceRef: jamieRef },
+    context,
+  );
+  await repo.link(nameOnly.id, 'ATTENDED', meeting.id, {}, context);
+  await repo.resolvePerson(
+    {
+      displayName: 'Dana Example',
+      emails: ['dana@northwind.test'],
+      sourceRef: {
+        ...ref('graph', `msg-${who}-dana`),
+        url: `https://outlook.test/msg-${who}-dana`,
+      },
+    },
+    context,
+  );
   const counterparty = people[people.length - 1];
   if (counterparty === undefined) throw new Error('Each principal needs an attendee.');
   const thread = await repo.upsertThread(
@@ -134,38 +157,28 @@ async function writeEvidence(
     thread: thread.id,
     commitment: commitmentId,
     task: task.id,
+    nameOnly: nameOnly.id,
     edgeValues: [`graph-${who}`, `transcript-${who}`, `tag-${who}`, `jamie-${who}`],
+    recordIds: [`msg-${who}`, `msg-${who}-dana`, `jtask-${who}`],
   };
 }
 
 /**
- * Shared Persons and Organisations carry the source refs of whichever
- * mailbox observed them. ADR 0017 accepts that a shared Person seen in one
- * mailbox becomes visible to other principals; those refs are the one
- * place that visibility shows, so the scan leaves them out and scans
- * everything else.
+ * The scan covers everything a read returns, shared nodes' source refs
+ * included: since ADR 0033 they carry only a system and a time, so a
+ * record id of the other principal's anywhere in a result is a leak.
  */
-function scrub(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(scrub);
-  if (typeof value !== 'object' || value === null) return value;
-  const record = value as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const [key, inner] of Object.entries(record)) out[key] = scrub(inner);
-  if (
-    (record['label'] === 'Person' || record['label'] === 'Organisation') &&
-    typeof out['properties'] === 'object' &&
-    out['properties'] !== null
-  ) {
-    const { source_refs: _dropped, ...rest } = out['properties'] as Record<string, unknown>;
-    void _dropped;
-    out['properties'] = rest;
-  }
-  return out;
-}
-
 function leaks(result: unknown, other: Evidence, otherPrincipal: string): string[] {
-  const text = JSON.stringify(scrub(result) ?? null);
-  const tokens = [otherPrincipal, other.thread, other.commitment, other.task, ...other.edgeValues];
+  const text = JSON.stringify(result ?? null);
+  const tokens = [
+    otherPrincipal,
+    other.thread,
+    other.commitment,
+    other.task,
+    other.nameOnly,
+    ...other.edgeValues,
+    ...other.recordIds,
+  ];
   return tokens.filter((token) => text.includes(token));
 }
 
@@ -199,7 +212,11 @@ const READ_PROBES: ReadProbe[] = [
   },
   {
     name: 'findPersonsByNormalisedName',
-    probe: (repo) => repo.findPersonsByNormalisedName('carol example'),
+    probe: async (repo) =>
+      Promise.all([
+        repo.findPersonsByNormalisedName('carol example'),
+        repo.findPersonsByNormalisedName('erin nokey'),
+      ]),
   },
   {
     name: 'findPersonsByEmailDomain',
@@ -221,6 +238,16 @@ const READ_PROBES: ReadProbe[] = [
   },
   { name: 'meetingContext', probe: (repo, other) => repo.meetingContext(other.meeting) },
   {
+    name: 'sightings',
+    probe: async (repo, other) =>
+      Promise.all([
+        repo.sightings(dana),
+        repo.sightings(ann),
+        repo.sightings(other.principalPerson),
+        repo.sightings(other.nameOnly),
+      ]),
+  },
+  {
     name: 'findTask',
     probe: async (repo) =>
       Promise.all([repo.findTask('jamie', 'jtask-dom'), repo.findTask('jamie', 'jtask-bea')]),
@@ -236,14 +263,17 @@ const READ_PROBES: ReadProbe[] = [
         repo.neighbours(other.meeting),
         repo.neighbours(ann),
         repo.neighbours(carol),
+        repo.neighbours(dana),
         repo.neighbours(own.principalPerson),
         repo.neighbours(other.principalPerson),
+        repo.neighbours(other.nameOnly),
       ]),
   },
   { name: 'coAttended', probe: (repo) => repo.coAttended(ann, carol) },
   {
     name: 'search',
-    probe: async (repo) => Promise.all([repo.search('renewal'), repo.search('pilot')]),
+    probe: async (repo) =>
+      Promise.all([repo.search('renewal'), repo.search('pilot'), repo.search('nokey')]),
   },
   { name: 'counts', probe: (repo) => repo.counts() },
 ];
@@ -264,11 +294,21 @@ const WRITE_METHODS = [
 ];
 
 const INTERNAL_METHODS = [
+  'createPerson',
+  'updatePerson',
   'findExistingPerson',
   'wouldViolateRuleThree',
+  'findOwnJamieKeyedMeeting',
+  'mergeMeeting',
+  'edgesOf',
+  'foldAttendance',
   'recordMeetingContext',
   'writeAttendance',
+  'recordSightings',
+  'ownEdge',
   'ownAttendance',
+  'backfillProvenance',
+  'touchedByAnother',
   'read',
   'scoped',
   'stamp',
@@ -317,9 +357,13 @@ beforeAll(async () => {
   ]);
   const annNode = await dom.findPersonByEmail('ann@northwind.test');
   const carolNode = await bea.findPersonByEmail('carol@northwind.test');
-  if (annNode === null || carolNode === null) throw new Error('Ann and Carol should exist.');
+  const danaNode = await bea.findPersonByEmail('dana@northwind.test');
+  if (annNode === null || carolNode === null || danaNode === null) {
+    throw new Error('Ann, Carol and Dana should exist.');
+  }
   ann = annNode.id;
   carol = carolNode.id;
+  dana = danaNode.id;
   before = await graphSnapshot(dbDom);
 }, 180000);
 
@@ -377,9 +421,11 @@ describe('ontology isolation between principals', () => {
         [domEvidence.thread, DOM],
         [domEvidence.commitment, DOM],
         [domEvidence.task, DOM],
+        [domEvidence.nameOnly, DOM],
         [beaEvidence.thread, BEA],
         [beaEvidence.commitment, BEA],
         [beaEvidence.task, BEA],
+        [beaEvidence.nameOnly, BEA],
       ].sort(),
     );
     for (const node of before.nodes.filter((item) => item.layer !== 'private')) {
@@ -439,6 +485,53 @@ describe('ontology isolation between principals', () => {
     expect(await bea.findMeeting({ jamieId: 'jamie-bea' })).toMatchObject({
       id: beaEvidence.meeting,
     });
+  });
+
+  it("keeps only the system and time in every shared node's source refs", () => {
+    const shared = before.nodes.filter((node) => node.layer !== 'private');
+    expect(shared.length).toBeGreaterThan(0);
+    for (const node of shared) {
+      for (const entry of (node.properties['source_refs'] as object[] | undefined) ?? []) {
+        expect(Object.keys(entry).sort(), `${node.label} ${node.id}`).toEqual([
+          'observedAt',
+          'system',
+        ]);
+      }
+    }
+    const annNode = before.nodes.find((node) => node.id === ann);
+    expect(annNode?.properties['source_refs']).toEqual([
+      { system: 'jamie', observedAt: '2026-09-22T08:00:00.000Z' },
+    ]);
+  });
+
+  it('tells another principal that a person exists, not which message showed them', async () => {
+    const seen = await dom.findPersonByEmail('dana@northwind.test');
+    expect(seen?.id).toBe(dana);
+    expect(JSON.stringify(seen)).not.toContain('msg-bea-dana');
+    expect(await dom.sightings(dana)).toEqual([
+      expect.objectContaining({ system: 'graph', id: 'msg-dom-dana' }),
+    ]);
+    expect(await bea.sightings(dana)).toEqual([
+      expect.objectContaining({
+        system: 'graph',
+        id: 'msg-bea-dana',
+        url: 'https://outlook.test/msg-bea-dana',
+      }),
+    ]);
+  });
+
+  it('keeps a name-only attendee private to the principal who heard it', async () => {
+    expect(domEvidence.nameOnly).not.toBe(beaEvidence.nameOnly);
+    const node = (id: string) => before.nodes.find((item) => item.id === id);
+    expect(node(domEvidence.nameOnly)).toMatchObject({ layer: 'private', principalId: DOM });
+    expect(node(beaEvidence.nameOnly)).toMatchObject({ layer: 'private', principalId: BEA });
+    expect(await dom.getNode(beaEvidence.nameOnly)).toBeNull();
+    expect((await dom.findPersonsByNormalisedName('erin nokey')).map((hit) => hit.id)).toEqual([
+      domEvidence.nameOnly,
+    ]);
+    expect((await dom.neighbours(domEvidence.meeting)).map((hit) => hit.node.id)).not.toContain(
+      beaEvidence.nameOnly,
+    );
   });
 
   it('counts only what each scope can see', async () => {

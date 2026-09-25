@@ -20,6 +20,7 @@ function watcher(pages: HistoryPage[] = [{ messages: [MESSAGE], nextCursor: null
     },
     channelId: CHANNEL,
     ownBotUserId: 'U0LANCEBOT',
+    principalId: '01K5S9V6QW3SWCCPVB0N0E300H',
     now: () => NOW,
   });
 }

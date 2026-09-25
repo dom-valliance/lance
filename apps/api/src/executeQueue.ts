@@ -15,23 +15,69 @@ export const BOSS_SCHEMA = 'pgboss';
 export const EXECUTE_QUEUE = 'execute';
 export const CHASE_QUEUE = 'chase';
 export const BRIEF_QUEUE = 'brief-morning';
+/** The worker's reconciler (ADR 0025), asked to run after a job row changes. */
+export const RECONCILE_QUEUE = 'jobs-reconcile';
+/** The worker's offboarding (package 5.6); the api records the request and queues it. */
+export const OFFBOARD_QUEUE = 'offboard-principal';
+
+/** The job body the worker's offboarding consumes. */
+export interface OffboardJob extends PrincipalJob {
+  /** The admin's ledger actor. */
+  actor: string;
+  reason: string;
+}
+
+/**
+ * Every job the api puts on a queue names the principal it is for
+ * (ADR 0025): the worker checks the id against `principals` and runs the
+ * handler in that principal's scope. The caller passes the id, so package
+ * 5.1 can pass the principal each request resolves to.
+ */
+interface PrincipalJob {
+  principalId: string;
+}
+
+/**
+ * The send options of a per-principal job: the principal's pg-boss group,
+ * as the worker's `principalJobOptions` (apps/worker/src/jobs/scoped.ts)
+ * gives them. The worker runs one job of a group at a time on each queue,
+ * which holds only for jobs sent in the group, so an api `/lance brief`
+ * never runs beside the scheduled brief for the same principal.
+ */
+export function principalJobOptions(principalId: string): { group: { id: string } } {
+  return { group: { id: principalId } };
+}
 
 /** The job body the worker's executor consumes. */
-export interface ExecuteJob {
+export interface ExecuteJob extends PrincipalJob {
   proposalId: string;
 }
 
 /** The job body the worker's chase handler consumes (spec 9.2, 10.1 item 4). */
-export interface ChaseJob {
+export interface ChaseJob extends PrincipalJob {
   commitmentId: string;
 }
 
+/** One pg-boss schedule for one of a principal's jobs. */
+export interface JobSchedule {
+  /** The job's slug, which is its queue. */
+  slug: string;
+  cron: string;
+  timeZone: string;
+}
+
 export interface ExecuteQueue {
-  enqueueExecute(proposalId: string): Promise<void>;
-  /** Returns the pg-boss job id, which the caller shows to Dom. */
-  enqueueChase(commitmentId: string): Promise<string>;
-  /** Regenerates the morning brief now (`/lance brief`, spec 9.2). */
-  enqueueBrief(): Promise<string>;
+  enqueueExecute(principalId: string, proposalId: string): Promise<void>;
+  /** Returns the pg-boss job id, which the caller shows to the principal. */
+  enqueueChase(principalId: string, commitmentId: string): Promise<string>;
+  /** Regenerates the principal's morning brief now (`/lance brief`, spec 9.2). */
+  enqueueBrief(principalId: string): Promise<string>;
+  /** Asks the worker to reconcile schedules after the principal's job rows changed. */
+  enqueueReconcile(principalId: string): Promise<void>;
+  /** Hands one principal's offboarding to the worker; returns the pg-boss job id. */
+  enqueueOffboard(job: OffboardJob): Promise<string>;
+  /** The schedules the worker's reconciler holds for the principal, for `/lance jobs`. */
+  schedulesFor(principalId: string): Promise<JobSchedule[]>;
   stop(): Promise<void>;
 }
 
@@ -60,20 +106,23 @@ export function createExecuteQueue(db: Db): ExecuteQueue {
     await boss.createQueue(EXECUTE_QUEUE);
     await boss.createQueue(CHASE_QUEUE);
     await boss.createQueue(BRIEF_QUEUE);
+    await boss.createQueue(RECONCILE_QUEUE);
+    await boss.createQueue(OFFBOARD_QUEUE);
   };
 
   return {
-    async enqueueExecute(proposalId: string): Promise<void> {
+    async enqueueExecute(principalId: string, proposalId: string): Promise<void> {
       started ??= start();
       await started;
-      const job: ExecuteJob = { proposalId };
-      await boss.send(EXECUTE_QUEUE, job);
+      const job: ExecuteJob = { principalId, proposalId };
+      await boss.send(EXECUTE_QUEUE, job, principalJobOptions(principalId));
     },
 
-    async enqueueBrief(): Promise<string> {
+    async enqueueBrief(principalId: string): Promise<string> {
       started ??= start();
       await started;
-      const jobId = await boss.send(BRIEF_QUEUE, {});
+      const job: PrincipalJob = { principalId };
+      const jobId = await boss.send(BRIEF_QUEUE, job, principalJobOptions(principalId));
       if (jobId === null) {
         throw new Error(
           'The brief queue refused the job. Check that the worker is running and that the pgboss schema is present.',
@@ -82,11 +131,11 @@ export function createExecuteQueue(db: Db): ExecuteQueue {
       return jobId;
     },
 
-    async enqueueChase(commitmentId: string): Promise<string> {
+    async enqueueChase(principalId: string, commitmentId: string): Promise<string> {
       started ??= start();
       await started;
-      const job: ChaseJob = { commitmentId };
-      const jobId = await boss.send(CHASE_QUEUE, job);
+      const job: ChaseJob = { principalId, commitmentId };
+      const jobId = await boss.send(CHASE_QUEUE, job, principalJobOptions(principalId));
       if (jobId === null) {
         throw new Error(
           `The chase queue refused the job for commitment ${commitmentId}. Check that the worker is running and that the pgboss schema is present.`,
@@ -94,6 +143,39 @@ export function createExecuteQueue(db: Db): ExecuteQueue {
       }
       return jobId;
     },
+
+    async enqueueReconcile(principalId: string): Promise<void> {
+      started ??= start();
+      await started;
+      const job: PrincipalJob = { principalId };
+      await boss.send(RECONCILE_QUEUE, job);
+    },
+
+    async enqueueOffboard(job: OffboardJob): Promise<string> {
+      started ??= start();
+      await started;
+      const jobId = await boss.send(OFFBOARD_QUEUE, job);
+      if (jobId === null) {
+        throw new Error(
+          `The offboarding queue refused the job for principal ${job.principalId}. Check that the worker is running and that the pgboss schema is present.`,
+        );
+      }
+      return jobId;
+    },
+
+    async schedulesFor(principalId: string): Promise<JobSchedule[]> {
+      started ??= start();
+      await started;
+      // Keys are `<slug>/<principalId>`, with `/<n>` for a job with several crons.
+      return (await boss.getSchedules())
+        .filter((schedule) => schedule.key.split('/')[1] === principalId)
+        .map((schedule) => ({
+          slug: schedule.name,
+          cron: schedule.cron,
+          timeZone: schedule.timezone,
+        }));
+    },
+
     async stop(): Promise<void> {
       if (started === null) return;
       await started;

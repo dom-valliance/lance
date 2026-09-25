@@ -25,7 +25,7 @@ const CORRELATION = '01K5S9V6QW3SWCCPVB0N0E309Z';
 
 let container: StartedPostgreSqlContainer;
 let client: pg.Client;
-let partialFolder: string;
+let partialFolder: string | undefined;
 
 /** A copy of the migrations folder whose journal stops at 0008. */
 const migrationsUpTo0008 = (): string => {
@@ -85,7 +85,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await client?.end();
   await container?.stop();
-  rmSync(partialFolder, { recursive: true, force: true });
+  if (partialFolder !== undefined) rmSync(partialFolder, { recursive: true, force: true });
 });
 
 describe('migration 0009 over existing data', () => {
@@ -97,7 +97,9 @@ describe('migration 0009 over existing data', () => {
       {
         id: DOM_ID,
         upn: 'dom@valliance.ai',
-        slack_user_id: 'U0SLACKDOM',
+        // Copied by 0009, then cleared by 0014: a Slack id counts only once
+        // the person has proven it through /lance login (ADR 0021).
+        slack_user_id: null,
         notion_user_id: 'notion-dom',
         status: 'active',
       },

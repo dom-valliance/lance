@@ -12,13 +12,11 @@ import {
 import { LedgerWriter } from '@lance/ledger';
 import { BANNED_PHRASES, newUlid, nowIso, type Config } from '@lance/shared';
 import { and, desc, gte, inArray, lt, sql } from 'drizzle-orm';
-import type { PgBoss } from 'pg-boss';
-import { work } from '../scheduler/boss.js';
 import { z } from 'zod';
 import { addDays, localDate, startOfLocalDay } from './local.js';
 
 /**
- * The weekly review (spec 10.5), Friday 16:30: commitment ageing in both
+ * The weekly review (spec 10.5), Friday 16:30 by default (the job registry): commitment ageing in both
  * directions, task completion by source, proposals by cell, promotion
  * candidates, cost by agent, alerts by kind, and three questions the
  * Planner wants answered to rank next week better. Everything but the
@@ -368,17 +366,4 @@ export async function runWeeklyReview(
     payload: { kind: 'brief', briefKind: 'weekly_review', briefId, slackTs },
   });
   return { briefId, slackTs };
-}
-
-export async function registerWeeklyReview(boss: PgBoss, deps: WeeklyDeps): Promise<void> {
-  await boss.createQueue(QUEUE_WEEKLY);
-  await boss.schedule(
-    QUEUE_WEEKLY,
-    '30 16 * * 5',
-    {},
-    { tz: deps.config.timeZone, key: QUEUE_WEEKLY },
-  );
-  await work(boss, QUEUE_WEEKLY, async () => {
-    await runWeeklyReview(deps);
-  });
 }

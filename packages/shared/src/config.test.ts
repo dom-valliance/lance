@@ -6,6 +6,23 @@ const minimalTestEnv: NodeJS.ProcessEnv = {
   DATABASE_URL: 'postgres://lance_app:pw@localhost:5432/lance_test',
 };
 
+describe('the inbox agent watermark alert', () => {
+  it('turns on with its threshold when the environment asks for it', () => {
+    const config = loadConfig({
+      ...minimalTestEnv,
+      INBOX_AGENT_WATERMARK_ALERT: 'true',
+      INBOX_AGENT_WATERMARK_MAX_AGE_HOURS: '36',
+    });
+    expect(config.inboxAgent).toEqual({ watermarkAlert: true, watermarkMaxAgeHours: 36 });
+  });
+
+  it('refuses a value that is not true or false', () => {
+    expect(() => loadConfig({ ...minimalTestEnv, INBOX_AGENT_WATERMARK_ALERT: 'yes' })).toThrow(
+      /INBOX_AGENT_WATERMARK_ALERT/,
+    );
+  });
+});
+
 describe('loadConfig defaults', () => {
   it('loads every documented default from a near-empty env in test mode', () => {
     const config = loadConfig(minimalTestEnv);
@@ -49,6 +66,11 @@ describe('loadConfig defaults', () => {
 
     expect(config.cost).toEqual({ dailyCeilingGbp: 15, usdToGbp: 0.78 });
     expect(config.scheduler).toEqual({ tickSeconds: 30 });
+    expect(config.modelLimiter).toEqual({
+      concurrency: 16,
+      principalBurst: 6,
+      principalRunsPerMinute: 12,
+    });
     expect(config.proposals).toEqual({ expiryHours: 48 });
     expect(config.interruption).toEqual({
       quietHoursStart: '19:00',
@@ -57,6 +79,9 @@ describe('loadConfig defaults', () => {
     });
     expect(config.promotion).toEqual({ threshold: 10, minSpanDays: 14 });
     expect(config.watchers).toEqual({ dryRunDaysForNewWatcher: 5 });
+    expect(config.inboxAgent).toEqual({ watermarkAlert: false, watermarkMaxAgeHours: 24 });
+    expect(config.triage).toEqual({ bulkLabels: ['Newsletters', 'Notifications'] });
+    expect(config.modelQueues).toEqual({ concurrency: 16 });
     expect(config.briefs).toEqual({ minFreeBlockHours: 2 });
     expect(config.retention).toEqual({
       mailBodiesDays: 90,
@@ -64,6 +89,7 @@ describe('loadConfig defaults', () => {
       ledgerDays: 730,
       modelLogsDays: 30,
     });
+    expect(config.offboarding).toEqual({ afterRoleLossDays: 7 });
     expect(config.featureFlags).toEqual({
       graphWrites: false,
       notionWrites: false,
@@ -134,6 +160,9 @@ describe('loadConfig env overrides', () => {
       COST_DAILY_CEILING_GBP: '25',
       COST_USD_TO_GBP: '0.8',
       SCHEDULER_TICK_SECONDS: '15',
+      MODEL_CONCURRENCY: '8',
+      MODEL_PRINCIPAL_BURST: '3',
+      MODEL_PRINCIPAL_RUNS_PER_MINUTE: '30',
       PROPOSALS_EXPIRY_HOURS: '24',
       INTERRUPTION_QUIET_HOURS_START: '20:00',
       INTERRUPTION_QUIET_HOURS_END: '08:00',
@@ -146,6 +175,7 @@ describe('loadConfig env overrides', () => {
       RETENTION_TRANSCRIPTS_DAYS: '60',
       RETENTION_LEDGER_DAYS: '365',
       RETENTION_MODEL_LOGS_DAYS: '7',
+      OFFBOARD_AFTER_ROLE_LOSS_DAYS: '14',
       FF_GRAPH_WRITES: 'true',
       FF_NOTION_WRITES: '1',
       FF_SLACK_WRITES: 'false',
@@ -180,6 +210,11 @@ describe('loadConfig env overrides', () => {
     expect(config.prices['claude-sonnet-5']).toBeDefined();
     expect(config.cost).toEqual({ dailyCeilingGbp: 25, usdToGbp: 0.8 });
     expect(config.scheduler).toEqual({ tickSeconds: 15 });
+    expect(config.modelLimiter).toEqual({
+      concurrency: 8,
+      principalBurst: 3,
+      principalRunsPerMinute: 30,
+    });
     expect(config.proposals).toEqual({ expiryHours: 24 });
     expect(config.interruption).toEqual({
       quietHoursStart: '20:00',
@@ -195,6 +230,7 @@ describe('loadConfig env overrides', () => {
       ledgerDays: 365,
       modelLogsDays: 7,
     });
+    expect(config.offboarding).toEqual({ afterRoleLossDays: 14 });
     expect(config.featureFlags).toEqual({
       graphWrites: true,
       notionWrites: true,
@@ -246,6 +282,26 @@ describe('loadConfig validation failures', () => {
   });
 });
 
+describe('bulk mail and model queues', () => {
+  const base = { NODE_ENV: 'test', DATABASE_URL: 'postgres://lance:pw@localhost:5432/lance' };
+
+  it('reads the bulk labels as a comma-separated list and the model queue team size', () => {
+    const config = loadConfig({
+      ...base,
+      TRIAGE_BULK_LABELS: 'Newsletters, Alerts',
+      MODEL_QUEUE_CONCURRENCY: '6',
+    });
+    expect(config.triage.bulkLabels).toEqual(['Newsletters', 'Alerts']);
+    expect(config.modelQueues.concurrency).toBe(6);
+  });
+
+  it('refuses a bulk label outside the mail taxonomy', () => {
+    expect(() => loadConfig({ ...base, TRIAGE_BULK_LABELS: 'Newsletters,Spam' })).toThrowError(
+      /TRIAGE_BULK_LABELS/,
+    );
+  });
+});
+
 describe('getConfig', () => {
   it('returns the same cached instance across calls', () => {
     // getConfig reads real process.env, so this test supplies a minimal
@@ -272,13 +328,13 @@ describe('getConfig', () => {
 });
 
 describe('dom identity', () => {
-  it('defaults the email to ALLOWED_UPN and the name to Dom Selvon', () => {
+  it("defaults the email to Dom's UPN and the name to Dom Selvon, whatever ALLOWED_UPN says", () => {
     const config = loadConfig({
       NODE_ENV: 'test',
       DATABASE_URL: 'postgres://postgres:postgres@localhost:5432/lance',
-      ALLOWED_UPN: 'dom@example.test',
+      ALLOWED_UPN: 'someone.else@example.test',
     });
-    expect(config.dom).toEqual({ name: 'Dom Selvon', email: 'dom@example.test' });
+    expect(config.dom).toEqual({ name: 'Dom Selvon', email: 'dom@valliance.ai' });
   });
 
   it('takes DOM_EMAIL and DOM_NAME when set', () => {

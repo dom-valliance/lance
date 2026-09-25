@@ -23,6 +23,8 @@ const EXPECTED_TABLES = [
   'briefs',
   'commitments',
   'cursors',
+  'graph_consent_states',
+  'jobs',
   'ledger_events',
   'observations',
   'policy_decisions',
@@ -30,6 +32,9 @@ const EXPECTED_TABLES = [
   'principal_state',
   'principals',
   'proposals',
+  'slack_link_tokens',
+  'slack_links',
+  'slack_request_nonces',
   'system_state',
   'users',
 ] as const;

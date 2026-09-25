@@ -2,7 +2,7 @@ import type { CommitmentCandidate } from '@lance/agents';
 import { commitments, type Db } from '@lance/db';
 import { LedgerWriter } from '@lance/ledger';
 import { OntologyRepository, normaliseEmail, type SourceRef } from '@lance/ontology';
-import { newUlid, nowIso, type ProvenanceRef } from '@lance/shared';
+import { newUlid, nowIso, type PrincipalIdentity, type ProvenanceRef } from '@lance/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 /**
@@ -18,12 +18,6 @@ export const COMMITMENTS_ACTOR = 'system:commitments';
 /** How long after the due date an inbound commitment is first chased. */
 const CHASE_GRACE_DAYS = 2;
 
-export interface DomIdentity {
-  name: string;
-  email: string;
-  notionUserId?: string | null;
-}
-
 export interface KnownPerson {
   name: string;
   email: string | null;
@@ -32,7 +26,8 @@ export interface KnownPerson {
 export interface RecordCommitmentsDeps {
   db: Db;
   ontology: OntologyRepository;
-  dom: DomIdentity;
+  /** The principal whose context this is; the Person every commitment is owed by or to. */
+  principal: PrincipalIdentity;
   now?: () => string;
 }
 
@@ -104,13 +99,13 @@ export async function recordCommitments(
   const sourceRef = sourceRefOf(first);
   const directory = context.directory ?? [];
 
-  const dom = await deps.ontology.upsertPerson(
+  const principal = await deps.ontology.upsertPerson(
     {
-      displayName: deps.dom.name,
-      emails: [deps.dom.email],
-      notionUserId: deps.dom.notionUserId ?? null,
+      displayName: deps.principal.name,
+      emails: [deps.principal.email],
+      notionUserId: deps.principal.notionUserId,
       isInternal: true,
-      sourceRef: { system: 'lance', id: 'dom', observedAt: now() },
+      sourceRef: { system: 'lance', id: 'principal', observedAt: now() },
     },
     mutation,
   );
@@ -129,7 +124,7 @@ export async function recordCommitments(
       { displayName: name, emails: email === null ? [] : [email], sourceRef },
       mutation,
     );
-    if (counterparty.id === dom.id) {
+    if (counterparty.id === principal.id) {
       skipped += 1;
       continue;
     }
@@ -157,8 +152,8 @@ export async function recordCommitments(
       candidate.direction === 'inbound' && due !== null
         ? new Date(due.getTime() + CHASE_GRACE_DAYS * 24 * 3600 * 1000)
         : null;
-    // The owner is who owes: Dom for outbound, the counterparty for inbound.
-    const ownerPersonId = candidate.direction === 'outbound' ? dom.id : counterparty.id;
+    // The owner is who owes: the principal for outbound, the counterparty for inbound.
+    const ownerPersonId = candidate.direction === 'outbound' ? principal.id : counterparty.id;
     await deps.db.insert(commitments).values({
       id,
       direction: candidate.direction,
@@ -178,7 +173,7 @@ export async function recordCommitments(
     await deps.ontology.link(
       id,
       'OWED_TO',
-      candidate.direction === 'outbound' ? counterparty.id : dom.id,
+      candidate.direction === 'outbound' ? counterparty.id : principal.id,
       {},
       mutation,
     );

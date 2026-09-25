@@ -1,52 +1,94 @@
-import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
+import { openAppTestDb, openFixtureDb, startPostgresContainer } from '@lance/db/testing';
 import {
   SEED_PRINCIPAL_ID,
   agentRuns,
+  alerts,
   cursors,
+  principalState,
   proposals,
   runMigrations,
+  scopedDb,
   type Db,
 } from '@lance/db';
-import { LedgerReader } from '@lance/ledger';
+import { JobControl, LedgerReader, LedgerWriter, raiseAlert } from '@lance/ledger';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { createPublicKey, generateKeyPairSync, verify } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEntraVerifier, entraIssuer } from './auth/entra.js';
-import { createExecuteQueue, type ExecuteQueue } from './executeQueue.js';
-import { createApiDeps } from './main.js';
+import { createBoss, createExecuteQueue, type ExecuteQueue } from './executeQueue.js';
+import { evidenceSignerFromPem, type SignedEvidence } from './admin/evidence.js';
+import { createServerDeps } from './main.js';
 import { buildServer } from './server.js';
 import { slackSignature } from './slack/verify.js';
 import {
   createTestJwks,
   testConfig,
   TEST_INGEST_SECRET,
+  TEST_OID,
   TEST_SIGNING_SECRET,
+  TEST_SLACK_TEAM_ID,
   TEST_SLACK_USER_ID,
   TEST_UPN,
   type TestJwks,
 } from './test-fakes.js';
 
 /**
- * The one test that runs the api over a real database (ADR 0004, same
- * image as CI and production). Everything else in this suite uses fakes;
- * this proves the wiring in `createApiDeps` and that a pause from the api
- * and a resume from Slack both land in the ledger.
+ * The api over a real database (ADR 0004, same image as CI and
+ * production), logged in as a lance_app member so row-level security and
+ * the principals policies apply as they do in production. Everything else
+ * in this suite uses fakes; this proves the wiring in `createServerDeps`:
+ * role-gated sign-in, first sign-in, the per-principal dependency cache,
+ * the admin reads, and a pause from the api and a resume from Slack both
+ * landing in the ledger.
  */
 
 const TENANT_ID = '11111111-2222-3333-4444-555555555555';
 const CLIENT_ID = '66666666-7777-8888-9999-000000000000';
 
+const ANN_ID = '01K5S9V6QW3SWCCPVB0N0E3A01';
+const ANN_OID = 'ann-object-id';
+const ANN_UPN = 'ann@valliance.ai';
+const STRANGER_OID = 'stranger-object-id';
+const STRANGER_UPN = 'new.person@valliance.ai';
+
 let container: StartedPostgreSqlContainer;
+let root: Db;
 let db: Db;
+let fixture: Db;
 let server: FastifyInstance;
 let keys: TestJwks;
-let bearer: string;
+let domBearer: string;
+let annBearer: string;
+let strangerBearer: string;
+let noRoleBearer: string;
 let executeQueue: ExecuteQueue;
 
 const PROPOSAL_ID = '01K5S9V6QW3SWCCPVB0N0E301A';
 const CORRELATION_ID = '01K5S9V6QW3SWCCPVB0N0E301B';
+const ANN_PROPOSAL_ID = '01K5S9V6QW3SWCCPVB0N0E3A02';
+
+/** Words planted in content columns; no admin response may carry them. */
+const CONTENT_MARKER = 'CONFIDENTIAL-CONTENT';
+
+const auth = (bearer: string): Record<string, string> => ({ authorization: `Bearer ${bearer}` });
+
+const trpcGet = (path: string, bearer: string) =>
+  server.inject({ method: 'GET', url: `/trpc/${path}`, headers: auth(bearer) });
+
+const trpcPost = (path: string, bearer: string, input: Record<string, unknown>) =>
+  server.inject({ method: 'POST', url: `/trpc/${path}`, headers: auth(bearer), payload: input });
+
+/** The evidence export's key, generated for the suite as `openssl genpkey -algorithm ed25519` would. */
+const EVIDENCE_KEY = generateKeyPairSync('ed25519').privateKey.export({
+  type: 'pkcs8',
+  format: 'pem',
+});
+
+const dataOf = <T>(response: { json: <U>() => U }): T =>
+  response.json<{ result: { data: T } }>().result.data;
 
 const slashCommand = async (
   text: string,
@@ -55,6 +97,7 @@ const slashCommand = async (
     command: '/lance',
     text,
     user_id: TEST_SLACK_USER_ID,
+    team_id: TEST_SLACK_TEAM_ID,
     channel_id: 'C0BU7P278N5',
   }).toString();
   const timestamp = String(Math.floor(Date.now() / 1000));
@@ -71,13 +114,54 @@ const slashCommand = async (
   });
 };
 
+const proposalRow = (id: string, preview: string) => ({
+  id,
+  correlationId: newUlid(),
+  actionClass: 'draft_email' as const,
+  counterpartyClass: 'client' as const,
+  targetSystem: 'graph' as const,
+  targetRecordId: `AAMk-${id}`,
+  reversibility: 'compensatable' as const,
+  payload: { subject: `Re: ${CONTENT_MARKER}`, bodyText: CONTENT_MARKER },
+  preview,
+  rationale: `They asked. ${CONTENT_MARKER}`,
+  provenance: [
+    { system: 'graph', recordId: 'AAMk1', hash: 'h1', observedAt: '2026-09-21T09:00:00.000Z' },
+  ],
+  policyDecision: 'propose' as const,
+  status: 'pending' as const,
+  expiresAt: new Date(Date.now() + 3600 * 1000),
+});
+
+const principalsSnapshot = async (): Promise<Record<string, unknown>[]> => {
+  const result = await fixture.$client.query(
+    'SELECT id, entra_oid, upn, slack_user_id, notion_user_id, status, time_zone, created_at FROM principals ORDER BY id',
+  );
+  return result.rows as Record<string, unknown>[];
+};
+
 beforeAll(async () => {
   container = await startPostgresContainer();
 
   const connectionString = container.getConnectionUri();
   await runMigrations({ connectionString });
 
-  db = await openSeededTestDb(connectionString);
+  root = await openAppTestDb(connectionString);
+  db = scopedDb(root, { principalId: SEED_PRINCIPAL_ID });
+  fixture = openFixtureDb(connectionString);
+
+  // Dom's row as the migration left it: no Entra object id yet, and a
+  // Slack link he proved through /lance login (ADR 0021), which fills
+  // principals.slack_user_id. Ann is a second, already bound principal.
+  await fixture.$client.query(
+    'INSERT INTO slack_links (slack_user_id, slack_team_id, principal_id) VALUES ($1, $2, $3)',
+    [TEST_SLACK_USER_ID, TEST_SLACK_TEAM_ID, SEED_PRINCIPAL_ID],
+  );
+  await fixture.$client.query(
+    "INSERT INTO principals (id, entra_oid, upn, status) VALUES ($1, $2, $3, 'active')",
+    [ANN_ID, ANN_OID, ANN_UPN],
+  );
+  await scopedDb(root, { principalId: ANN_ID }).insert(principalState).values({});
 
   await db.insert(cursors).values({ watcher: 'graph-mail', key: 'inbox', value: 'delta-token' });
   await db.insert(agentRuns).values({
@@ -90,23 +174,32 @@ beforeAll(async () => {
   });
 
   keys = await createTestJwks(entraIssuer(TENANT_ID), CLIENT_ID);
-  bearer = await keys.sign({ preferred_username: TEST_UPN });
+  domBearer = await keys.sign({
+    oid: TEST_OID,
+    preferred_username: TEST_UPN,
+    roles: ['Lance.User', 'Lance.Admin'],
+  });
+  annBearer = await keys.sign({ oid: ANN_OID, preferred_username: ANN_UPN, roles: ['Lance.User'] });
+  strangerBearer = await keys.sign({
+    oid: STRANGER_OID,
+    preferred_username: STRANGER_UPN,
+    roles: ['Lance.User'],
+  });
+  noRoleBearer = await keys.sign({
+    oid: 'no-role-oid',
+    preferred_username: 'no.role@valliance.ai',
+  });
 
-  executeQueue = createExecuteQueue(db);
+  executeQueue = createExecuteQueue(root);
   server = buildServer(
-    createApiDeps({
+    createServerDeps({
       config: testConfig(),
-      db,
-      principalId: SEED_PRINCIPAL_ID,
+      root,
       executeQueue,
-      auth: createEntraVerifier({
-        tenantId: TENANT_ID,
-        clientId: CLIENT_ID,
-        allowedUpn: TEST_UPN,
-        jwks: keys.jwks,
-      }),
-      slack: { signingSecret: TEST_SIGNING_SECRET, allowedUserId: TEST_SLACK_USER_ID },
+      auth: createEntraVerifier({ tenantId: TENANT_ID, clientId: CLIENT_ID, jwks: keys.jwks }),
+      slack: { signingSecret: TEST_SIGNING_SECRET, fallbackUserId: null },
       ingestSecret: TEST_INGEST_SECRET,
+      evidenceSigner: evidenceSignerFromPem(EVIDENCE_KEY),
     }),
   );
   await server.ready();
@@ -115,23 +208,101 @@ beforeAll(async () => {
 afterAll(async () => {
   await server?.close();
   await executeQueue?.stop();
-  await db?.$client.end();
+  await root?.$client.end();
+  await fixture?.$client.end();
   await container?.stop();
 });
 
+describe('sign-in over a real database', () => {
+  it("binds Dom's oid on his first sign-in and changes no other row", async () => {
+    const before = await principalsSnapshot();
+
+    const response = await trpcGet('me', domBearer);
+
+    expect(response.statusCode).toBe(200);
+    expect(dataOf<{ principalId: string; status: string }>(response)).toMatchObject({
+      principalId: SEED_PRINCIPAL_ID,
+      status: 'active',
+    });
+    const after = await principalsSnapshot();
+    expect(after).toEqual(
+      before.map((row) =>
+        row['id'] === SEED_PRINCIPAL_ID ? { ...row, entra_oid: TEST_OID } : row,
+      ),
+    );
+    const events = await new LedgerReader(db).query({ kind: 'state_changed' });
+    // Newest first: the binding, then the roles his token carried.
+    expect(events.map((event) => event.payload)).toEqual([
+      {
+        change: 'principal_roles_recorded',
+        principalId: SEED_PRINCIPAL_ID,
+        roles: ['Lance.Admin', 'Lance.User'],
+        previous: [],
+      },
+      { change: 'principal_bound', principalId: SEED_PRINCIPAL_ID, entraOid: TEST_OID },
+    ]);
+    expect(events.map((event) => event.actor)).toEqual(['user:dom', 'user:dom']);
+  });
+
+  it('finds Dom by his oid on every later request without writing again', async () => {
+    await trpcGet('me', domBearer);
+    const events = await new LedgerReader(db).query({ kind: 'state_changed' });
+    expect(events).toHaveLength(2);
+  });
+
+  it('refuses a token with neither Lance role and creates no principal', async () => {
+    const before = await principalsSnapshot();
+    const response = await trpcGet('me', noRoleBearer);
+
+    expect(response.statusCode).toBe(403);
+    expect(await principalsSnapshot()).toEqual(before);
+  });
+
+  it("creates an onboarding principal on a stranger's first sign-in, who reaches nothing else", async () => {
+    const me = await trpcGet('me', strangerBearer);
+    const summary = await trpcGet('proposals.summary', strangerBearer);
+    const pause = await server.inject({
+      method: 'POST',
+      url: '/admin/pause',
+      headers: auth(strangerBearer),
+      payload: { reason: 'curious' },
+    });
+
+    const created = dataOf<{ principalId: string; status: string; upn: string }>(me);
+    expect(created).toMatchObject({ status: 'onboarding', upn: STRANGER_UPN });
+    expect([summary.statusCode, pause.statusCode]).toEqual([403, 403]);
+    const stranger = scopedDb(root, { principalId: created.principalId });
+    const events = await new LedgerReader(stranger).query({ kind: 'state_changed' });
+    expect(events.map((event) => event.payload)).toEqual([
+      {
+        change: 'principal_roles_recorded',
+        principalId: created.principalId,
+        roles: ['Lance.User'],
+        previous: [],
+      },
+      {
+        change: 'principal_created',
+        principalId: created.principalId,
+        entraOid: STRANGER_OID,
+        status: 'onboarding',
+      },
+    ]);
+  });
+});
+
 describe('the api over a real database', () => {
-  it('reports itself ready once the schema is migrated and seeded', async () => {
+  it('reports itself ready from the global system_state row', async () => {
     const response = await server.inject({ method: 'GET', url: '/health/ready' });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true, paused: false, mode: 'dry_run' });
+    expect(response.json()).toEqual({ ok: true, pausedGlobally: false, modeCeiling: 'live' });
   });
 
   it('pauses through POST /admin/pause with a test-signed Entra token', async () => {
     const response = await server.inject({
       method: 'POST',
       url: '/admin/pause',
-      headers: { authorization: `Bearer ${bearer}` },
+      headers: auth(domBearer),
       payload: { reason: 'container test' },
     });
 
@@ -155,51 +326,36 @@ describe('the api over a real database', () => {
     const response = await server.inject({
       method: 'POST',
       url: '/admin/resume',
-      headers: { authorization: `Bearer ${bearer}` },
+      headers: auth(domBearer),
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json<{ changed: boolean }>().changed).toBe(true);
-
-    const ready = await server.inject({ method: 'GET', url: '/health/ready' });
-    expect(ready.json<{ paused: boolean }>().paused).toBe(false);
   });
 
   it('leaves one state_changed event for the pause and one for the resume', async () => {
     const events = await new LedgerReader(db).query({ kind: 'state_changed' });
+    const switches = events.filter((event) =>
+      ['pause', 'resume'].includes((event.payload as { change: string }).change),
+    );
 
-    expect(events).toHaveLength(2);
-    expect(events.map((event) => (event.payload as { change: string }).change).sort()).toEqual([
+    expect(switches.map((event) => (event.payload as { change: string }).change).sort()).toEqual([
       'pause',
       'resume',
     ]);
-    expect(events.every((event) => event.actor === 'user:dom')).toBe(true);
+    expect(switches.every((event) => event.actor === 'user:dom')).toBe(true);
   });
 
   it('approves a pending proposal through tRPC and queues it for execution', async () => {
     await db.insert(proposals).values({
-      id: PROPOSAL_ID,
+      ...proposalRow(PROPOSAL_ID, 'Reply to "the pilot"'),
       correlationId: CORRELATION_ID,
-      actionClass: 'draft_email',
-      counterpartyClass: 'client',
-      targetSystem: 'graph',
-      targetRecordId: 'AAMk1',
-      reversibility: 'compensatable',
-      payload: { subject: 'Re: the pilot', bodyText: 'Tuesday suits.' },
-      preview: 'Reply to "the pilot"',
-      rationale: 'They asked for a date.',
-      provenance: [
-        { system: 'graph', recordId: 'AAMk1', hash: 'h1', observedAt: '2026-09-21T09:00:00.000Z' },
-      ],
-      policyDecision: 'propose',
-      status: 'pending',
-      expiresAt: new Date(Date.now() + 3600 * 1000),
     });
 
     const response = await server.inject({
       method: 'POST',
       url: '/trpc/proposals.decide',
-      headers: { authorization: `Bearer ${bearer}` },
+      headers: auth(domBearer),
       payload: { proposalId: PROPOSAL_ID, action: 'approve' },
     });
 
@@ -213,11 +369,15 @@ describe('the api over a real database', () => {
     expect(forProposal[0]?.actor).toBe('user:dom');
     expect((forProposal[0]?.payload as { to: string }).to).toBe('approved');
 
-    const queued = await db.execute<{ name: string; data: { proposalId: string } }>(
-      sql`select name, data from pgboss.job where name = 'execute'`,
-    );
+    const queued = await db.execute<{
+      name: string;
+      data: { principalId: string; proposalId: string };
+    }>(sql`select name, data from pgboss.job where name = 'execute'`);
     expect(queued.rows).toHaveLength(1);
-    expect(queued.rows[0]?.data.proposalId).toBe(PROPOSAL_ID);
+    expect(queued.rows[0]?.data).toEqual({
+      principalId: SEED_PRINCIPAL_ID,
+      proposalId: PROPOSAL_ID,
+    });
   });
 
   it('appends an observed agent log through the ingest webhook', async () => {
@@ -240,5 +400,308 @@ describe('the api over a real database', () => {
     expect(observed).toHaveLength(1);
     expect(observed[0]?.actor).toBe('agent:inbox-agent@0.0.0');
     expect(observed[0]?.idempotencyKey).toContain('webhook:slack-1758351600.123456:');
+  });
+
+  it("pauses one of the principal's jobs from Slack, records it and asks the worker to reconcile", async () => {
+    // The worker's reconciler creates these rows; here the test does.
+    await new JobControl(db).ensure(
+      [
+        { slug: 'brief-morning', locked: false },
+        { slug: 'alerts-deliver', locked: true },
+      ],
+      { actor: 'system:scheduler' },
+    );
+
+    // And the worker's schedule for one of them, keyed as its reconciler keys it.
+    const boss = createBoss(db);
+    await boss.start();
+    await boss.createQueue('alerts-deliver');
+    await boss.schedule(
+      'alerts-deliver',
+      '* * * * *',
+      { principalId: SEED_PRINCIPAL_ID },
+      { tz: 'Europe/London', key: `alerts-deliver/${SEED_PRINCIPAL_ID}` },
+    );
+    await boss.stop({ graceful: false });
+
+    const listed = await slashCommand('jobs');
+    const listing = listed.json<{ text: string }>().text;
+    expect(listing).toContain('`brief-morning`: on');
+    expect(listing).toContain('`alerts-deliver`: on, locked, next run');
+    expect(listing).toContain('`brief-morning`: on, not scheduled yet');
+
+    const paused = await slashCommand('pause brief-morning');
+    expect(paused.json<{ text: string }>().text).toContain('brief-morning is paused');
+    const refused = await slashCommand('pause alerts-deliver');
+    expect(refused.json<{ text: string }>().text).toContain('locked');
+
+    const rows = await new JobControl(db).list();
+    expect(rows.find((row) => row.slug === 'brief-morning')?.enabled).toBe(false);
+    expect(rows.find((row) => row.slug === 'alerts-deliver')?.enabled).toBe(true);
+
+    const changes = (await new LedgerReader(db).query({ kind: 'state_changed' }))
+      .map((event) => event.payload as { change: string; slug?: string })
+      .filter((payload) => payload.change === 'job');
+    expect(changes).toEqual([
+      {
+        change: 'job',
+        slug: 'brief-morning',
+        old: { enabled: true, scheduleOverride: null },
+        new: { enabled: false, scheduleOverride: null },
+      },
+    ]);
+
+    const reconcile = await db.execute<{ data: { principalId: string } }>(
+      sql`select data from pgboss.job where name = 'jobs-reconcile'`,
+    );
+    expect(reconcile.rows.map((row) => row.data)).toEqual([{ principalId: SEED_PRINCIPAL_ID }]);
+  });
+});
+
+describe('two principals', () => {
+  it('each read only their own rows through the dependency cache', async () => {
+    await scopedDb(root, { principalId: ANN_ID })
+      .insert(proposals)
+      .values(proposalRow(ANN_PROPOSAL_ID, "Ann's reply"));
+
+    const dom = await trpcGet('proposals.list', domBearer);
+    const ann = await trpcGet('proposals.list', annBearer);
+    const annReadsDoms = await server.inject({
+      method: 'GET',
+      url: `/trpc/proposals.get?input=${encodeURIComponent(JSON.stringify({ proposalId: PROPOSAL_ID }))}`,
+      headers: auth(annBearer),
+    });
+
+    const ids = (response: typeof dom): string[] =>
+      dataOf<{ items: { id: string }[] }>(response).items.map((item) => item.id);
+    expect(ids(dom)).toEqual([PROPOSAL_ID]);
+    expect(ids(ann)).toEqual([ANN_PROPOSAL_ID]);
+    expect(dataOf<unknown>(annReadsDoms)).toBeNull();
+  });
+});
+
+describe('the admin procedures over a real database', () => {
+  it('answer 403 to a principal without Lance.Admin', async () => {
+    const responses = await Promise.all([
+      trpcGet('admin.principals', annBearer),
+      trpcGet('admin.health', annBearer),
+    ]);
+    expect(responses.map((response) => response.statusCode)).toEqual([403, 403]);
+  });
+
+  it("return each principal's health, read in its own scope, and no content", async () => {
+    const annDb = scopedDb(root, { principalId: ANN_ID });
+    await annDb.insert(alerts).values({
+      id: newUlid(),
+      severity: 'P1',
+      kind: 'breaker_open',
+      dedupeKey: 'breaker:graph',
+      title: CONTENT_MARKER,
+      body: CONTENT_MARKER,
+      provenance: [],
+    });
+    await new LedgerWriter(annDb).append({
+      ts: new Date().toISOString(),
+      actor: 'user:ann',
+      kind: 'state_changed',
+      sourceSystem: 'lance',
+      correlationId: newUlid(),
+      payload: { change: 'note', text: CONTENT_MARKER },
+    });
+
+    const principalsResponse = await trpcGet('admin.principals', domBearer);
+    const healthResponse = await trpcGet('admin.health', domBearer);
+
+    expect([principalsResponse.statusCode, healthResponse.statusCode]).toEqual([200, 200]);
+    const health = dataOf<
+      {
+        principalId: string;
+        watchers: { watcher: string }[];
+        breakers: { connector: string }[];
+        costTodayGbp: number;
+      }[]
+    >(healthResponse);
+    const domHealth = health.find((row) => row.principalId === SEED_PRINCIPAL_ID);
+    const annHealth = health.find((row) => row.principalId === ANN_ID);
+    expect(domHealth).toMatchObject({
+      watchers: [{ watcher: 'graph-mail' }],
+      breakers: [],
+      costTodayGbp: 1.56,
+    });
+    expect(annHealth).toMatchObject({
+      watchers: [],
+      breakers: [{ connector: 'graph', state: 'open' }],
+    });
+
+    for (const response of [principalsResponse, healthResponse]) {
+      expect(response.body).not.toContain(CONTENT_MARKER);
+      expect(response.body).not.toMatch(
+        /"(payload|preview|rationale|body|title|description|bodyText|subject)"/,
+      );
+    }
+  });
+
+  it('list organisation rule changes and system alerts, and nothing of another principal', async () => {
+    const orgRule = newUlid();
+    const annRule = newUlid();
+    await fixture.$client.query(
+      `INSERT INTO policy_rules (id, principal_id, version, action_class, counterparty_class, system, decision, created_by, rationale)
+       VALUES ($1, NULL, 2, 'draft_email', 'client', 'graph', 'propose', 'user:dom', $3),
+              ($2, $4, 1, 'create_task', 'internal', 'notion', 'auto', 'user:dom', $3)`,
+      [orgRule, annRule, CONTENT_MARKER, ANN_ID],
+    );
+    await new LedgerWriter(db).append({
+      ts: new Date().toISOString(),
+      actor: 'user:dom',
+      kind: 'rule_changed',
+      sourceSystem: 'lance',
+      correlationId: newUlid(),
+      payload: { ruleId: orgRule, change: 'superseded' },
+    });
+    await new LedgerWriter(scopedDb(root, { principalId: ANN_ID })).append({
+      ts: new Date().toISOString(),
+      actor: 'user:ann',
+      kind: 'rule_changed',
+      sourceSystem: 'lance',
+      correlationId: newUlid(),
+      payload: { ruleId: annRule, change: 'created' },
+    });
+    await raiseAlert(db, {
+      kind: 'principal_access_revoked',
+      severity: 'P1',
+      dedupeKey: 'principal_access_revoked:someone',
+      title: 'someone@valliance.ai has lost Lance access and is paused',
+      body: 'The nightly role check paused them.',
+      actor: 'system:role-check',
+    });
+    await raiseAlert(db, {
+      kind: 'breaker_open',
+      severity: 'P1',
+      dedupeKey: 'breaker:jamie',
+      title: 'Dom own alert, not a system one',
+      body: 'x',
+      actor: 'agent:worker@0.1.0',
+    });
+
+    const rules = await trpcGet('admin.ruleChanges', domBearer);
+    const systemAlerts = await trpcGet('admin.systemAlerts', domBearer);
+
+    expect(dataOf<{ ruleId: string; change: string }[]>(rules)).toEqual([
+      expect.objectContaining({ ruleId: orgRule, change: 'superseded', actor: 'user:dom' }),
+    ]);
+    expect(dataOf<{ kind: string }[]>(systemAlerts).map((alert) => alert.kind)).toEqual([
+      'principal_access_revoked',
+    ]);
+    expect(rules.body).not.toContain(CONTENT_MARKER);
+    expect(systemAlerts.body).not.toContain(CONTENT_MARKER);
+    expect(rules.body).not.toMatch(/"(payload|rationale|body|title|conditions)"/);
+  });
+
+  it('count onboarding steps and recorded secrets from the ledger, never what was entered', async () => {
+    await new LedgerWriter(scopedDb(root, { principalId: ANN_ID })).append({
+      ts: new Date().toISOString(),
+      actor: 'user:ann',
+      kind: 'state_changed',
+      sourceSystem: 'lance',
+      correlationId: newUlid(),
+      payload: { change: 'jamie_connected' },
+    });
+    const principalsResponse = await trpcGet('admin.principals', domBearer);
+    const healthResponse = await trpcGet('admin.health', domBearer);
+    const ann = dataOf<{ id: string; onboarding: { steps: { step: string; done: boolean }[] } }[]>(
+      principalsResponse,
+    ).find((row) => row.id === ANN_ID);
+    const annHealth = dataOf<
+      { principalId: string; secrets: { connector: string; state: string }[] }[]
+    >(healthResponse).find((row) => row.principalId === ANN_ID);
+
+    expect(ann?.onboarding.steps.filter((step) => step.done).map((step) => step.step)).toEqual([
+      'jamie',
+    ]);
+    expect(annHealth?.secrets.map((secret) => [secret.connector, secret.state])).toEqual([
+      ['graph', 'never_stored'],
+      ['jamie', 'stored'],
+    ]);
+    for (const response of [principalsResponse, healthResponse]) {
+      expect(response.body).not.toContain(CONTENT_MARKER);
+    }
+  });
+
+  it('export a signed evidence bundle that verifies, with metadata and no content', async () => {
+    const from = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const to = new Date(Date.now() + 3600 * 1000).toISOString();
+    const refused = await trpcPost('admin.evidence', annBearer, { from, to });
+    const scoped = await trpcPost('admin.evidence', domBearer, { from, to, principalId: ANN_ID });
+    const system = await trpcPost('admin.evidence', domBearer, { from, to });
+
+    expect([refused.statusCode, scoped.statusCode, system.statusCode]).toEqual([403, 200, 200]);
+    for (const response of [scoped, system]) {
+      const bundle = dataOf<SignedEvidence>(response);
+      const key = createPublicKey(bundle.signature.publicKey);
+      expect(
+        verify(
+          null,
+          Buffer.from(bundle.signed, 'utf8'),
+          key,
+          Buffer.from(bundle.signature.value, 'base64'),
+        ),
+      ).toBe(true);
+      expect(bundle.signed).not.toContain(CONTENT_MARKER);
+    }
+    const annBundle = JSON.parse(dataOf<SignedEvidence>(scoped).signed) as {
+      scope: { kind: string };
+      ledgerEvents: { kind: string; payloadHash: string }[];
+      accessEvents: { payload: { change?: string } }[];
+    };
+    expect(annBundle.scope.kind).toBe('principal');
+    expect(annBundle.ledgerEvents.length).toBeGreaterThan(0);
+    expect(annBundle.ledgerEvents.every((event) => !('payload' in event))).toBe(true);
+    expect(annBundle.accessEvents.map((event) => event.payload.change)).toContain(
+      'jamie_connected',
+    );
+
+    const systemBundle = JSON.parse(dataOf<SignedEvidence>(system).signed) as {
+      scope: { kind: string };
+      ledgerEvents?: unknown;
+      principals: { id: string }[];
+    };
+    expect(systemBundle.scope.kind).toBe('system');
+    expect(systemBundle.ledgerEvents).toBeUndefined();
+    expect(systemBundle.principals.map((principal) => principal.id)).toContain(ANN_ID);
+
+    const exported = await new LedgerReader(db).query({ kind: 'state_changed' });
+    const changeOf = (event: { payload: unknown }): unknown =>
+      (event.payload as Record<string, unknown> | null)?.['change'];
+    expect(exported.filter((event) => changeOf(event) === 'evidence_exported')).toHaveLength(2);
+  });
+
+  it("record an offboarding request in the principal's ledger and queue it for the worker", async () => {
+    const own = await trpcPost('admin.offboard', domBearer, {
+      principalId: SEED_PRINCIPAL_ID,
+      reason: 'test',
+    });
+    expect(own.statusCode).toBe(400);
+
+    const response = await trpcPost('admin.offboard', domBearer, {
+      principalId: ANN_ID,
+      reason: 'left Valliance',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(dataOf<{ status: string }>(response).status).toBe('queued');
+
+    const requested = await new LedgerReader(scopedDb(root, { principalId: ANN_ID })).query({
+      kind: 'state_changed',
+    });
+    expect(requested[0]?.payload).toMatchObject({
+      change: 'offboarding_requested',
+      principalId: ANN_ID,
+      reason: 'left Valliance',
+    });
+    const queued = await db.execute<{ data: Record<string, unknown> }>(
+      sql`select data from pgboss.job where name = 'offboard-principal'`,
+    );
+    expect(queued.rows.map((row) => row.data)).toEqual([
+      { principalId: ANN_ID, actor: 'user:dom', reason: 'left Valliance' },
+    ]);
   });
 });

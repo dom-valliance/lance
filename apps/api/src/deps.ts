@@ -1,6 +1,8 @@
 import type { SlackSurface } from '@lance/connectors';
 import type {
   AppendResult,
+  RaiseAlertInput,
+  RaiseAlertResult,
   DecisionResult,
   CostCeiling,
   InterruptionBudget,
@@ -14,12 +16,25 @@ import type {
   ResumeResult,
   RunState,
 } from '@lance/ledger';
-import type { Config, LedgerEventInputCandidate, Proposal, SystemMode } from '@lance/shared';
+import type {
+  Config,
+  LanceRole,
+  LedgerEventInputCandidate,
+  Proposal,
+  SystemMode,
+} from '@lance/shared';
+import type { PRINCIPAL_STATUS_VALUES } from '@lance/db';
+import type { OnboardingProgress } from './admin/onboarding.js';
+import type { ConsentStateStoreLike } from './auth/graph-state.js';
+import type { SignedEvidence } from './admin/evidence.js';
 import type { AgentsStoreLike } from './agents/store.js';
 import type { AlertStoreLike } from './alerts/store.js';
 import type { BriefStoreLike } from './briefs/store.js';
 import type { CommitmentStoreLike } from './commitments/store.js';
 import type { FeedEvent, FeedListener } from './events.js';
+import type { JobsServiceLike } from './jobs/service.js';
+import type { OnboardingServiceLike } from './onboarding/service.js';
+import type { ReplayGuardLike } from './slack/replay.js';
 import type { DecisionRequest } from './proposals/decide.js';
 import type { StatusSource } from './status.js';
 import type { TaskStoreLike } from './tasks/store.js';
@@ -35,6 +50,17 @@ export interface SystemControlLike {
   read(): Promise<RunState>;
   pause(options: { reason: string; actor: string }): Promise<PauseResult>;
   resume(options: { actor: string }): Promise<ResumeResult>;
+  /** Sets the global row, which pauses every principal (ADR 0015). */
+  pauseAll(options: { reason: string; actor: string }): Promise<PauseResult>;
+  /** Clears the global row; each principal's own pause, and their held proposals, stay. */
+  resumeAll(options: { actor: string }): Promise<{ changed: boolean; eventId: string }>;
+  /** The global row's pause and organisation ceiling. */
+  readOrganisation(): Promise<{ paused: boolean; costCeilingGbp: number }>;
+  /** Sets the organisation's daily ceiling; the api allows it to admins only. */
+  setOrganisationCostCeiling(
+    ceiling: CostCeiling,
+    options: { actor: string },
+  ): Promise<{ changed: boolean; eventId: string }>;
   /** Switches between dry run and live (spec 6.3); records a state_changed event either way. */
   setMode(
     mode: SystemMode,
@@ -88,28 +114,185 @@ export interface OntologyLike {
   getNode(id: string): Promise<OntologyNodeLike | null>;
 }
 
-/** Turns a bearer token into the caller's UPN, or throws `UnauthorisedError`. */
+/** Who a verified Entra token says is calling (ADR 0020). */
+export interface VerifiedIdentity {
+  /** The Entra object id, `oid`: the stable key a principal is bound to. */
+  oid: string;
+  upn: string;
+  /** The Lance app roles in the token's `roles` claim; empty when it holds neither. */
+  roles: LanceRole[];
+  /** The token's tenant, `tid`, when it carries one. */
+  tid?: string;
+}
+
+/** Turns a bearer token into the caller's identity, or throws `UnauthorisedError`. */
 export interface TokenVerifier {
-  verify(bearer: string): Promise<{ upn: string }>;
+  verify(bearer: string): Promise<VerifiedIdentity>;
+}
+
+export type PrincipalStatus = (typeof PRINCIPAL_STATUS_VALUES)[number];
+
+/** The slice of a `principals` row the api routes on. */
+export interface PrincipalRef {
+  id: string;
+  upn: string;
+  status: PrincipalStatus;
+  /** The Slack user of the principal's active link (ADR 0021); null until they link. */
+  slackUserId: string | null;
+  /** The principal's private channel (ADR 0023); null until their first link. */
+  slackChannelId: string | null;
+  /**
+   * The Lance roles their last verified Entra token carried, recorded at
+   * each sign-in and at the Slack link. What a Slack request, which carries
+   * no token, is gated on.
+   */
+  lanceRoles: LanceRole[];
+  createdAt: Date;
+}
+
+/**
+ * Enough of a principal to build its dependencies: the scope, the ledger
+ * actor and, when the caller has it, the channel its Slack surface posts
+ * to. A key without the channel reuses whatever was built for the
+ * principal before; one with it rebuilds when the channel has changed.
+ */
+export type PrincipalKey = Pick<PrincipalRef, 'id' | 'upn'> &
+  Partial<Pick<PrincipalRef, 'slackChannelId'>>;
+
+/** The identity behind a request, once `requireEntra` has resolved it. */
+export interface Caller {
+  identity: VerifiedIdentity;
+  principal: PrincipalRef;
+}
+
+/**
+ * The lookup from an identity to a principal. `signIn` is the first-sign-in
+ * path of ADR 0020: it finds the principal bound to the token's `oid`,
+ * binds the `oid` to an unbound row carrying the token's UPN, or creates an
+ * `onboarding` principal, and records a ledger event for either write.
+ */
+export interface PrincipalDirectoryLike {
+  signIn(identity: VerifiedIdentity): Promise<PrincipalRef>;
+  /**
+   * The principal a Slack user acts for, through their active row in
+   * `slack_links` (ADR 0021), or null when they have not linked. A team id,
+   * when the request carries one, must match the link's.
+   */
+  bySlackUserId(slackUserId: string, slackTeamId?: string | null): Promise<PrincipalRef | null>;
+  /** The principal whose private channel this is (ADR 0023), or null. */
+  bySlackChannelId(channelId: string): Promise<PrincipalRef | null>;
+  byUpn(upn: string): Promise<PrincipalRef | null>;
+  list(): Promise<PrincipalRef[]>;
 }
 
 export interface SlackDeps {
   signingSecret: string;
   /**
-   * The principal's Slack user id, from `principals.slack_user_id`. Only this user may
-   * pause or resume from Slack. Null refuses every such command, which is
-   * the safe default before the id is recorded.
+   * `SLACK_ALLOWED_USER_ID`: until Dom has linked through `/lance login`, a
+   * Slack user with this id acts for the principal whose UPN is
+   * `config.dom.email`. Ignored once that principal has a link, and retired
+   * once Dom has linked (docs/runbooks/slack-app-setup.md). Null when unset.
    */
-  allowedUserId: string | null;
+  fallbackUserId: string | null;
+  /** `/lance login` and the web route it links to (ADR 0021). */
+  links: SlackLinksLike;
+  /** Refuses a signed request seen before inside the replay window. */
+  replay: ReplayGuardLike;
+}
+
+/** A `/lance login` link, to answer in Slack. */
+export type SlackLinkIssue =
+  | { status: 'issued'; url: string; expiresAt: string }
+  /** `PUBLIC_WEB_URL` is not set on the api, so there is nowhere to link to. */
+  | { status: 'unconfigured' };
+
+/** Why a link cannot be used. The web page words each one itself. */
+export type SlackLinkRefusal =
+  /** Malformed, tampered with, or naming no nonce Lance issued. */
+  | 'invalid'
+  | 'expired'
+  | 'used'
+  /** The Slack user is linked to another principal. */
+  | 'taken'
+  /** The signed-in principal is paused or offboarded. */
+  | 'inactive'
+  /** The Slack profile's email is not the signed-in principal's UPN: the link was opened by someone else. */
+  | 'email_mismatch'
+  /** Slack gave no email for the account (no bot token, or no `users:read.email`), so the link cannot be checked. */
+  | 'email_unavailable'
+  /** The signed-in principal already has an active link to a different Slack user; `/lance unlink` from that account first. */
+  | 'linked_elsewhere';
+
+/** What the link page shows before the person confirms. */
+export type SlackLinkPreview =
+  | {
+      status: 'ready';
+      slackUserId: string;
+      slackTeamId: string;
+      /** From Slack's profile when the bot token can read it; null otherwise. */
+      slackName: string | null;
+      expiresAt: string;
+      /** True when this Slack user is already linked to the signed-in principal. */
+      alreadyLinked: boolean;
+    }
+  | { status: SlackLinkRefusal };
+
+/** The principal's private channel after a link. */
+export type SlackChannelOutcome =
+  | { status: 'ready'; channelId: string; name: string | null; created: boolean }
+  /** No bot token on the api, so no channel could be made. The link stands. */
+  | { status: 'unavailable'; reason: string }
+  | { status: 'failed'; reason: string };
+
+export type SlackLinkOutcome =
+  | {
+      status: 'linked';
+      slackUserId: string;
+      slackTeamId: string;
+      channel: SlackChannelOutcome;
+      /** Things the person should know that did not stop the link, such as a directory mismatch. */
+      warnings: string[];
+    }
+  | { status: SlackLinkRefusal };
+
+/** The signed-in principal's link as it stands, for the page after a reload. */
+export interface SlackLinkState {
+  slackUserId: string;
+  slackTeamId: string;
+  linkedAt: string;
+  channelId: string | null;
+}
+
+export interface SlackLinksLike {
+  /**
+   * Stores a nonce and returns the link. `recordFor` is the principal whose
+   * ledger records the request: the one the Slack user already acts for,
+   * or the organisation's admin for a user not linked yet.
+   */
+  issue(input: {
+    slackUserId: string;
+    slackTeamId: string;
+    recordFor: PrincipalKey;
+    actor: string;
+  }): Promise<SlackLinkIssue>;
+  preview(token: string, principal: PrincipalRef): Promise<SlackLinkPreview>;
+  /** Consumes the token and binds its Slack user to the caller's principal. */
+  confirm(token: string, caller: Caller): Promise<SlackLinkOutcome>;
+  current(principal: PrincipalRef): Promise<SlackLinkState | null>;
+  /**
+   * `/lance unlink`: revokes the principal's own active link to this Slack
+   * user, with a ledger event. False when there was none to revoke.
+   */
+  unlink(input: { principal: PrincipalRef; slackUserId: string; actor: string }): Promise<boolean>;
 }
 
 /**
- * Where the delegated Graph refresh token lives. Structural, like the
- * other `*Like` types here: `KeyVaultTokenStore` from `@lance/connectors`
- * satisfies it without knowing about the api, and a test passes a double.
+ * Where the consent callback stores a principal's first Graph refresh
+ * token (ADR 0022): `graph-refresh-token--<principalId>` in the principal
+ * vault, which the api may write and never read. `principalTokenWriter`
+ * from `@lance/connectors` satisfies it; a test passes a double.
  */
-export interface GraphTokenStoreLike {
-  getRefreshToken(): Promise<string | null>;
+export interface GraphTokenWriterLike {
   setRefreshToken(token: string): Promise<void>;
 }
 
@@ -120,11 +303,37 @@ export interface GraphConsentDeps {
   clientSecret: string;
   /** Origin the browser reaches the api on, from `PUBLIC_API_URL`. */
   publicApiUrl: string;
-  tokenStore: GraphTokenStoreLike;
+  /** The writer for one principal's own refresh token secret. */
+  tokenWriterFor: (principalId: string) => GraphTokenWriterLike;
+  /** Open consents, in Postgres so any api replica can finish one (migration 0021). */
+  states: ConsentStateStoreLike;
 }
 
+/**
+ * What `POST /credentials/jamie` needs (ADR 0022, docs/plans/multi-user.md
+ * M2 and M3 step 3). The key goes from the request body to a test call and
+ * then to Key Vault; it is never written to Postgres or a log line.
+ */
+export interface JamieKeyDeps {
+  /** A test call with the key. Resolves when Jamie accepts it; rejects with a reason otherwise. */
+  check: (apiKey: string) => Promise<void>;
+  /** Stores the key as `jamie-api-key--<principalId>` in the principal vault. Write only. */
+  store: (principalId: string, apiKey: string) => Promise<void>;
+}
+
+/**
+ * Everything one principal's requests run over (ADR 0015): each store reads
+ * and writes through a handle scoped to that principal. `depsFor` in
+ * `ServerDeps` builds one per principal and reuses it.
+ */
 export interface ApiDeps {
   config: Config;
+  /** The principal every store here is scoped to. */
+  principalId: string;
+  /** The ledger actor for what this principal does by hand, `user:<name>`. */
+  actor: string;
+  /** The principal's UPN. */
+  upn: string;
   control: SystemControlLike;
   ledger: LedgerReaderLike;
   writer: LedgerWriterLike;
@@ -145,6 +354,8 @@ export interface ApiDeps {
   briefs: BriefStoreLike;
   /** Reads and the three status writes behind the Alerts page. */
   alerts: AlertStoreLike;
+  /** Raises an alert in this principal's scope, as the worker does (spec 11). */
+  raiseAlert: (input: Omit<RaiseAlertInput, 'now'>) => Promise<RaiseAlertResult>;
   /** Cursors, agent runs and pushes behind the Agents page. */
   agents: AgentsStoreLike;
   /** Person nodes, for the owner and counterparty of a commitment. */
@@ -156,13 +367,14 @@ export interface ApiDeps {
   enqueueChase: (commitmentId: string) => Promise<string>;
   /** `/lance brief`: the worker regenerates the morning brief now. */
   enqueueBrief: () => Promise<string>;
+  /** The principal's jobs behind `/lance jobs`, `pause <job>` and `resume <job>` (ADR 0025). */
+  jobs: JobsServiceLike;
   status: StatusSource;
-  auth: TokenVerifier;
-  slack: SlackDeps;
   /**
-   * How Lance speaks in its own channel (ADR 0012). Null when
-   * `SLACK_BOT_TOKEN` is absent, so a local run answers interactions
-   * without a token instead of failing at construction.
+   * How Lance speaks in this principal's channel (ADR 0012, ADR 0023). Null
+   * when `SLACK_BOT_TOKEN` is absent, so a local run answers interactions
+   * without a token instead of failing at construction, and null for a
+   * principal with no channel yet.
    */
   slackSurface: SlackSurface | null;
   /**
@@ -174,6 +386,149 @@ export interface ApiDeps {
   notify: (event: FeedEvent) => void;
   /** Registers one such client. Returns the function that removes it. */
   subscribe: (listener: FeedListener) => () => void;
+  /** Injected in tests. Returns an ISO-8601 instant with an explicit offset. */
+  now?: () => string;
+}
+
+/**
+ * Whether a principal's credential is in the principal vault, as the ledger
+ * records it: stored at onboarding (or copied from before ADR 0022), and
+ * deleted at offboarding. The api may write to the vault and never read
+ * it, so this is the record, not a vault read.
+ */
+export interface SecretState {
+  connector: 'graph' | 'jamie';
+  state: 'stored' | 'deleted' | 'never_stored';
+  /** When the ledger recorded the latest change; null for never stored. */
+  recordedAt: string | null;
+}
+
+/** Health for one principal, as a `Lance.Admin` sees it (ADR 0024). No content. */
+export interface PrincipalHealth {
+  principalId: string;
+  upn: string;
+  status: PrincipalStatus;
+  watchers: { watcher: string; lastRunAgeMinutes: number }[];
+  breakers: { connector: string; state: 'open' }[];
+  secrets: SecretState[];
+  costTodayGbp: number;
+  costWeekGbp: number;
+}
+
+/** A principal as the admin list shows it (ADR 0024): status and which onboarding steps are done. */
+export interface AdminPrincipalView {
+  id: string;
+  upn: string;
+  status: PrincipalStatus;
+  createdAt: string;
+  onboarding: OnboardingProgress;
+}
+
+/** A change to an organisation-default rule, from the ledger's `rule_changed` events. */
+export interface RuleChangeView {
+  eventId: string;
+  ts: string;
+  actor: string;
+  ruleId: string;
+  /** `payload.change`, such as `created` or `superseded`, when the event names one. */
+  change: string | null;
+  rule: {
+    version: number;
+    active: boolean;
+    actionClass: string;
+    counterpartyClass: string;
+    system: string;
+    decision: string;
+  };
+}
+
+/** An alert an organisation job raised in the admin's own scope (the role check, the organisation budget). */
+export interface SystemAlertView {
+  id: string;
+  severity: string;
+  kind: string;
+  title: string;
+  status: string;
+  firstSeen: string;
+  lastSeen: string;
+  count: number;
+}
+
+export interface OffboardingRequest {
+  principalId: string;
+  reason: string;
+  /** The admin's ledger actor. */
+  actor: string;
+  /** The admin's own principal, who may not offboard themselves. */
+  callerId: string;
+  /**
+   * The second confirmation offboarding the organisation's owner or the
+   * last active Lance.Admin needs; refused without it.
+   */
+  confirmProtected?: boolean;
+}
+
+export interface OffboardingQueued {
+  status: 'queued';
+  principalId: string;
+  jobId: string;
+}
+
+/** The reads behind the admin procedures, each computed in the principal's own scope. */
+export interface AdminStoreLike {
+  principals(): Promise<AdminPrincipalView[]>;
+  health(): Promise<PrincipalHealth[]>;
+  /** Newest first, across every principal's ledger. */
+  ruleChanges(): Promise<RuleChangeView[]>;
+  /** Open and acknowledged, in the admin's own scope. */
+  systemAlerts(adminPrincipalId: string): Promise<SystemAlertView[]>;
+  /** Records the request in the principal's ledger and hands the steps to the worker. */
+  requestOffboarding(request: OffboardingRequest): Promise<OffboardingQueued>;
+}
+
+export interface EvidenceRequest {
+  from: string;
+  to: string;
+  /** Null for the system export, which covers system events only (ADR 0024). */
+  principalId: string | null;
+  actor: string;
+  /** The admin's own principal, whose ledger records the export. */
+  callerId: string;
+}
+
+/** Spec 4.4's evidence export, as a signed bundle. */
+export interface EvidenceExporterLike {
+  export(request: EvidenceRequest): Promise<SignedEvidence>;
+}
+
+/**
+ * What the server itself needs, beyond any one principal: the token check,
+ * the identity lookup, the per-principal dependency cache and the secrets
+ * of the unauthenticated routes.
+ */
+export interface ServerDeps {
+  config: Config;
+  auth: TokenVerifier;
+  directory: PrincipalDirectoryLike;
+  /** One principal's dependencies, built on first use and reused after. */
+  depsFor: (principal: PrincipalKey) => ApiDeps;
+  admin: AdminStoreLike;
+  /**
+   * Absent in a process without `EVIDENCE_SIGNING_KEY`; the export then
+   * refuses and names the missing secret.
+   */
+  evidence?: EvidenceExporterLike;
+  /** The onboarding checklist and its completion (docs/plans/multi-user.md M3). */
+  onboarding: OnboardingServiceLike;
+  /**
+   * The SHA-256 of the data-processing notice this build carries, computed
+   * by the api from the file (`onboarding/notice.ts`). The only hash an
+   * acceptance may name.
+   */
+  noticeSha256: string;
+  /** The global `system_state` row, for the readiness probe. */
+  readiness: () => Promise<{ paused: boolean; mode: SystemMode }>;
+  slack: SlackDeps;
   /** Shared secret for `POST /ingest/agent-log` (spec 7.1, agent-logs). */
   ingestSecret: string;
   /**
@@ -182,11 +537,16 @@ export interface ApiDeps {
    * naming what is missing rather than half-running the flow.
    */
   graph?: GraphConsentDeps;
+  /**
+   * Absent in a process without the principal vault
+   * (`PRINCIPAL_KEY_VAULT_URL`); the route then answers 503.
+   */
+  jamieKeys?: JamieKeyDeps;
   /** Injected in tests. Returns an ISO-8601 instant with an explicit offset. */
   now?: () => string;
 }
 
-/** The ledger actor for everything Dom triggers, in Slack or in the api. */
+/** The ledger actor Dom's own actions carried before actors came from the principal. */
 export const DOM_ACTOR = 'user:dom';
 
 /**
@@ -195,9 +555,9 @@ export const DOM_ACTOR = 'user:dom';
  * proposal that nothing then executes.
  */
 export async function resumeAndRequeue(
-  deps: Pick<ApiDeps, 'control' | 'enqueueExecute'>,
+  deps: Pick<ApiDeps, 'control' | 'enqueueExecute' | 'actor'>,
 ): Promise<ResumeResult> {
-  const result = await deps.control.resume({ actor: DOM_ACTOR });
+  const result = await deps.control.resume({ actor: deps.actor });
   for (const proposalId of result.releasedProposalIds) {
     await deps.enqueueExecute(proposalId);
   }

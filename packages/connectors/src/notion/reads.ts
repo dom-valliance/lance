@@ -50,10 +50,22 @@ export interface QueryTasksArgs {
   since: string;
   /** Resumes a run from a cursor the previous run returned. */
   cursor?: string;
+  /**
+   * The Notion user whose tasks these are (ADR 0022): only pages with them
+   * among the Assignee people are returned. The watcher always sets it, so
+   * one principal never reads another's tasks out of the shared database.
+   */
+  assigneeId?: string;
 }
 
 /** The Meetings data source (`notion.meetingsDataSourceId`), on the same terms. */
-export type QueryMeetingsArgs = QueryTasksArgs;
+export type QueryMeetingsArgs = Omit<QueryTasksArgs, 'assigneeId'>;
+
+/** Notion's filter for pages with `assigneeId` among the Assignee people. */
+const assignedTo = (assigneeId: string): Record<string, unknown> => ({
+  property: TASK_PROPERTY_NAMES.assigneeIds,
+  people: { contains: assigneeId },
+});
 
 export interface QueryTasksResult {
   readonly tasks: readonly TaskRecord[];
@@ -141,6 +153,11 @@ async function queryPages<T>(
   throw pagingDidNotFinish(operation, args.adviceOnRunaway);
 }
 
+const editedAfter = (since: string): Record<string, unknown> => ({
+  timestamp: 'last_edited_time',
+  last_edited_time: { after: since },
+});
+
 /** Every page of a data source edited after `since`, oldest edit first. */
 function queryEditedSince<T>(
   notion: NotionConnector,
@@ -155,10 +172,16 @@ function queryEditedSince<T>(
     {
       dataSourceId: args.dataSourceId,
       body: {
-        filter: { timestamp: 'last_edited_time', last_edited_time: { after: args.since } },
+        filter:
+          args.assigneeId === undefined
+            ? editedAfter(args.since)
+            : { and: [editedAfter(args.since), assignedTo(args.assigneeId)] },
         sorts: [{ timestamp: 'last_edited_time', direction: 'ascending' }],
       },
-      request: { since: args.since },
+      request: {
+        since: args.since,
+        ...(args.assigneeId === undefined ? {} : { assigneeId: args.assigneeId }),
+      },
       startCursor: args.cursor ?? null,
       adviceOnRunaway:
         'Narrow the window by moving the watcher cursor forward, then resume from the cursor the last run returned.',
@@ -171,6 +194,8 @@ function queryEditedSince<T>(
 export interface QueryOpenTasksArgs {
   /** The All Tasks data source, as for `queryTasksEditedSince`. */
   dataSourceId: string;
+  /** As for `queryTasksEditedSince`: only this Notion user's tasks. */
+  assigneeId?: string;
 }
 
 /**
@@ -191,13 +216,19 @@ export async function queryOpenTasks(
       dataSourceId: args.dataSourceId,
       body: {
         filter: {
-          and: TASK_CLOSED_STATUSES.map((status) => ({
-            property: TASK_PROPERTY_NAMES.status,
-            status: { does_not_equal: status },
-          })),
+          and: [
+            ...TASK_CLOSED_STATUSES.map((status) => ({
+              property: TASK_PROPERTY_NAMES.status,
+              status: { does_not_equal: status },
+            })),
+            ...(args.assigneeId === undefined ? [] : [assignedTo(args.assigneeId)]),
+          ],
         },
       },
-      request: { openOnly: true },
+      request: {
+        openOnly: true,
+        ...(args.assigneeId === undefined ? {} : { assigneeId: args.assigneeId }),
+      },
       startCursor: null,
       adviceOnRunaway:
         'Check the All Tasks database for a status option that never closes, or archive the open tasks nobody owns.',

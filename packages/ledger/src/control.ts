@@ -1,14 +1,15 @@
 import {
   SYSTEM_STATE_ID,
   principalState,
+  principals,
   proposals,
   systemState,
   type Db,
   type PrincipalState,
   type SystemState,
 } from '@lance/db';
-import { newUlid, nowIso, type SystemMode } from '@lance/shared';
-import { and, eq, inArray } from 'drizzle-orm';
+import { addWorkingDays, formatLongDate, newUlid, nowIso, type SystemMode } from '@lance/shared';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { LedgerReader } from './reader.js';
 import { LedgerWriter, type DbExecutor } from './writer.js';
 
@@ -71,6 +72,16 @@ export interface RunState {
   updatedAt: Date;
 }
 
+/**
+ * The global row as the organisation sees it: the kill switch over every
+ * principal and the organisation's daily cost ceiling across all of them
+ * (docs/plans/multi-user.md M5).
+ */
+export interface OrganisationState {
+  paused: boolean;
+  costCeilingGbp: number;
+}
+
 /** The stricter of the principal's state and the global row. */
 export function effectiveRunState(own: PrincipalState, global: SystemState): RunState {
   const pausedGlobally = global.paused;
@@ -88,6 +99,41 @@ export function effectiveRunState(own: PrincipalState, global: SystemState): Run
     costCeilingGbp: own.costCeilingGbp,
     updatedAt: own.updatedAt > global.updatedAt ? own.updatedAt : global.updatedAt,
   };
+}
+
+/**
+ * A newly onboarded principal runs in dry run for this many working days
+ * before live opens to them (docs/plans/multi-user.md M3 and Q7), the same
+ * rule every new watcher followed in Phase 1.
+ */
+export const DRY_RUN_WORKING_DAYS = 5;
+
+/** Working days are counted, and the opening date named, in London (the brief's rule, not the principal's zone). */
+const DRY_RUN_TIME_ZONE = 'Europe/London';
+
+/** When live mode opens to a principal activated at `activatedAt`: London midnight five working days on. */
+export function liveModeOpensAt(activatedAt: Date): Date {
+  return addWorkingDays(activatedAt, DRY_RUN_WORKING_DAYS, DRY_RUN_TIME_ZONE);
+}
+
+/**
+ * A mode change the principal may not make yet. The message is written for
+ * the principal and is what Slack and Settings show them.
+ */
+export class ModeChangeRefusedError extends Error {
+  override readonly name = 'ModeChangeRefusedError';
+  constructor(
+    message: string,
+    /** When live opens, or null when it waits on something other than time. */
+    readonly opensAt: Date | null,
+  ) {
+    super(message);
+  }
+}
+
+export interface SystemControlOptions {
+  /** Injected in tests. */
+  now?: () => Date;
 }
 
 /** Proposal statuses that are waiting for the executor and can be held. */
@@ -150,9 +196,15 @@ export class SystemControl {
   private readonly writer: LedgerWriter;
   private readonly reader: LedgerReader;
 
-  constructor(private readonly db: Db) {
+  private readonly now: () => Date;
+
+  constructor(
+    private readonly db: Db,
+    options: SystemControlOptions = {},
+  ) {
     this.writer = new LedgerWriter(db);
     this.reader = new LedgerReader(db);
+    this.now = options.now ?? (() => new Date());
   }
 
   async read(): Promise<RunState> {
@@ -194,12 +246,19 @@ export class SystemControl {
     return row;
   }
 
+  /** The global row alone; any scope reads it, since it carries no principal. */
+  async readOrganisation(): Promise<OrganisationState> {
+    const global = await this.readGlobal(this.db);
+    return { paused: global.paused, costCeilingGbp: global.costCeilingGbp };
+  }
+
   async isPaused(): Promise<boolean> {
     return (await this.read()).paused;
   }
 
   async pause(options: PauseOptions): Promise<PauseResult> {
     return this.db.transaction(async (tx) => {
+      await this.lockHolds(tx);
       const current = await this.readOwn(tx);
       const ts = nowIso();
       const correlationId = newUlid();
@@ -252,6 +311,7 @@ export class SystemControl {
    */
   async pauseAll(options: PauseOptions): Promise<PauseResult> {
     return this.db.transaction(async (tx) => {
+      await this.lockHolds(tx);
       const current = await this.readGlobal(tx);
       const ts = nowIso();
       const held = await holdProposals(tx, ts);
@@ -328,27 +388,63 @@ export class SystemControl {
   }
 
   /**
-   * Records that the executor held a proposal because the system was paused
-   * when its job ran, so resume can release it (spec 4.3). The executor calls
-   * this after moving the proposal to held.
+   * Serialises every change to this principal's holds (ADR 0015): pause,
+   * resume and the executor's hold take the same transaction lock, so a
+   * resume never reads the ledger between a hold's status change and its
+   * event. The key comes from the session's own scope.
    */
-  async recordHold(
-    held: HeldProposal[],
-    options: ActorOptions & { reason: string },
-  ): Promise<{ eventId: string }> {
-    const event = await this.writer.append({
-      ts: nowIso(),
-      actor: options.actor,
-      kind: 'state_changed',
-      sourceSystem: 'lance',
-      correlationId: newUlid(),
-      payload: { change: 'hold', reason: options.reason, held },
+  private async lockHolds(tx: DbExecutor): Promise<void> {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended('lance:holds:' || app_principal(), 0))`,
+    );
+  }
+
+  /**
+   * The executor's hold, atomic with its ledger event and ordered against
+   * pause and resume. Under the lock the run state is read again: if a
+   * resume landed after the executor's own check, `runnable` says so and
+   * nothing is held, so the executor goes on to the write rather than
+   * parking a proposal no resume will ever release.
+   */
+  async holdUnlessRunnable(
+    proposal: {
+      id: string;
+      from: HoldableStatus;
+      current: readonly (HoldableStatus | 'executing')[];
+    },
+    options: ActorOptions & { reason: string; runnable: (state: RunState) => boolean },
+  ): Promise<{ held: boolean; eventId: string | null }> {
+    return this.db.transaction(async (tx) => {
+      await this.lockHolds(tx);
+      if (options.runnable(await this.readWith(tx))) return { held: false, eventId: null };
+      const moved = await tx
+        .update(proposals)
+        .set({ status: 'held', updatedAt: new Date(nowIso()) })
+        .where(and(eq(proposals.id, proposal.id), inArray(proposals.status, [...proposal.current])))
+        .returning({ id: proposals.id });
+      if (moved.length === 0) return { held: false, eventId: null };
+      const event = await this.writer.append(
+        {
+          ts: nowIso(),
+          actor: options.actor,
+          kind: 'state_changed',
+          sourceSystem: 'lance',
+          correlationId: newUlid(),
+          payload: {
+            change: 'hold',
+            reason: options.reason,
+            held: [{ id: proposal.id, from: proposal.from }],
+          },
+        },
+        tx,
+      );
+      return { held: true, eventId: event.id };
     });
-    return { eventId: event.id };
   }
 
   async resume(options: ActorOptions): Promise<ResumeResult> {
     return this.db.transaction(async (tx) => {
+      await this.lockHolds(tx);
       const current = await this.readOwn(tx);
       const ts = nowIso();
       if ((await this.readGlobal(tx)).paused) {
@@ -452,6 +548,7 @@ export class SystemControl {
   ): Promise<{ changed: boolean; eventId: string }> {
     return this.db.transaction(async (tx) => {
       const current = await this.readOwn(tx);
+      if (mode === 'live' && current.mode !== 'live') await this.assertLiveOpen(tx, current);
       const ts = nowIso();
       if (current.mode !== mode) {
         await tx
@@ -472,6 +569,35 @@ export class SystemControl {
       );
       return { changed: current.mode !== mode, eventId: event.id };
     });
+  }
+
+  /**
+   * Refuses live for a principal still onboarding, and for one activated
+   * less than five working days ago (docs/plans/multi-user.md M3). The
+   * activation time is on the principal's own row, which any scope reads
+   * and only the onboarding completion writes. Dom's is null because he
+   * was never onboarded (his row predates onboarding), so he is exempt.
+   */
+  private async assertLiveOpen(tx: DbExecutor, current: PrincipalState): Promise<void> {
+    const rows = await tx
+      .select({ status: principals.status, activatedAt: principals.activatedAt })
+      .from(principals)
+      .where(eq(principals.id, current.principalId))
+      .limit(1);
+    const principal = rows[0];
+    if (principal?.status === 'onboarding') {
+      throw new ModeChangeRefusedError(
+        'Live mode opens five working days after onboarding is complete. Finish the onboarding checklist first; until then everything stays in dry run.',
+        null,
+      );
+    }
+    if (principal?.activatedAt === null || principal?.activatedAt === undefined) return;
+    const opensAt = liveModeOpensAt(principal.activatedAt);
+    if (this.now().getTime() >= opensAt.getTime()) return;
+    throw new ModeChangeRefusedError(
+      `Live mode opens on ${formatLongDate(opensAt, DRY_RUN_TIME_ZONE)}. A new principal runs in dry run for ${String(DRY_RUN_WORKING_DAYS)} working days after onboarding, which finished on ${formatLongDate(principal.activatedAt, DRY_RUN_TIME_ZONE)}. Nothing was changed; switch to live on or after that date.`,
+      opensAt,
+    );
   }
 
   /**
@@ -549,6 +675,46 @@ export class SystemControl {
           correlationId: newUlid(),
           payload: {
             change: 'cost_ceiling',
+            costCeilingGbp: ceiling.costCeilingGbp,
+            previousCostCeilingGbp: current.costCeilingGbp,
+          },
+        },
+        tx,
+      );
+      return { changed, eventId: event.id };
+    });
+  }
+
+  /**
+   * Sets the organisation's daily model spend ceiling, the global row's
+   * `cost_ceiling_gbp` (multi-user plan M5): above it every principal's
+   * model-backed agents pause. Recorded like a principal's own ceiling. The
+   * api allows it to `Lance.Admin` only; `system_state` carries no principal,
+   * so the database cannot tell an admin apart (ADR 0015).
+   */
+  async setOrganisationCostCeiling(
+    ceiling: CostCeiling,
+    options: ActorOptions,
+  ): Promise<{ changed: boolean; eventId: string }> {
+    return this.db.transaction(async (tx) => {
+      const current = await this.readGlobal(tx);
+      const ts = nowIso();
+      const changed = current.costCeilingGbp !== ceiling.costCeilingGbp;
+      if (changed) {
+        await tx
+          .update(systemState)
+          .set({ costCeilingGbp: ceiling.costCeilingGbp, updatedAt: new Date(ts) })
+          .where(eq(systemState.id, SYSTEM_STATE_ID));
+      }
+      const event = await this.writer.append(
+        {
+          ts,
+          actor: options.actor,
+          kind: 'state_changed',
+          sourceSystem: 'lance',
+          correlationId: newUlid(),
+          payload: {
+            change: 'organisation_cost_ceiling',
             costCeilingGbp: ceiling.costCeilingGbp,
             previousCostCeilingGbp: current.costCeilingGbp,
           },

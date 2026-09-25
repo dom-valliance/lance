@@ -8,6 +8,7 @@ import {
   type Proposal,
 } from '@lance/shared';
 import type { ConnectorWrite } from './index.js';
+import { moveDestinationRefusal, policyTarget } from './target.js';
 
 /** The connector operations the executor may perform, as adapters built in main from the real connectors. */
 type Written = { id: string; webLink?: string | undefined };
@@ -93,21 +94,6 @@ function need<T>(value: T | null | undefined, what: string): T {
   return value;
 }
 
-/**
- * What a rule's `targetAnyOf` is compared with at execution: the folder a
- * move lands in, named as the proposer named it. Other classes have no
- * target condition in the seed rules.
- */
-function executionTarget(
-  actionClass: ActionClass,
-  payload: Record<string, unknown>,
-): string | null {
-  if (actionClass === 'move_mail') {
-    return str(payload, 'destinationFolderName') ?? str(payload, 'destinationFolderId');
-  }
-  return null;
-}
-
 function writesEnabled(
   flags: DispatchDeps['featureFlags'],
   system: Proposal['targetSystem'],
@@ -161,7 +147,11 @@ export function createConnectorWrite(deps: DispatchDeps): ConnectorWrite {
         ...proposal.payload,
         ...(proposal.editedPayload ?? {}),
       };
-      const target = executionTarget(proposal.actionClass, payload);
+      if (proposal.actionClass === 'move_mail') {
+        const refusal = moveDestinationRefusal(payload);
+        if (refusal !== null) throw new ExecutionRefusedError('forbidden_at_execution', refusal);
+      }
+      const target = policyTarget(proposal.actionClass, payload);
       const labels = await deps.loadLabels(proposal);
       const decision = evaluate(
         {

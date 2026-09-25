@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { NAV_ITEMS, SIGN_OUT_PATH, type NavCounts } from '@/components/shell/nav';
+import { SIGN_OUT_PATH, type NavCounts, type NavItem } from '@/components/shell/nav';
 import { NavLink } from '@/components/shell/nav-link';
 import { StatusLine } from '@/components/shell/status-line';
 import { Wordmark } from '@/components/shell/wordmark';
@@ -11,10 +11,12 @@ import type { ShellStatusLine } from '@/lib/shell-status';
  */
 export function Sidebar({
   agentName,
+  items,
   counts,
   status,
 }: {
   agentName: string;
+  items: readonly NavItem[];
   counts: NavCounts;
   status: ShellStatusLine | null;
 }) {
@@ -24,7 +26,7 @@ export function Sidebar({
         <Wordmark name={agentName} />
       </div>
       <nav aria-label="Pages" className="flex flex-1 flex-col gap-0.5">
-        {NAV_ITEMS.map((item) => (
+        {items.map((item) => (
           <NavLink
             key={item.href}
             href={item.href}

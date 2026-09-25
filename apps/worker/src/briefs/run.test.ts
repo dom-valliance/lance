@@ -58,6 +58,7 @@ function deps(overrides: Partial<BriefDeps> = {}): BriefDeps {
   return {
     db,
     config,
+    principal: { email: 'dom@valliance.ai' },
     ontology,
     agent: null,
     reads: {
@@ -281,6 +282,7 @@ describe('assembleMorningBrief', () => {
       db,
       ontology,
       config,
+      principal: { email: 'dom@valliance.ai' },
       now: () => NOW,
     });
     expect(MorningBriefContentSchema.safeParse(brief).success).toBe(true);

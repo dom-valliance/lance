@@ -1,6 +1,8 @@
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createDb } from './client.js';
+import { grantRetentionMember } from './grants.js';
 import { runMigrations } from './migrate.js';
 import { startPostgresContainer } from './testing.js';
 
@@ -82,6 +84,99 @@ describe('migrations run by a non-superuser admin member', () => {
       expect(rows[0]?.['who']).toBe('worker_identity');
     } finally {
       await worker.end();
+    }
+  });
+});
+
+describe('the retention membership the migration job grants', () => {
+  const PRINCIPAL = '01K5S9V6QW3SWCCPVB0N0E3R01';
+  const EVENT = '01K5S9V6QW3SWCCPVB0N0E3R02';
+
+  beforeAll(async () => {
+    await superuser.query("CREATE ROLE retention_worker LOGIN PASSWORD 'test'");
+    await superuser.query('GRANT lance_app TO retention_worker');
+    await superuser.query(
+      "INSERT INTO principals (id, upn) VALUES ($1, 'retention@example.test')",
+      [PRINCIPAL],
+    );
+    await superuser.query("SELECT set_config('app.principal', $1, false)", [PRINCIPAL]);
+    await superuser.query(
+      `INSERT INTO ledger_events (id, ts, actor, kind, correlation_id, payload, payload_hash)
+       VALUES ($1, now(), 'watcher:test', 'observed', $1, '{"body":"raw"}', 'sha256:fixture')`,
+      [EVENT],
+    );
+  });
+
+  it('is granted by the non-superuser migrate identity, which created the role', async () => {
+    const migrate = createDb({ connectionString: connectAs('migrate_identity'), password: 'test' });
+    try {
+      await expect(grantRetentionMember(migrate, 'retention_worker')).resolves.toEqual({
+        status: 'granted',
+        role: 'retention_worker',
+      });
+      // A second run, as every migration job makes, changes nothing.
+      await expect(grantRetentionMember(migrate, 'retention_worker')).resolves.toMatchObject({
+        status: 'granted',
+      });
+    } finally {
+      await migrate.$client.end();
+    }
+    const rows = await query(
+      superuser,
+      `SELECT m.inherit_option AS inherit, m.set_option AS set
+         FROM pg_auth_members m
+         JOIN pg_roles r ON r.oid = m.roleid
+         JOIN pg_roles u ON u.oid = m.member
+        WHERE r.rolname = 'lance_retention' AND u.rolname = 'retention_worker'`,
+    );
+    expect(rows).toEqual([{ inherit: false, set: true }]);
+  });
+
+  const asWorker = async <T>(run: (client: pg.Client) => Promise<T>): Promise<T> => {
+    const worker = new pg.Client({
+      connectionString: connectAs('retention_worker'),
+      options: '-c role=lance_app',
+    });
+    await worker.connect();
+    try {
+      await worker.query("SELECT set_config('app.principal', $1, false)", [PRINCIPAL]);
+      return await run(worker);
+    } finally {
+      await worker.end();
+    }
+  };
+
+  it('leaves an ordinary worker session, which runs as lance_app, unable to null a payload', async () => {
+    const failure = await asWorker((worker) =>
+      worker
+        .query('UPDATE ledger_events SET payload = NULL WHERE id = $1', [EVENT])
+        .then(() => null)
+        .catch((error: unknown) => error as { code?: string }),
+    );
+    expect(failure?.code).toBe('42501');
+  });
+
+  it('lets the worker null a payload only after SET LOCAL ROLE lance_retention', async () => {
+    const nulled = await asWorker(async (worker) => {
+      await worker.query('BEGIN');
+      await worker.query('SET LOCAL ROLE lance_retention');
+      const result = await worker.query('UPDATE ledger_events SET payload = NULL WHERE id = $1', [
+        EVENT,
+      ]);
+      await worker.query('COMMIT');
+      const after = await worker.query<{ who: string }>('SELECT current_user AS who');
+      return { count: result.rowCount, roleAfter: after.rows[0]?.who };
+    });
+    expect(nulled).toEqual({ count: 1, roleAfter: 'lance_app' });
+  });
+
+  it('refuses to grant the role to lance_app', async () => {
+    const migrate = createDb({ connectionString: connectAs('migrate_identity'), password: 'test' });
+    try {
+      await expect(grantRetentionMember(migrate, 'lance_app')).rejects.toThrow(/only the worker/);
+      await expect(grantRetentionMember(migrate, 'no_such_identity')).rejects.toThrow(/step 7/);
+    } finally {
+      await migrate.$client.end();
     }
   });
 });

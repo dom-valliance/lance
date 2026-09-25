@@ -1,9 +1,10 @@
-import type {
-  MeetingRecord,
-  QueryMeetingsArgs,
-  QueryOpenTasksArgs,
-  QueryTasksArgs,
-  TaskRecord,
+import {
+  ConnectorError,
+  type MeetingRecord,
+  type QueryMeetingsArgs,
+  type QueryOpenTasksArgs,
+  type QueryTasksArgs,
+  type TaskRecord,
 } from '@lance/connectors';
 import { hashRecord } from '@lance/shared';
 import { describe, expect, it } from 'vitest';
@@ -24,6 +25,9 @@ import {
 const NOW = '2026-09-21T09:00:00.000Z';
 const TASKS_DATA_SOURCE_ID = '20257534-6e48-81fe-b4b5-000b69ecace6';
 const MEETINGS_DATA_SOURCE_ID = '1fc57534-6e48-804e-a193-000bec4176ab';
+/** The principal's Notion user, the assignee on `task()`. */
+const ASSIGNEE = '1fdd872b-594c-8146-b22f-00028f1f5a41';
+const COLLEAGUE = '2aee983c-605d-8257-c33a-00139a2a6b52';
 
 function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
@@ -83,6 +87,8 @@ function fakeReads(
     open?: TaskRecord[];
     meetings?: MeetingRecord[];
     pageText?: string;
+    /** What a single page read returns; a page missing here is one Notion cannot find. */
+    pages?: Record<string, TaskRecord>;
   } = {},
 ): FakeReads {
   const taskCalls: QueryTasksArgs[] = [];
@@ -110,6 +116,19 @@ function fakeReads(
       pageTextCalls.push(pageId);
       return Promise.resolve(result.pageText ?? '');
     },
+    getTask: (pageId: string) => {
+      const page = result.pages?.[pageId];
+      return page === undefined
+        ? Promise.reject(
+            new ConnectorError('notion getTask: HTTP 404', {
+              connector: 'notion',
+              operation: 'getTask',
+              status: 404,
+              retryable: false,
+            }),
+          )
+        : Promise.resolve(page);
+    },
   };
 }
 
@@ -121,6 +140,7 @@ function watcherWith(
     reads,
     tasksDataSourceId: TASKS_DATA_SOURCE_ID,
     meetingsDataSourceId: MEETINGS_DATA_SOURCE_ID,
+    assigneeId: ASSIGNEE,
     knownOpenTaskIds: () => Promise.resolve(options.knownOpen ?? []),
     now: () => options.now ?? NOW,
   });
@@ -142,6 +162,7 @@ describe('createNotionWatcher', () => {
       reads,
       tasksDataSourceId: TASKS_DATA_SOURCE_ID,
       meetingsDataSourceId: null,
+      assigneeId: ASSIGNEE,
       knownOpenTaskIds: () => Promise.resolve([]),
       now: () => NOW,
     });
@@ -153,7 +174,9 @@ describe('createNotionWatcher', () => {
   it('reads the whole database when the partition has no cursor yet', async () => {
     const reads = fakeReads();
     await watcherWith(reads).poll(TASK_PARTITION, null);
-    expect(reads.taskCalls).toEqual([{ dataSourceId: TASKS_DATA_SOURCE_ID, since: INITIAL_SINCE }]);
+    expect(reads.taskCalls).toEqual([
+      { dataSourceId: TASKS_DATA_SOURCE_ID, since: INITIAL_SINCE, assigneeId: ASSIGNEE },
+    ]);
   });
 
   it('reaches two minutes behind the cursor to cover clock skew', async () => {
@@ -212,11 +235,45 @@ describe('the removal sweep', () => {
       TASK_PARTITION,
       '2026-09-21T08:00:00.000Z',
     );
-    expect(reads.openCalls).toEqual([{ dataSourceId: TASKS_DATA_SOURCE_ID }]);
+    expect(reads.openCalls).toEqual([{ dataSourceId: TASKS_DATA_SOURCE_ID, assigneeId: ASSIGNEE }]);
     expect(result.records).toEqual([
       { id: GONE, observedAt: NOW, raw: { id: GONE }, removed: true },
     ]);
     expect(result.nextCursor).toBeNull();
+  });
+
+  it('treats a task reassigned to someone else as leaving the principal view, not deleted', async () => {
+    const reads = fakeReads({
+      tasks: [],
+      open: [],
+      pages: { [GONE]: task({ id: GONE, assigneeIds: [COLLEAGUE] }) },
+    });
+    const watcher = watcherWith(reads, { knownOpen: [GONE] });
+
+    const result = await watcher.poll(TASK_PARTITION, '2026-09-21T08:00:00.000Z');
+    const record = result.records[0];
+    if (record === undefined) throw new Error('the sweep returned no record');
+    const observation = await watcher.normalise(record, TASK_PARTITION);
+
+    expect(result.records).toEqual([
+      { id: GONE, observedAt: NOW, raw: { id: GONE, reassigned: true }, removed: true },
+    ]);
+    expect(observation.record).toEqual({ kind: 'task', id: GONE, removed: true, reassigned: true });
+    expect(observation.labels).toEqual(['Notion', 'Task', 'Reassigned']);
+    expect(observation.summary).toBe('Task reassigned to someone else in Notion');
+  });
+
+  it('records a removal for a task that still names the principal but neither query returned, which is in the trash', async () => {
+    const reads = fakeReads({ tasks: [], open: [], pages: { [GONE]: task({ id: GONE }) } });
+
+    const result = await watcherWith(reads, { knownOpen: [GONE] }).poll(
+      TASK_PARTITION,
+      '2026-09-21T08:00:00.000Z',
+    );
+
+    expect(result.records).toEqual([
+      { id: GONE, observedAt: NOW, raw: { id: GONE }, removed: true },
+    ]);
   });
 
   it('does not report a task removed when the same poll saw it edited', async () => {

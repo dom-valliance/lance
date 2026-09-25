@@ -28,3 +28,38 @@ Lesson: use plain git for branches and commits. Do not install or use the `gh` C
 **Correction**: Dom said it was not clear what Claude wanted him to do next.
 **Rule**: Close any hand-over with a numbered list of Dom's actions, each with the exact command where one exists, followed by what Claude will do and what it is waiting on. State of branches goes above that list, not in place of it.
 **Applies to**: global, every hand-over message
+
+### [2026-09-24] Create worktrees for subagents by hand, from the working branch
+
+**Context**: Launching three Phase 5 agents with the Agent tool's worktree isolation.
+**Correction**: None from Dom; the agents stopped themselves. The tool cut each worktree from local `main`, which lags `origin/main` on this machine because `git fetch` fails over SSH, so none held the Phase 5 base. It also deleted each worktree and its branch as soon as the agent stopped unchanged, so a resumed agent had nowhere to work.
+**Rule**: For parallel agents, create each worktree with `git worktree add ../lance-worktrees/<name> -b <branch> <working branch>` before launching, tell Dom the paths and branches, and pin each agent to its path in the prompt. Check the base commit before the agent starts.
+**Applies to**: global, parallel subagent work
+
+### [2026-09-24] A failing target is fixed at the cause, not by loosening the target
+
+**Context**: The Phase 5 load test failed queue latency p95 (about two hours against 60 seconds for Monday mail at 30 principals). Claude recommended option D, amending the acceptance target, first.
+**Correction**: Dom: "Isn't that just making the NFRs more tolerant?" The user-facing problem, a two-hour mail backlog, would have remained.
+**Rule**: When an acceptance target fails, recommend the change that fixes the cause. Propose changing a target only when the target measures the wrong thing, say plainly that it loosens the requirement and what the user would then experience, and never lead with it.
+**Applies to**: global, NFRs and acceptance criteria
+
+### [2026-09-24] Cap long-running agent work in runs and wall time
+
+**Context**: The load-test agent was briefed to measure, tune and rerun with no limit. One run took most of an hour, so it ran for over four hours and spent many tokens; Claude had estimated 45 to 90 minutes without knowing a run's length.
+**Correction**: Dom asked why the load test was touching four hours and whether it used tokens.
+**Rule**: Brief any long-running agent job with an explicit cap on runs and on wall time, and with "report and stop" when a target still fails. Find out how long one run takes before estimating. Check on an agent that passes its estimate rather than waiting.
+**Applies to**: global, subagent briefs
+
+### [2026-09-25] Say where and how to run a step, not just its name
+
+**Context**: Checklist step 2 said "redeploy `infra/deployer.bicep` from the branch".
+**Correction**: Dom: "It's not clear what redeploy means here. Should I push, merge, pull, build and deploy?"
+**Rule**: A hand-over step names the directory, the branch, the exact commands, and what they do not involve (no push, no merge, no build). Avoid "redeploy" and "run from the branch" as shorthand; say "run these two commands in your terminal from <dir> while it is on <branch>".
+**Applies to**: global, hand-over steps and runbooks
+
+### [2026-09-25] Check the operator's Entra rights before handing over an Entra script
+
+**Context**: `setup-app-roles.sh` was handed to Dom having been checked only with read queries of the objects, not of who may change them. It failed three times: the app and enterprise app had no owner, an owner's CLI token cannot assign app roles, and the tenant has no Entra ID P1 for group assignment.
+**Correction**: Dom ran it and pasted each failure; he chose the portal over signing in as the tenant admin.
+**Rule**: Before handing over a script that changes Entra, read with the operator's own account: owners of every object it edits (`az ad app owner list`, `/servicePrincipals/{id}/owners`), the operator's directory roles (`/me/memberOf`), and the tenant's licences (`/subscribedSkus`). Give the portal route beside any step the operator's CLI token may not be allowed to do.
+**Applies to**: global, Entra and tenant changes

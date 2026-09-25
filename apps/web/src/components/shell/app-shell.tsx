@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { MobileNav } from '@/components/shell/mobile-nav';
+import { navItemsFor } from '@/components/shell/nav';
 import { PausedBanner } from '@/components/shell/paused-banner';
 import { Sidebar } from '@/components/shell/sidebar';
 import type { ShellData } from '@/lib/shell-data';
@@ -7,9 +8,10 @@ import type { ShellData } from '@/lib/shell-data';
 /**
  * Sidebar at 1024 and up, top bar and drawer beneath; the paused banner
  * above every page while the kill switch is on; 32px of padding around
- * the page at desktop, 16px on a phone. Signed out, none of that has a
- * reading, so the shell steps back to a centred canvas for the sign-in
- * card (design 7.12).
+ * the page at desktop, 16px on a phone. Signed out, or signed in and still
+ * onboarding, none of that has a reading, so the shell steps back to a
+ * centred canvas for the sign-in card or the onboarding checklist (design
+ * 7.12).
  */
 export function AppShell({
   agentName,
@@ -20,15 +22,16 @@ export function AppShell({
   data: ShellData;
   children: ReactNode;
 }) {
-  if (!data.signedIn) {
+  if (!data.signedIn || data.onboarding) {
     return <main className="grid min-h-screen place-items-center p-4">{children}</main>;
   }
 
+  const items = navItemsFor(data.admin);
   return (
     <div className="flex min-h-screen">
-      <Sidebar agentName={agentName} counts={data.counts} status={data.statusLine} />
+      <Sidebar agentName={agentName} items={items} counts={data.counts} status={data.statusLine} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <MobileNav counts={data.counts} status={data.statusLine} />
+        <MobileNav items={items} counts={data.counts} status={data.statusLine} />
         <main className="flex flex-1 flex-col gap-6 p-4 lg:p-8">
           {data.paused === null ? null : <PausedBanner {...data.paused} />}
           {children}

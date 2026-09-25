@@ -203,6 +203,45 @@ describe('connector dispatch', () => {
     expect(w.graph.applyCategories).not.toHaveBeenCalled();
   });
 
+  it('refuses a move that names its folder by name and by a different id, and writes nothing', async () => {
+    // The review's case: policy would read AI-Filed, the write would read the id.
+    const p = proposal({
+      actionClass: 'move_mail',
+      policyDecision: 'auto',
+      payload: { destinationFolderName: 'AI-Filed', destinationFolderId: 'deleteditems' },
+    });
+    const { write, w } = dispatch(p);
+    await expect(write.perform(p.id)).rejects.toMatchObject({ reason: 'forbidden_at_execution' });
+    expect(w.graph.moveMessage).not.toHaveBeenCalled();
+    expect(w.graph.resolveFolderId).not.toHaveBeenCalled();
+  });
+
+  it('refuses a move into Deleted Items however it is named', async () => {
+    for (const payload of [
+      { destinationFolderId: 'deleteditems' },
+      { destinationFolderName: 'Deleted Items' },
+      { destinationFolderName: 'RecoverableItemsDeletions' },
+    ]) {
+      const p = proposal({ actionClass: 'move_mail', policyDecision: 'propose', payload });
+      const { write, w } = dispatch(p);
+      await expect(write.perform(p.id)).rejects.toMatchObject({ reason: 'forbidden_at_execution' });
+      expect(w.graph.moveMessage).not.toHaveBeenCalled();
+    }
+  });
+
+  it('refuses an edit that adds a folder id beside the proposed folder name', async () => {
+    const p = proposal({
+      actionClass: 'move_mail',
+      status: 'edited',
+      policyDecision: 'auto',
+      payload: { destinationFolderName: 'AI-Filed' },
+      editedPayload: { destinationFolderId: 'folder-elsewhere' },
+    });
+    const { write, w } = dispatch(p);
+    await expect(write.perform(p.id)).rejects.toMatchObject({ reason: 'forbidden_at_execution' });
+    expect(w.graph.moveMessage).not.toHaveBeenCalled();
+  });
+
   it('refuses when the target changed since the proposal', async () => {
     const { write } = dispatch(proposal(), writers(), 'changed');
     await expect(write.perform(proposal().id)).rejects.toMatchObject({ reason: 'target_changed' });

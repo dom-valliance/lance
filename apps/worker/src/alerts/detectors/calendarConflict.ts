@@ -1,5 +1,5 @@
 import type { DetectedAlert, Detector, DetectorContext } from './types.js';
-import { calendarWindow, domDeclined, type CalendarEventRow } from './calendarWindow.js';
+import { calendarWindow, principalDeclined, type CalendarEventRow } from './calendarWindow.js';
 import { localDateTime, provenanceOf } from './support.js';
 
 /**
@@ -31,9 +31,9 @@ export const calendarConflictDetector: Detector = {
 
   async run(context: DetectorContext): Promise<DetectedAlert[]> {
     const zone = context.config.timeZone;
-    const domEmail = context.config.dom.email;
+    const principalEmail = context.principal.email;
     const windows = (await calendarWindow(context))
-      .filter((event) => !domDeclined(event, domEmail))
+      .filter((event) => !principalDeclined(event, principalEmail))
       .flatMap((event) => {
         const window = windowOf(event);
         return window === null ? [] : [window];

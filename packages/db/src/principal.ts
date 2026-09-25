@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { Db } from './client.js';
 import { principals, type Principal } from './schema/principals.js';
 
@@ -30,7 +30,29 @@ export async function resolveSinglePrincipal(db: Db, upn: string): Promise<Princ
   if (principal.upn.toLowerCase() !== upn.toLowerCase()) {
     throw new Error(
       `The active principal is ${principal.upn} but this process is configured for ${upn}. ` +
-        'Correct ALLOWED_UPN or DOM_EMAIL, or the principal row, so the two agree.',
+        'Correct DOM_EMAIL, or the principal row, so the two agree.',
+    );
+  }
+  return principal;
+}
+
+/**
+ * The principal with `upn`, whatever other principals exist (ADR 0025).
+ * The multi-principal worker uses it to find the organisation's admin,
+ * who is Dom until package 5.1 adds roles. A missing row is treated as the
+ * migration job not having seeded it yet.
+ */
+export async function resolvePrincipalByUpn(db: Db, upn: string): Promise<Principal> {
+  const rows = await db
+    .select()
+    .from(principals)
+    .where(eq(sql`lower(${principals.upn})`, upn.toLowerCase()))
+    .limit(1);
+  const principal = rows[0];
+  if (principal === undefined) {
+    throw new NoActivePrincipalError(
+      `No principal has the UPN ${upn}. Run the migration job, which seeds the first principal, ` +
+        'or correct DOM_EMAIL so it names an existing principal.',
     );
   }
   return principal;
@@ -79,6 +101,23 @@ export async function waitForSinglePrincipal(
   upn: string,
   options: WaitOptions,
 ): Promise<Principal> {
+  return waitForMigration(() => resolveSinglePrincipal(db, upn), upn, options);
+}
+
+/** `resolvePrincipalByUpn`, retried while the migration job runs, as above. */
+export async function waitForPrincipalByUpn(
+  db: Db,
+  upn: string,
+  options: WaitOptions,
+): Promise<Principal> {
+  return waitForMigration(() => resolvePrincipalByUpn(db, upn), upn, options);
+}
+
+async function waitForMigration(
+  attempt: () => Promise<Principal>,
+  upn: string,
+  options: WaitOptions,
+): Promise<Principal> {
   const now = options.now ?? Date.now;
   const sleep =
     options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -86,7 +125,7 @@ export async function waitForSinglePrincipal(
   const deadline = now() + options.waitSeconds * 1000;
   for (;;) {
     try {
-      return await resolveSinglePrincipal(db, upn);
+      return await attempt();
     } catch (error) {
       if (!isMigrationPending(error) || now() + pollMs > deadline) throw error;
       options.log?.(

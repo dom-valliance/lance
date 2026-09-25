@@ -1,6 +1,7 @@
 import type { AppRouter } from '@lance/api/router';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { auth } from '@/auth';
+import { serverIdToken } from '@/auth/id-token';
 import { apiBaseUrl } from './api';
 
 /**
@@ -39,10 +40,11 @@ export async function apiClient(): Promise<ApiClient> {
   if (session.error !== undefined) {
     throw new Error('The Microsoft sign-in has lapsed and could not be renewed. Sign in again.');
   }
-  if (session.idToken === undefined) {
+  const idToken = await serverIdToken();
+  if (idToken === undefined) {
     throw new Error(
       'The session carries no Entra id token. Sign out and in again so Auth.js can store one.',
     );
   }
-  return clientWithToken(session.idToken);
+  return clientWithToken(idToken);
 }

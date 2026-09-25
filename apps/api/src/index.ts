@@ -3,7 +3,15 @@ export const APP_NAME = '@lance/api';
 export { buildServer, loggerOptions, scrubAccessToken, LOGGER_REDACT_PATHS } from './server.js';
 export { DOM_ACTOR } from './deps.js';
 export type {
+  AdminStoreLike,
   ApiDeps,
+  Caller,
+  PrincipalDirectoryLike,
+  PrincipalHealth,
+  PrincipalKey,
+  PrincipalRef,
+  ServerDeps,
+  VerifiedIdentity,
   LedgerReaderLike,
   LedgerWriterLike,
   ProposalStoreLike,
@@ -23,7 +31,7 @@ export type { InteractionOutcome } from './slack/interactions.js';
 export { eventsRoutes, HEARTBEAT_MS } from './routes/events.js';
 export { createEntraVerifier, entraIssuer } from './auth/entra.js';
 export type { EntraVerifierOptions } from './auth/entra.js';
-export { requireEntra, verifiedUpn } from './auth/require-entra.js';
+export { authenticate, requireActive, requireEntra, verifiedCaller } from './auth/require-entra.js';
 export { verifySlackSignature, slackSignature, REPLAY_WINDOW_SECONDS } from './slack/verify.js';
 export type { SlackSignatureInput, SlackVerification } from './slack/verify.js';
 export { createDbStatusSource, renderStatus, startOfLocalDay } from './status.js';
@@ -38,4 +46,4 @@ export type { AgentLog } from './routes/ingest.js';
 export { appRouter, DecideInputSchema, ProposalFilterInputSchema } from './router.js';
 export type { AppRouter, DecideInput, ProposalFilterInput } from './router.js';
 export { createCallerFactory } from './trpc.js';
-export { BadRequestError, HttpError, UnauthorisedError } from './errors.js';
+export { BadRequestError, ForbiddenError, HttpError, UnauthorisedError } from './errors.js';

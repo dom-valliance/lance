@@ -10,10 +10,9 @@ import {
   nowIso,
   type Config,
   type MorningBriefContent,
+  type PrincipalIdentity,
 } from '@lance/shared';
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
-import type { PgBoss } from 'pg-boss';
-import { work } from '../scheduler/boss.js';
 import type { createProposalHandler } from '../executor/createProposal.js';
 import {
   PREP_LEAD_MINUTES,
@@ -48,16 +47,17 @@ export const QUEUE_PREP = 'brief-meeting-prep';
 
 export interface BriefDeps {
   db: Db;
-  config: Pick<
-    Config,
-    'timeZone' | 'dom' | 'briefs' | 'cost' | 'models' | 'agentDisplayName' | 'notion'
-  >;
+  config: Pick<Config, 'timeZone' | 'briefs' | 'cost' | 'models' | 'agentDisplayName' | 'notion'>;
+  /** The principal the briefs are for. */
+  principal: Pick<PrincipalIdentity, 'email'>;
   ontology: OntologyRepository;
   /** Null means no model: the brief is posted from the assembled facts alone. */
   agent: AgentDeps | null;
   reads: ReadToolDeps;
   slack: Pick<SlackSurface, 'post'> | null;
   createProposal: ReturnType<typeof createProposalHandler>;
+  /** `principals.notion_user_id`, whose Notion tasks the briefs list (ADR 0022). */
+  principalNotionUserId?: string | null;
   now?: () => string;
 }
 
@@ -76,7 +76,16 @@ interface SlackDelivery {
 type StoredMorningBrief = MorningBriefContent & SlackDelivery;
 
 function dataDeps(deps: BriefDeps, now: () => string): BriefDataDeps {
-  return { db: deps.db, ontology: deps.ontology, config: deps.config, now };
+  return {
+    db: deps.db,
+    ontology: deps.ontology,
+    config: deps.config,
+    principal: deps.principal,
+    ...(deps.principalNotionUserId === undefined
+      ? {}
+      : { principalNotionUserId: deps.principalNotionUserId }),
+    now,
+  };
 }
 
 async function recordBrief(
@@ -357,24 +366,4 @@ export async function runMeetingPrep(deps: BriefDeps): Promise<BriefResult[]> {
     results.push({ briefId, correlationId, slackTs });
   }
   return results;
-}
-
-/** Schedules (spec 9.1): brief 06:30 and board 16:00 on weekdays, prep checks every five minutes in the working day. */
-export async function registerBriefs(boss: PgBoss, deps: BriefDeps): Promise<void> {
-  const tz = deps.config.timeZone;
-  await boss.createQueue(QUEUE_MORNING);
-  await boss.schedule(QUEUE_MORNING, '30 6 * * 1-5', {}, { tz, key: QUEUE_MORNING });
-  await work(boss, QUEUE_MORNING, async () => {
-    await runMorningBrief(deps);
-  });
-  await boss.createQueue(QUEUE_BOARD);
-  await boss.schedule(QUEUE_BOARD, '0 16 * * 1-5', {}, { tz, key: QUEUE_BOARD });
-  await work(boss, QUEUE_BOARD, async () => {
-    await runAfternoonBoard(deps);
-  });
-  await boss.createQueue(QUEUE_PREP);
-  await boss.schedule(QUEUE_PREP, '*/5 7-19 * * 1-5', {}, { tz, key: QUEUE_PREP });
-  await work(boss, QUEUE_PREP, async () => {
-    await runMeetingPrep(deps);
-  });
 }

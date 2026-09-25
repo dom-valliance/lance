@@ -19,6 +19,7 @@ import {
   NODE_LABEL_VALUES,
   ONTOLOGY_LAYERS,
   edgeLayer,
+  edgeLayerBetween,
   nodeLayer,
   type EdgeLabel,
   type Layer,
@@ -55,6 +56,36 @@ export const MUTATION_KIND = 'ontology_mutation';
 /** The Cypher parameter that carries the scope's principal. Reserved. */
 const SCOPE_PARAM = 'principal';
 
+/** A Drizzle transaction over the repository's handle. */
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+/**
+ * How an `apply` runs: inside a caller's transaction rather than its own,
+ * and holding the node locks a merge takes (see `lockNodes`).
+ */
+interface ApplyOptions {
+  tx?: Tx;
+  locks?: readonly string[];
+}
+
+/** Raised inside a merge's transaction to roll it back when the merge is refused. */
+class MergeRefused extends Error {
+  override readonly name = 'MergeRefused';
+}
+
+/**
+ * Transaction-scoped advisory locks on graph node ids, taken in id order.
+ * A meeting merge holds the lock on the node it deletes from its edge
+ * scan to its delete, and every write that attaches an edge to a Meeting
+ * or changes one takes the same lock, so no edge can reach the node
+ * between the check and the delete (ADR 0033).
+ */
+async function lockNodes(runner: SqlRunner, ids: readonly string[]): Promise<void> {
+  for (const id of [...new Set(ids)].sort()) {
+    await runner.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`ontology-node:${id}`]);
+  }
+}
+
 const REBUILD_PAGE = 500;
 
 /** The principal a repository reads and writes for (ADR 0015, ADR 0017). */
@@ -67,6 +98,16 @@ export interface SourceRef {
   system: SourceSystem;
   id: string;
   url?: string;
+  observedAt: string;
+}
+
+/**
+ * What a shared node keeps of its sightings (ADR 0033): the system and the
+ * first time Lance learnt of it there. The record id and URL of each
+ * sighting stay on the observing principal's private edge to the node.
+ */
+export interface SharedSourceRef {
+  system: SourceSystem;
   observedAt: string;
 }
 
@@ -180,6 +221,15 @@ export interface RebuildResult {
 export interface BackfillOptions {
   /** The iCalUId of the scope's own calendar event with this Graph event id, or null. */
   icalUidOf(graphEventId: string): Promise<string | null>;
+  /**
+   * The principal whose data the pre-Phase-4 graph is: the one every
+   * legacy mutation was recorded under (the principal whose UPN is
+   * `config.dom.email`). Every unlayered node, every name-only shared
+   * Person and every record-bearing shared ref is taken to be theirs, so
+   * a backfill in any other principal's scope claims nothing and records
+   * nothing.
+   */
+  legacyOwnerId: string;
 }
 
 export interface BackfillResult {
@@ -191,8 +241,20 @@ export interface BackfillResult {
   meetingContexts: number;
   /** Meetings given an iCalUId. */
   meetingKeys: number;
-  /** Meetings left without an iCalUId because another Meeting already holds it. */
+  /** Meetings left without an iCalUId because another Meeting already holds it and could not be merged into it. */
   meetingKeyConflicts: number;
+  /** Jamie-keyed Meetings merged into the Meeting that holds their iCalUId (ADR 0033). */
+  meetingMerges: number;
+  /** Shared Meetings whose Jamie id left the node because they have an iCalUId (ADR 0033). */
+  meetingJamieIds: number;
+  /** Name-only Persons moved from the shared layer to the principal's private layer (ADR 0033). */
+  privatePersons: number;
+  /** Shared SAME_AS candidates made private to the principal whose name judgement they are. */
+  privateCandidates: number;
+  /** Shared nodes whose source refs lost their record ids and URLs to the principal's own edge (ADR 0033). */
+  strippedRefs: number;
+  /** Nodes left as they are because another principal's evidence touches them; the next run looks again. */
+  refused: number;
   /** Recorded mutations this run appended. */
   mutations: number;
 }
@@ -226,9 +288,44 @@ function mergeSourceRefs(existing: unknown, incoming: SourceRef): SourceRef[] {
   return seen ? refs : [...refs, incoming];
 }
 
+/**
+ * A shared node's refs with one more sighting folded in: one entry per
+ * system, the earliest time, and nothing else (ADR 0033). Refs written
+ * before ADR 0033 carry a record id; folding drops it.
+ */
+function sharedRefs(existing: unknown, incoming: SourceRef | null): SharedSourceRef[] {
+  const all = [...sourceRefsOf(existing), ...(incoming === null ? [] : [incoming])];
+  const out: SharedSourceRef[] = [];
+  for (const ref of all) {
+    const seen = out.find((item) => item.system === ref.system);
+    if (seen === undefined) out.push({ system: ref.system, observedAt: ref.observedAt });
+    else if (ref.observedAt < seen.observedAt) seen.observedAt = ref.observedAt;
+  }
+  return out;
+}
+
+/** True when a ref says more than a shared node may keep: a record id or a URL. */
+function carriesRecord(ref: unknown): boolean {
+  return typeof ref === 'object' && ref !== null && ('id' in ref || 'url' in ref);
+}
+
 function sourceRefsOf(value: unknown): SourceRef[] {
   return Array.isArray(value) ? (value as SourceRef[]) : [];
 }
+
+/** True when a node property holds a value: not absent, null or the empty string. */
+function isSet(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== '';
+}
+
+/** Scalar Person attributes one principal's sighting may fill but never change. */
+const PERSON_ATTRIBUTES = [
+  ['slack_id', 'slackId'],
+  ['notion_user_id', 'notionUserId'],
+  ['org_id', 'orgId'],
+  ['role', 'role'],
+  ['is_internal', 'isInternal'],
+] as const;
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null;
@@ -239,6 +336,53 @@ function stringsOf(value: unknown): string[] {
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
 }
+
+function layerOf(node: Node | null): Layer | null {
+  const layer = node?.properties['layer'];
+  return layer === 'reference' || layer === 'shared' || layer === 'private' ? layer : null;
+}
+
+/**
+ * ADR 0033: an email, a Slack id, a Notion user id or a Jamie participant
+ * id. A Person with none of them is only a name one principal saw, so it
+ * is that principal's evidence and lives in their private layer.
+ */
+function hasExactKey(props: {
+  emails: readonly unknown[];
+  slackId: unknown;
+  notionUserId: unknown;
+  jamieParticipantIds: readonly unknown[];
+}): boolean {
+  const present = (value: unknown) => typeof value === 'string' && value !== '';
+  return (
+    props.emails.some(present) ||
+    present(props.slackId) ||
+    present(props.notionUserId) ||
+    props.jamieParticipantIds.some(present)
+  );
+}
+
+function inputHasExactKey(input: PersonInput, emails: readonly string[]): boolean {
+  return hasExactKey({
+    emails,
+    slackId: input.slackId,
+    notionUserId: input.notionUserId,
+    jamieParticipantIds: input.jamieParticipantIds ?? [],
+  });
+}
+
+function nodeHasExactKey(node: Node): boolean {
+  const props = node.properties;
+  return hasExactKey({
+    emails: stringsOf(props['emails']),
+    slackId: props['slack_id'],
+    notionUserId: props['notion_user_id'],
+    jamieParticipantIds: stringsOf(props['jamie_participant_ids']),
+  });
+}
+
+/** Edge property keys a merge copies by name into Cypher text; anything else is refused. */
+const PROPERTY_KEY = /^[a-z_][a-z0-9_]*$/;
 
 function assertLabel(label: string, allowed: ReadonlySet<string>, what: string): void {
   if (!allowed.has(label)) {
@@ -438,6 +582,18 @@ export class OntologyRepository {
     };
   }
 
+  /**
+   * Where the scope's principal saw a shared node: the source refs, record
+   * ids and URLs included, on their own `OBSERVED` edge to it (ADR 0033).
+   * Empty when the principal never saw it, or saw it only in another way.
+   */
+  async sightings(nodeId: string): Promise<SourceRef[]> {
+    const person = await this.findPrincipalPerson();
+    if (person === null) return [];
+    const properties = await this.ownEdge(person.id, 'OBSERVED', nodeId);
+    return sourceRefsOf(properties?.['source_refs']);
+  }
+
   async findTask(source: TaskInput['source'], sourceId: string): Promise<Node | null> {
     return firstNode(
       await this.read(
@@ -506,52 +662,103 @@ export class OntologyRepository {
   async upsertPerson(input: PersonInput, context: MutationContext): Promise<UpsertResult> {
     const emails = uniqueStrings((input.emails ?? []).map(normaliseEmail));
     const existing = await this.findExistingPerson(input, emails);
+    if (existing === null) return this.createPerson(input, emails, context);
+    await this.updatePerson(existing, input, emails, context);
+    return { id: existing.id, created: false };
+  }
+
+  /**
+   * A new Person. With an exact key it is shared, keeps only the system
+   * and time of the sighting, and the full ref goes on the principal's
+   * own `OBSERVED` edge; with none it is private to the principal and
+   * keeps its refs whole (ADR 0033).
+   */
+  private async createPerson(
+    input: PersonInput,
+    emails: string[],
+    context: MutationContext,
+  ): Promise<UpsertResult> {
+    const layer: Layer = inputHasExactKey(input, emails) ? nodeLayer('Person') : 'private';
+    const id = this.newId();
     const ts = this.now();
-    if (existing === null) {
-      const id = this.newId();
-      await this.apply(
-        'CREATE (p:Person {id: $id, display_name: $displayName, normalised_name: $normalisedName, emails: $emails, slack_id: $slackId, notion_user_id: $notionUserId, jamie_participant_ids: $jamieIds, org_id: $orgId, role: $role, is_internal: $isInternal, confidence: $confidence, source_refs: $sourceRefs, layer: $layer, principal_id: $owner, created_at: $ts, updated_at: $ts}) RETURN p.id',
-        {
-          id,
-          displayName: input.displayName,
-          normalisedName: normaliseName(input.displayName),
-          emails,
-          slackId: input.slackId ?? null,
-          notionUserId: input.notionUserId ?? null,
-          jamieIds: uniqueStrings(input.jamieParticipantIds ?? []),
-          orgId: input.orgId ?? null,
-          role: input.role ?? null,
-          isInternal: input.isInternal ?? false,
-          confidence: input.confidence ?? 1,
-          sourceRefs: [input.sourceRef],
-          ...this.stamp(nodeLayer('Person')),
-          ts,
-        },
-        context,
-      );
-      return { id, created: true };
-    }
-    const props = existing.properties;
     await this.apply(
-      `MATCH (p:Person {id: $id}) WHERE ${visible('p')} SET p.emails = $emails, p.slack_id = $slackId, p.notion_user_id = $notionUserId, p.jamie_participant_ids = $jamieIds, p.org_id = $orgId, p.role = $role, p.is_internal = $isInternal, p.source_refs = $sourceRefs, p.updated_at = $ts RETURN p.id`,
+      'CREATE (p:Person {id: $id, display_name: $displayName, normalised_name: $normalisedName, emails: $emails, slack_id: $slackId, notion_user_id: $notionUserId, jamie_participant_ids: $jamieIds, org_id: $orgId, role: $role, is_internal: $isInternal, confidence: $confidence, source_refs: $sourceRefs, layer: $layer, principal_id: $owner, created_at: $ts, updated_at: $ts}) RETURN p.id',
       {
-        id: existing.id,
-        emails: uniqueStrings([...((props['emails'] as string[] | undefined) ?? []), ...emails]),
-        slackId: input.slackId ?? props['slack_id'] ?? null,
-        notionUserId: input.notionUserId ?? props['notion_user_id'] ?? null,
-        jamieIds: uniqueStrings([
-          ...((props['jamie_participant_ids'] as string[] | undefined) ?? []),
-          ...(input.jamieParticipantIds ?? []),
-        ]),
-        orgId: input.orgId ?? props['org_id'] ?? null,
-        role: input.role ?? props['role'] ?? null,
-        isInternal: input.isInternal ?? props['is_internal'] ?? false,
-        sourceRefs: mergeSourceRefs(props['source_refs'], input.sourceRef),
+        id,
+        displayName: input.displayName,
+        normalisedName: normaliseName(input.displayName),
+        emails,
+        slackId: input.slackId ?? null,
+        notionUserId: input.notionUserId ?? null,
+        jamieIds: uniqueStrings(input.jamieParticipantIds ?? []),
+        orgId: input.orgId ?? null,
+        role: input.role ?? null,
+        // Unknown until a sighting says; `updatePerson` fills an empty value.
+        isInternal: input.isInternal ?? null,
+        confidence: input.confidence ?? 1,
+        sourceRefs: layer === 'private' ? [input.sourceRef] : sharedRefs([], input.sourceRef),
+        ...this.stamp(layer),
         ts,
       },
       context,
     );
-    return { id: existing.id, created: false };
+    if (layer !== 'private') {
+      const filled = PERSON_ATTRIBUTES.filter(([, field]) => isSet(input[field])).map(
+        ([property]) => property,
+      );
+      await this.recordSightings(id, [input.sourceRef], context, filled);
+    }
+    return { id, created: true };
+  }
+
+  /**
+   * Folds one sighting into an existing Person. Emails and Jamie ids are
+   * unions. A scalar attribute (Slack id, Notion user id, organisation,
+   * role, internal) keeps the value the node holds and takes the input's
+   * only where the node has none, so one principal's reading of a person
+   * never rewrites what another principal's, or the person's own
+   * principal record, set. Which attributes this principal's sighting
+   * filled on a shared Person is recorded on their own `OBSERVED` edge
+   * (`set_fields`), never on the shared node (ADR 0033).
+   */
+  private async updatePerson(
+    existing: Node,
+    input: PersonInput,
+    emails: string[],
+    context: MutationContext,
+  ): Promise<void> {
+    const props = existing.properties;
+    const isPrivate = layerOf(existing) === 'private';
+    const values: Record<string, unknown> = {};
+    const filled: string[] = [];
+    for (const [property, field] of PERSON_ATTRIBUTES) {
+      const held = props[property];
+      const incoming = input[field] ?? null;
+      if (isSet(held)) {
+        values[field] = held;
+      } else {
+        values[field] = incoming;
+        if (isSet(incoming)) filled.push(property);
+      }
+    }
+    await this.apply(
+      `MATCH (p:Person {id: $id}) WHERE ${visible('p')} SET p.emails = $emails, p.slack_id = $slackId, p.notion_user_id = $notionUserId, p.jamie_participant_ids = $jamieIds, p.org_id = $orgId, p.role = $role, p.is_internal = $isInternal, p.source_refs = $sourceRefs, p.updated_at = $ts RETURN p.id`,
+      {
+        id: existing.id,
+        emails: uniqueStrings([...stringsOf(props['emails']), ...emails]),
+        ...values,
+        jamieIds: uniqueStrings([
+          ...stringsOf(props['jamie_participant_ids']),
+          ...(input.jamieParticipantIds ?? []),
+        ]),
+        sourceRefs: isPrivate
+          ? mergeSourceRefs(props['source_refs'], input.sourceRef)
+          : sharedRefs(props['source_refs'], input.sourceRef),
+        ts: this.now(),
+      },
+      context,
+    );
+    if (!isPrivate) await this.recordSightings(existing.id, [input.sourceRef], context, filled);
   }
 
   private async findExistingPerson(input: PersonInput, emails: string[]): Promise<Node | null> {
@@ -581,12 +788,19 @@ export class OntologyRepository {
    * creates the person and a SAME_AS candidate for the Ontology page,
    * below that a new person. Two people who attended the same meeting
    * as distinct attendees are never merged automatically.
+   *
+   * ADR 0033: a sighting with no exact key creates a Person private to the
+   * principal. A later sighting with an exact key never merges into such a
+   * node, which would carry one principal's evidence into the shared layer:
+   * it creates (or has already found) the shared Person, and the private
+   * node gains a private `SAME_AS` candidate pointing at it.
    */
   async resolvePerson(input: PersonInput, context: MutationContext): Promise<ResolvePersonResult> {
     const emails = uniqueStrings((input.emails ?? []).map(normaliseEmail));
+    const keyed = inputHasExactKey(input, emails);
     const exact = await this.findExistingPerson(input, emails);
     if (exact !== null) {
-      await this.upsertPerson(input, context);
+      await this.updatePerson(exact, input, emails, context);
       return { id: exact.id, decision: 'exact', matchedId: exact.id, score: 1 };
     }
     const domain = emails.map(organisationDomain).find((d) => d !== null) ?? null;
@@ -594,7 +808,7 @@ export class OntologyRepository {
     const candidates = await this.findPersonsByNormalisedName(normaliseName(input.displayName));
     let best: { node: Node; score: number } | null = null;
     for (const node of candidates) {
-      const theirDomain = ((node.properties['emails'] as string[] | undefined) ?? [])
+      const theirDomain = stringsOf(node.properties['emails'])
         .map(organisationDomain)
         .find((d) => d !== null);
       const score = nameOrganisationScore(
@@ -611,7 +825,7 @@ export class OntologyRepository {
       if (best === null || score > best.score) best = { node, score };
     }
     if (best === null) {
-      const created = await this.upsertPerson(input, context);
+      const created = await this.createPerson(input, emails, context);
       return { id: created.id, decision: 'none', matchedId: null, score: null };
     }
     let decision = decide(best.score);
@@ -621,28 +835,23 @@ export class OntologyRepository {
     // address) has nothing that could ever distinguish it from the person
     // of that name already known, so a candidate-grade match reuses that
     // node rather than minting one per meeting.
-    const hasKey =
-      emails.length > 0 ||
-      Boolean(input.notionUserId) ||
-      Boolean(input.slackId) ||
-      (input.jamieParticipantIds?.length ?? 0) > 0;
-    if (decision === 'candidate' && !hasKey && !barred) decision = 'merge';
+    if (decision === 'candidate' && !keyed && !barred) decision = 'merge';
+    const bestIsPrivate = layerOf(best.node) === 'private';
+    if (decision === 'merge' && keyed && bestIsPrivate) decision = 'candidate';
     if (decision === 'merge') {
-      await this.upsertPerson(
-        {
-          ...input,
-          emails: [...emails, ...((best.node.properties['emails'] as string[] | undefined) ?? [])],
-        },
-        context,
-      );
+      await this.updatePerson(best.node, input, emails, context);
       return { id: best.node.id, decision, matchedId: best.node.id, score: best.score };
     }
-    const created = await this.upsertPerson(input, context);
+    const created = await this.createPerson(input, emails, context);
     if (decision === 'candidate') {
+      // The candidate runs from the private name-only node to the shared
+      // one, so it is the principal's evidence and private (ADR 0033).
+      const [from, to] =
+        keyed && bestIsPrivate ? [best.node.id, created.id] : [created.id, best.node.id];
       await this.link(
-        created.id,
+        from,
         'SAME_AS',
-        best.node.id,
+        to,
         { confidence: best.score, status: 'candidate' },
         context,
       );
@@ -690,12 +899,13 @@ export class OntologyRepository {
           domains,
           type: input.type ?? 'unknown',
           confidence: input.confidence ?? 1,
-          sourceRefs: [input.sourceRef],
+          sourceRefs: sharedRefs([], input.sourceRef),
           ...this.stamp(nodeLayer('Organisation')),
           ts,
         },
         context,
       );
+      await this.recordSightings(id, [input.sourceRef], context);
       return { id, created: true };
     }
     await this.apply(
@@ -707,22 +917,55 @@ export class OntologyRepository {
           ...domains,
         ]),
         type: input.type ?? existing.properties['type'] ?? 'unknown',
-        sourceRefs: mergeSourceRefs(existing.properties['source_refs'], input.sourceRef),
+        sourceRefs: sharedRefs(existing.properties['source_refs'], input.sourceRef),
         ts,
       },
       context,
     );
+    await this.recordSightings(existing.id, [input.sourceRef], context);
     return { id: existing.id, created: false };
   }
 
   /**
-   * One shared Meeting node per iCalUId, or per Jamie id when no calendar
-   * event matched. The node carries the facts every attendee shares; the
-   * observing principal's context goes on their own `ATTENDED` edge.
+   * One shared Meeting node per iCalUId. The node carries the facts every
+   * attendee shares; the observing principal's context goes on their own
+   * `ATTENDED` edge.
+   *
+   * A meeting only this principal's Jamie saw, with no iCalUId, is keyed
+   * on its Jamie id and is private to the principal: nothing but their
+   * own recording says it happened, so no other principal may find it.
+   * It becomes shared when the principal's calendar supplies its iCalUId,
+   * which every attendee's mailbox holds. It keeps its title, start and
+   * end then, because ADR 0017 lists exactly those as the shared facts
+   * of a Meeting, and loses its Jamie id to the principal's edge.
+   *
+   * Which source wins on a shared Meeting: the calendar. A Jamie
+   * observation never changes a shared Meeting's title, start or end,
+   * which the first sighting wrote and only a calendar (`graph`)
+   * observation may change; it fills a fact only where the node has none.
+   * On the principal's own private Meeting, their Jamie may update all
+   * three.
+   *
+   * ADR 0033: once the node has an iCalUId it keeps no Jamie id, which
+   * lives on the principal's edge. When this observation supplies the
+   * iCalUId of a meeting the same principal's earlier Jamie observation
+   * keyed on its Jamie id, and another node already holds that iCalUId,
+   * the Jamie-keyed node is merged into it (see `mergeMeeting`). When the
+   * merge is refused both nodes stay, and this observation lands on the
+   * iCalUId node, which `findMeeting` prefers.
    */
   async upsertMeeting(input: MeetingInput, context: MutationContext): Promise<UpsertResult> {
     const icalUid = input.icalUid ?? null;
-    const existing = await this.findMeeting({
+    let existing: Node | null = null;
+    if (icalUid !== null) {
+      const keyed = await this.findMeeting({ icalUid });
+      const jamieKeyed = await this.findOwnJamieKeyedMeeting(input);
+      if (keyed !== null && jamieKeyed !== null && jamieKeyed.id !== keyed.id) {
+        await this.mergeMeeting(jamieKeyed.id, keyed.id, context);
+      }
+      existing = keyed ?? jamieKeyed;
+    }
+    existing ??= await this.findMeeting({
       icalUid,
       jamieId: input.jamieId ?? null,
       graphEventId: input.graphEventId ?? null,
@@ -731,39 +974,244 @@ export class OntologyRepository {
     let result: UpsertResult;
     if (existing === null) {
       const id = this.newId();
-      await this.apply(
-        'CREATE (m:Meeting {id: $id, title: $title, start: $start, end_at: $end, ical_uid: $icalUid, jamie_id: $jamieId, confidence: 1, source_refs: [], layer: $layer, principal_id: $owner, created_at: $ts, updated_at: $ts}) RETURN m.id',
-        {
-          id,
-          title: input.title,
-          start: input.start,
-          end: input.end,
-          icalUid,
-          // The Jamie id keys the node only when no calendar event did.
-          jamieId: icalUid === null ? (input.jamieId ?? null) : null,
-          ...this.stamp(nodeLayer('Meeting')),
-          ts,
-        },
-        context,
-      );
+      const params = {
+        id,
+        title: input.title,
+        start: input.start,
+        end: input.end,
+        // Only one principal's recording knows of a meeting with no iCalUId.
+        ...this.stamp(icalUid === null ? 'private' : nodeLayer('Meeting')),
+        ts,
+      };
+      // The Jamie id keys the node only when no calendar event did.
+      await (icalUid === null
+        ? this.apply(
+            'CREATE (m:Meeting {id: $id, title: $title, start: $start, end_at: $end, jamie_id: $jamieId, confidence: 1, source_refs: [], layer: $layer, principal_id: $owner, created_at: $ts, updated_at: $ts}) RETURN m.id',
+            { ...params, jamieId: input.jamieId ?? null },
+            context,
+          )
+        : this.apply(
+            'CREATE (m:Meeting {id: $id, title: $title, start: $start, end_at: $end, ical_uid: $icalUid, confidence: 1, source_refs: [], layer: $layer, principal_id: $owner, created_at: $ts, updated_at: $ts}) RETURN m.id',
+            { ...params, icalUid },
+            context,
+          ));
       result = { id, created: true };
     } else {
-      await this.apply(
-        `MATCH (m:Meeting {id: $id}) WHERE ${visible('m')} SET m.title = $title, m.start = $start, m.end_at = $end, m.ical_uid = $icalUid, m.updated_at = $ts RETURN m.id`,
-        {
-          id: existing.id,
-          title: input.title,
-          start: input.start ?? existing.properties['start'] ?? null,
-          end: input.end ?? existing.properties['end_at'] ?? existing.properties['end'] ?? null,
-          icalUid: stringOrNull(existing.properties['ical_uid']) ?? icalUid,
-          ts,
-        },
-        context,
-      );
+      const key = stringOrNull(existing.properties['ical_uid']) ?? icalUid;
+      const props = existing.properties;
+      const current = {
+        title: props['title'] ?? null,
+        start: props['start'] ?? null,
+        end: props['end_at'] ?? props['end'] ?? null,
+      };
+      // The calendar wins on a shared meeting: another source only fills a gap.
+      const authoritative = layerOf(existing) === 'private' || input.sourceRef.system === 'graph';
+      const pick = (incoming: string | null, held: unknown): unknown =>
+        authoritative ? (incoming ?? held) : (held ?? incoming);
+      const params = {
+        id: existing.id,
+        title: pick(input.title, current.title),
+        start: pick(input.start, current.start),
+        end: pick(input.end, current.end),
+        ts,
+      };
+      const locks = { locks: [existing.id] };
+      await (key === null
+        ? this.apply(
+            `MATCH (m:Meeting {id: $id}) WHERE ${visible('m')} SET m.title = $title, m.start = $start, m.end_at = $end, m.updated_at = $ts RETURN m.id`,
+            params,
+            context,
+            locks,
+          )
+        : // An iCalUId makes the meeting one every attendee shares.
+          this.apply(
+            `MATCH (m:Meeting {id: $id}) WHERE ${visible('m')} SET m.title = $title, m.start = $start, m.end_at = $end, m.ical_uid = $icalUid, m.layer = $layer, m.principal_id = $owner, m.updated_at = $ts REMOVE m.jamie_id RETURN m.id`,
+            { ...params, icalUid: key, ...this.stamp(nodeLayer('Meeting')) },
+            context,
+            locks,
+          ));
       result = { id: existing.id, created: false };
     }
     await this.recordMeetingContext(result.id, input, context);
     return result;
+  }
+
+  /**
+   * The Meeting this principal's own earlier observation keyed without an
+   * iCalUId: found through the Jamie id or the Graph event id on the
+   * principal's own `ATTENDED` edge. Another principal's Jamie-keyed node
+   * is never this principal's to merge.
+   */
+  private async findOwnJamieKeyedMeeting(input: MeetingInput): Promise<Node | null> {
+    for (const [property, value] of [
+      ['jamie_id', input.jamieId],
+      ['graph_event_id', input.graphEventId],
+    ] as const) {
+      if (!value) continue;
+      const query =
+        property === 'jamie_id'
+          ? `MATCH (:Person)-[r:ATTENDED {jamie_id: $v}]->(m:Meeting) WHERE ${own('r')} AND ${visible('m')} AND m.ical_uid IS NULL RETURN m`
+          : `MATCH (:Person)-[r:ATTENDED {graph_event_id: $v}]->(m:Meeting) WHERE ${own('r')} AND ${visible('m')} AND m.ical_uid IS NULL RETURN m`;
+      const hit = firstNode(await this.read(query, { v: value }));
+      if (hit !== null) return hit;
+    }
+    return null;
+  }
+
+  /**
+   * Merges a Jamie-keyed Meeting into the Meeting that holds its iCalUId,
+   * as recorded mutations (ADR 0033): the principal's context on its own
+   * `ATTENDED` edge is folded into their edge to the target, every other
+   * edge of theirs is recreated on the target unless an equal one is
+   * already there, and the Jamie-keyed node is deleted. Deleting a graph
+   * node is not a connector delete (non-negotiable 3 covers those), and
+   * is allowed only for a node nothing but this principal's own private
+   * edges touch: a shared edge or another principal's edge on it means
+   * someone else's evidence depends on it, so the merge is refused and
+   * both nodes stay. Returns whether the merge happened.
+   *
+   * The edge scan reads every edge on the node, whoever owns it, because
+   * refusing needs to know; it returns nothing to the caller but the
+   * decision.
+   */
+  private async mergeMeeting(
+    fromId: string,
+    intoId: string,
+    context: MutationContext,
+  ): Promise<boolean> {
+    // One transaction from the scan to the delete, holding the lock every
+    // edge write to a Meeting takes, so no other principal's edge can land
+    // on the node between the check and the delete.
+    try {
+      await this.db.transaction(async (tx) => {
+        const runner = drizzleRunner(tx);
+        await runner.query('SET LOCAL search_path = ag_catalog, "$user", public');
+        await lockNodes(runner, [fromId]);
+        const read = (query: string, params: CypherParams, columns?: readonly string[]) =>
+          runCypher(runner, query, this.scoped(params), columns);
+        const source = firstNode(
+          await read(
+            `MATCH (m:Meeting {id: $id}) WHERE (m.layer = 'shared' OR ${own('m')}) AND m.ical_uid IS NULL RETURN m`,
+            { id: fromId },
+          ),
+        );
+        if (source === null) throw new MergeRefused('no Jamie-keyed meeting to merge');
+        const edges = await this.edgesOf(read, fromId);
+        const scope = this.scope.principalId;
+        const movable = edges.every(
+          ({ edge, other }) =>
+            isEdge(edge) &&
+            typeof other === 'string' &&
+            edge.properties['layer'] === 'private' &&
+            edge.properties['principal_id'] === scope &&
+            EDGE_LABELS.has(edge.label) &&
+            Object.keys(edge.properties).every((key) => PROPERTY_KEY.test(key)),
+        );
+        if (!movable) throw new MergeRefused("another principal's evidence touches the meeting");
+        const person = await this.findPrincipalPerson();
+        for (const { edge, other, outward } of edges) {
+          if (!isEdge(edge) || typeof other !== 'string') continue;
+          if (!outward && edge.label === 'ATTENDED' && other === person?.id) {
+            await this.foldAttendance(other, intoId, edge.properties, context, tx);
+            continue;
+          }
+          const [from, to] = outward ? [intoId, other] : [other, intoId];
+          const present = await read(
+            `MATCH (a {id: $from})-[r:${edge.label}]->(b {id: $to}) WHERE ${own('r')} RETURN count(r)`,
+            { from, to },
+          );
+          if (Number(present[0]?.[0] ?? 0) > 0) continue;
+          const keys = Object.keys(edge.properties).sort();
+          const assignments = keys.map((key, index) => `${key}: $p${String(index)}`).join(', ');
+          const values = Object.fromEntries(
+            keys.map((key, index) => [`p${String(index)}`, edge.properties[key]]),
+          );
+          await this.apply(
+            `MATCH (a {id: $from}), (b {id: $to}) CREATE (a)-[r:${edge.label} {${assignments}}]->(b) RETURN r`,
+            { ...values, from, to },
+            context,
+            { tx },
+          );
+        }
+        // The check again, in the same transaction, just before the delete.
+        const foreign = await read(
+          `MATCH (m:Meeting {id: $id})-[r]-() WHERE NOT (coalesce(r.layer, '') = 'private' AND coalesce(r.principal_id, '') = $${SCOPE_PARAM}) RETURN count(r)`,
+          { id: fromId },
+        );
+        if (Number(foreign[0]?.[0] ?? 0) > 0) {
+          throw new MergeRefused("another principal's evidence reached the meeting");
+        }
+        await this.apply(
+          `MATCH (m:Meeting {id: $id}) WHERE (m.layer = 'shared' OR ${own('m')}) AND m.ical_uid IS NULL DETACH DELETE m`,
+          { id: fromId },
+          context,
+          { tx },
+        );
+      });
+      return true;
+    } catch (error) {
+      if (error instanceof MergeRefused) return false;
+      throw error;
+    }
+  }
+
+  /**
+   * Every edge on a node, whoever owns it, for a merge to decide whether
+   * it may move them. It returns nothing to a caller of the repository.
+   */
+  private async edgesOf(
+    read: (
+      query: string,
+      params: CypherParams,
+      columns?: readonly string[],
+    ) => Promise<unknown[][]>,
+    nodeId: string,
+  ): Promise<{ edge: unknown; other: unknown; outward: boolean }[]> {
+    const outgoing = await read(
+      'MATCH (m:Meeting {id: $id})-[r]->(o) RETURN r, o.id',
+      { id: nodeId },
+      ['edge', 'other'],
+    );
+    const incoming = await read(
+      'MATCH (o)-[r]->(m:Meeting {id: $id}) RETURN r, o.id',
+      { id: nodeId },
+      ['edge', 'other'],
+    );
+    return [
+      ...outgoing.map(([edge, other]) => ({ edge, other, outward: true })),
+      ...incoming.map(([edge, other]) => ({ edge, other, outward: false })),
+    ];
+  }
+
+  /** Folds one `ATTENDED` edge's context into the principal's own edge to another meeting. */
+  private async foldAttendance(
+    personId: string,
+    meetingId: string,
+    context: Record<string, unknown>,
+    mutation: MutationContext,
+    tx?: Tx,
+  ): Promise<void> {
+    const current = (await this.ownAttendance(personId, meetingId)) ?? {};
+    await this.writeAttendance(
+      personId,
+      meetingId,
+      {
+        graphEventId:
+          stringOrNull(current['graph_event_id']) ?? stringOrNull(context['graph_event_id']),
+        transcriptRef:
+          stringOrNull(current['transcript_ref']) ?? stringOrNull(context['transcript_ref']),
+        tags: uniqueStrings([...stringsOf(current['tags']), ...stringsOf(context['tags'])]),
+        jamieId: stringOrNull(current['jamie_id']) ?? stringOrNull(context['jamie_id']),
+        sourceRefs: sourceRefsOf(context['source_refs']).reduce(
+          (refs, ref) => mergeSourceRefs(refs, ref),
+          sourceRefsOf(current['source_refs']),
+        ),
+      },
+      typeof current['confidence'] === 'number' ? current['confidence'] : 1,
+      mutation,
+      false,
+      tx,
+    );
   }
 
   /** Writes the principal's context for a meeting onto their own `ATTENDED` edge. */
@@ -796,6 +1244,7 @@ export class OntologyRepository {
     confidence: number,
     context: MutationContext,
     removeFromNode = false,
+    tx?: Tx,
   ): Promise<void> {
     // MERGE keys on the principal, so each principal's edge to one meeting
     // is its own, whoever else attended.
@@ -817,7 +1266,76 @@ export class OntologyRepository {
         ts: this.now(),
       },
       context,
+      { locks: [meetingId], ...(tx === undefined ? {} : { tx }) },
     );
+  }
+
+  /**
+   * ADR 0033. The record ids and URLs of the sightings of a shared node go
+   * on a private `OBSERVED` edge from the principal's own Person node to
+   * it, one edge per principal and node, its refs merged by system and
+   * record id. A Meeting's sightings go on the principal's `ATTENDED` edge
+   * instead, as they already did (ADR 0017).
+   *
+   * Why one `OBSERVED` edge rather than the natural edge a caller writes
+   * next (`PARTICIPATED_IN`, `MENTIONS`, `ASSIGNED_TO`, `WORKS_AT`): the
+   * repository learns of a sighting when a node is upserted, before and
+   * apart from any edge the caller may or may not write, and several of
+   * those edges do not start at the principal (a counterparty's
+   * `PARTICIPATED_IN` to a Thread, a Commitment's `OWES`) or are shared
+   * (`WORKS_AT`). A single private edge from the principal holds every
+   * sighting whatever edges follow, and reading it back is one lookup.
+   *
+   * Nothing is written for the principal's own Person, whose sighting is
+   * the principal record, or when every ref is already on the edge.
+   */
+  private async recordSightings(
+    nodeId: string,
+    refs: readonly SourceRef[],
+    context: MutationContext,
+    setFields: readonly string[] = [],
+  ): Promise<void> {
+    const person = await this.ensurePrincipalPerson(context);
+    if (person === nodeId) return;
+    const current = await this.ownEdge(person, 'OBSERVED', nodeId);
+    const before = sourceRefsOf(current?.['source_refs']);
+    const merged = refs.reduce((all, ref) => mergeSourceRefs(all, ref), before);
+    const fieldsBefore = stringsOf(current?.['set_fields']);
+    const fields = uniqueStrings([...fieldsBefore, ...setFields]);
+    if (
+      current !== null &&
+      merged.length === before.length &&
+      fields.length === fieldsBefore.length
+    ) {
+      return;
+    }
+    await this.apply(
+      `MATCH (p:Person {id: $person}), (n {id: $node}) WHERE ${visible('p')} AND ${visible('n')} MERGE (p)-[r:OBSERVED {principal_id: $${SCOPE_PARAM}}]->(n) SET r.layer = $layer, r.source_refs = $sourceRefs, r.set_fields = $setFields, r.updated_at = $ts RETURN r`,
+      {
+        person,
+        node: nodeId,
+        layer: edgeLayer('OBSERVED'),
+        sourceRefs: merged,
+        setFields: fields,
+        ts: this.now(),
+      },
+      context,
+    );
+  }
+
+  /** The properties of the scope's own edge of one label between two nodes, or null. */
+  private async ownEdge(
+    fromId: string,
+    label: EdgeLabel,
+    toId: string,
+  ): Promise<Record<string, unknown> | null> {
+    assertLabel(label, EDGE_LABELS, 'edge');
+    const rows = await this.read(
+      `MATCH (a {id: $from})-[r:${label}]->(b {id: $to}) WHERE ${own('r')} RETURN r`,
+      { from: fromId, to: toId },
+    );
+    const edge = rows[0]?.[0];
+    return isEdge(edge) ? edge.properties : null;
   }
 
   /** The properties of the scope's own `ATTENDED` edge from a person to a meeting. */
@@ -836,6 +1354,8 @@ export class OntologyRepository {
   async upsertTask(input: TaskInput, context: MutationContext): Promise<UpsertResult> {
     const existing = await this.findTask(input.source, input.sourceId);
     const ts = this.now();
+    const layer = existing === null ? nodeLayer('Task', input.source) : layerOf(existing);
+    const shared = layer !== 'private';
     if (existing === null) {
       const id = this.newId();
       await this.apply(
@@ -848,12 +1368,13 @@ export class OntologyRepository {
           source: input.source,
           sourceId: input.sourceId,
           assigneeId: input.assigneeId ?? null,
-          sourceRefs: [input.sourceRef],
+          sourceRefs: shared ? sharedRefs([], input.sourceRef) : [input.sourceRef],
           ...this.stamp(nodeLayer('Task', input.source)),
           ts,
         },
         context,
       );
+      if (shared) await this.recordSightings(id, [input.sourceRef], context);
       return { id, created: true };
     }
     await this.apply(
@@ -864,11 +1385,14 @@ export class OntologyRepository {
         status: input.status,
         due: input.due,
         assigneeId: input.assigneeId ?? existing.properties['assignee_id'] ?? null,
-        sourceRefs: mergeSourceRefs(existing.properties['source_refs'], input.sourceRef),
+        sourceRefs: shared
+          ? sharedRefs(existing.properties['source_refs'], input.sourceRef)
+          : mergeSourceRefs(existing.properties['source_refs'], input.sourceRef),
         ts,
       },
       context,
     );
+    if (shared) await this.recordSightings(existing.id, [input.sourceRef], context);
     return { id: existing.id, created: false };
   }
 
@@ -941,12 +1465,13 @@ export class OntologyRepository {
           clientOrgId: input.clientOrgId ?? null,
           status: input.status ?? null,
           aliases: uniqueStrings(input.aliases ?? []),
-          sourceRefs: [input.sourceRef],
+          sourceRefs: sharedRefs([], input.sourceRef),
           ...this.stamp(nodeLayer('Project')),
           ts,
         },
         context,
       );
+      await this.recordSightings(id, [input.sourceRef], context);
       return { id, created: true };
     }
     await this.apply(
@@ -960,11 +1485,12 @@ export class OntologyRepository {
           ...((existing.properties['aliases'] as string[] | undefined) ?? []),
           ...(input.aliases ?? []),
         ]),
-        sourceRefs: mergeSourceRefs(existing.properties['source_refs'], input.sourceRef),
+        sourceRefs: sharedRefs(existing.properties['source_refs'], input.sourceRef),
         ts,
       },
       context,
     );
+    await this.recordSightings(existing.id, [input.sourceRef], context);
     return { id: existing.id, created: false };
   }
 
@@ -975,7 +1501,8 @@ export class OntologyRepository {
    * layer, confidence, status, role, since and updated_at. Anything else
    * belongs on a node. A private edge is merged on the scope's principal,
    * so another principal's edge between the same two nodes is never
-   * touched. Both ends must be visible to the scope.
+   * touched. Both ends must be visible to the scope. An edge with a
+   * private end is private whatever its label (ADR 0033).
    */
   async link(
     fromId: string,
@@ -985,7 +1512,15 @@ export class OntologyRepository {
     context: MutationContext,
   ): Promise<void> {
     assertLabel(edge, EDGE_LABELS, 'edge');
-    const layer = edgeLayer(edge);
+    const [from, to] = await Promise.all([this.getNode(fromId), this.getNode(toId)]);
+    // A SAME_AS candidate is one principal's name judgement, so it is
+    // theirs to see and to decide, whatever the layers of its ends.
+    const candidate = edge === 'SAME_AS' && properties.status === 'candidate';
+    const layer: Layer = candidate ? 'private' : edgeLayerBetween(edge, layerOf(from), layerOf(to));
+    // An edge to a Meeting waits for any merge of that meeting (`mergeMeeting`).
+    const locks = [from, to].flatMap((node) =>
+      node !== null && node.label === 'Meeting' ? [node.id] : [],
+    );
     const merge =
       layer === 'private'
         ? `MERGE (a)-[r:${edge} {principal_id: $${SCOPE_PARAM}}]->(b)`
@@ -1003,10 +1538,16 @@ export class OntologyRepository {
         ts: this.now(),
       },
       context,
+      { locks },
     );
   }
 
-  /** Records a human decision on a SAME_AS candidate (spec 5.3 step 4). Reversible: the prior status is in the ledger. */
+  /**
+   * Records a human decision on a SAME_AS candidate (spec 5.3 step 4).
+   * Reversible: the prior status is in the ledger. Only the principal
+   * whose evidence produced the candidate may decide it: the edge must be
+   * their own, so another principal's decision changes nothing.
+   */
   async setSameAsStatus(
     fromId: string,
     toId: string,
@@ -1014,7 +1555,7 @@ export class OntologyRepository {
     context: MutationContext,
   ): Promise<void> {
     await this.apply(
-      `MATCH (a {id: $from})-[r:SAME_AS]-(b {id: $to}) WHERE ${visible('a')} AND ${visible('b')} AND ${visible('r')} SET r.status = $status, r.decided_at = $ts RETURN r`,
+      `MATCH (a {id: $from})-[r:SAME_AS]-(b {id: $to}) WHERE ${visible('a')} AND ${visible('b')} AND ${own('r')} SET r.status = $status, r.decided_at = $ts RETURN r`,
       { from: fromId, to: toId, status, ts: this.now() },
       context,
     );
@@ -1030,7 +1571,13 @@ export class OntologyRepository {
    * each step looks before it writes, so a second run records nothing.
    *
    * Every node and edge without a layer is taken to be this principal's,
-   * which holds while the graph has known only one principal (Phase 4).
+   * which holds only for the legacy owner, the principal every pre-Phase-4
+   * mutation was recorded under. In any other scope the backfill returns
+   * at once and records nothing, so a context built before the owner's
+   * cannot claim the owner's evidence (the caller runs it for the owner
+   * once, before other contexts build). It then applies ADR 0033 through
+   * `backfillProvenance`, and merges a Jamie-keyed Meeting into the one
+   * that already holds its iCalUId.
    */
   async backfillLayers(
     context: MutationContext,
@@ -1042,8 +1589,16 @@ export class OntologyRepository {
       meetingContexts: 0,
       meetingKeys: 0,
       meetingKeyConflicts: 0,
+      meetingMerges: 0,
+      meetingJamieIds: 0,
+      privatePersons: 0,
+      privateCandidates: 0,
+      strippedRefs: 0,
+      refused: 0,
       mutations: 0,
     };
+    if (options.legacyOwnerId !== this.scope.principalId) return result;
+    const before = await this.mutationCount(context);
     const layerWhere = async (
       match: string,
       alias: string,
@@ -1060,7 +1615,6 @@ export class OntologyRepository {
         { ...params, ...this.stamp(layer) },
         context,
       );
-      result.mutations += 1;
       return found;
     };
 
@@ -1097,7 +1651,6 @@ export class OntologyRepository {
       ),
     );
     if (legacy.length > 0) {
-      const before = await this.mutationCount(context);
       const person = await this.ensurePrincipalPerson(context);
       for (const meeting of legacy) {
         const current = (await this.ownAttendance(person, meeting.id)) ?? {};
@@ -1123,7 +1676,6 @@ export class OntologyRepository {
         );
         result.meetingContexts += 1;
       }
-      result.mutations += (await this.mutationCount(context)) - before;
     }
 
     // Meetings keyed on a mailbox's event id take the iCalUId that event
@@ -1139,18 +1691,133 @@ export class OntologyRepository {
       if (icalUid === null) continue;
       const holder = await this.findMeeting({ icalUid });
       if (holder !== null && holder.id !== meetingId) {
-        result.meetingKeyConflicts += 1;
+        // ADR 0033: the principal's calendar says this Jamie-keyed meeting
+        // is the one another node holds the iCalUId of.
+        if (await this.mergeMeeting(meetingId, holder.id, context)) result.meetingMerges += 1;
+        else result.meetingKeyConflicts += 1;
         continue;
       }
       await this.apply(
-        'MATCH (m:Meeting {id: $id}) WHERE m.ical_uid IS NULL SET m.ical_uid = $icalUid, m.updated_at = $ts RETURN m.id',
-        { id: meetingId, icalUid, ts: this.now() },
+        // An iCalUId makes the meeting shared, as `upsertMeeting` does.
+        'MATCH (m:Meeting {id: $id}) WHERE m.ical_uid IS NULL SET m.ical_uid = $icalUid, m.layer = $layer, m.principal_id = $owner, m.updated_at = $ts RETURN m.id',
+        { id: meetingId, icalUid, ts: this.now(), ...this.stamp(nodeLayer('Meeting')) },
         context,
+        { locks: [meetingId] },
       );
       result.meetingKeys += 1;
-      result.mutations += 1;
     }
+    await this.backfillProvenance(context, result);
+    result.mutations = (await this.mutationCount(context)) - before;
     return result;
+  }
+
+  /**
+   * ADR 0033 on an existing graph, as recorded mutations and idempotently:
+   * a shared Person with no exact key moves to this principal's private
+   * layer with the edges that touch it; every other shared node keeps
+   * only the system and time of its sightings, the full refs moving to
+   * the principal's `OBSERVED` edge; and a shared Meeting with an iCalUId
+   * gives up its Jamie id to the principal's `ATTENDED` edge.
+   *
+   * Refs and name-only Persons written before ADR 0033 are taken to be
+   * this principal's, which holds because every one of them was written
+   * while the graph knew one principal. A node another principal's
+   * private edges already touch is left alone and counted as refused.
+   */
+  private async backfillProvenance(
+    context: MutationContext,
+    result: BackfillResult,
+  ): Promise<void> {
+    const people = allNodes(await this.read(`MATCH (p:Person) WHERE p.layer = 'shared' RETURN p`));
+    for (const node of people) {
+      if (nodeHasExactKey(node)) continue;
+      if (await this.touchedByAnother(node.id)) {
+        result.refused += 1;
+        continue;
+      }
+      await this.apply(
+        `MATCH (p:Person {id: $id}) WHERE p.layer = 'shared' SET p.layer = $layer, p.principal_id = $owner RETURN p.id`,
+        { id: node.id, ...this.stamp('private') },
+        context,
+      );
+      for (const pattern of ['(p:Person {id: $id})-[r]->()', '()-[r]->(p:Person {id: $id})']) {
+        const where = `MATCH ${pattern} WHERE r.layer <> 'private'`;
+        const found = await this.read(`${where} RETURN count(r)`, { id: node.id });
+        if (Number(found[0]?.[0] ?? 0) === 0) continue;
+        await this.apply(
+          `${where} SET r.layer = $layer, r.principal_id = $owner RETURN count(r)`,
+          { id: node.id, ...this.stamp('private') },
+          context,
+        );
+      }
+      result.privatePersons += 1;
+    }
+
+    // A SAME_AS candidate is the legacy owner's name judgement, theirs to decide.
+    const candidates = `MATCH ()-[r:SAME_AS]->() WHERE r.layer <> 'private' AND r.status = 'candidate'`;
+    const openCandidates = Number((await this.read(`${candidates} RETURN count(r)`))[0]?.[0] ?? 0);
+    if (openCandidates > 0) {
+      await this.apply(
+        `${candidates} SET r.layer = $layer, r.principal_id = $owner RETURN count(r)`,
+        this.stamp('private'),
+        context,
+      );
+      result.privateCandidates = openCandidates;
+    }
+
+    const shared = allNodes(
+      await this.read(`MATCH (n) WHERE n.layer IN ['reference', 'shared'] RETURN n`),
+    );
+    for (const node of shared) {
+      const refs = sourceRefsOf(node.properties['source_refs']);
+      if (!refs.some(carriesRecord)) continue;
+      await this.recordSightings(node.id, refs.filter(carriesRecord), context);
+      await this.apply(
+        `MATCH (n {id: $id}) WHERE n.layer IN ['reference', 'shared'] SET n.source_refs = $sourceRefs RETURN n.id`,
+        { id: node.id, sourceRefs: sharedRefs(refs, null) },
+        context,
+      );
+      result.strippedRefs += 1;
+    }
+
+    const keyed = allNodes(
+      await this.read(
+        `MATCH (m:Meeting) WHERE m.layer = 'shared' AND m.ical_uid IS NOT NULL AND m.jamie_id IS NOT NULL RETURN m`,
+      ),
+    );
+    for (const meeting of keyed) {
+      const jamieId = stringOrNull(meeting.properties['jamie_id']);
+      // Whether any principal's edge already carries the Jamie id: a count
+      // across principals, which says nothing about whose edge it is.
+      const carried = await this.read(
+        'MATCH (:Person)-[r:ATTENDED {jamie_id: $v}]->(m:Meeting {id: $id}) RETURN count(r)',
+        { v: jamieId, id: meeting.id },
+      );
+      if (Number(carried[0]?.[0] ?? 0) === 0) {
+        const person = await this.findPrincipalPerson();
+        const attendance = person === null ? null : await this.ownAttendance(person.id, meeting.id);
+        if (person === null || attendance === null) {
+          result.refused += 1;
+          continue;
+        }
+        await this.foldAttendance(person.id, meeting.id, { jamie_id: jamieId }, context);
+      }
+      await this.apply(
+        `MATCH (m:Meeting {id: $id}) WHERE m.ical_uid IS NOT NULL REMOVE m.jamie_id RETURN m.id`,
+        { id: meeting.id },
+        context,
+      );
+      result.meetingJamieIds += 1;
+    }
+  }
+
+  /** True when another principal's private edge touches the node: a count, nothing more. */
+  private async touchedByAnother(nodeId: string): Promise<boolean> {
+    const rows = await this.read(
+      `MATCH (n {id: $id})-[r]-() WHERE r.layer = 'private' AND r.principal_id <> $${SCOPE_PARAM} RETURN count(r)`,
+      { id: nodeId },
+    );
+    return Number(rows[0]?.[0] ?? 0) > 0;
   }
 
   /**
@@ -1246,13 +1913,16 @@ export class OntologyRepository {
     cypher: string,
     params: CypherParams,
     context: MutationContext,
+    options: ApplyOptions = {},
   ): Promise<void> {
     const bound = this.scoped(params);
     // One transaction: the graph write and the ledger event that makes it
-    // replayable commit together, or neither does (spec 5.2).
-    await this.db.transaction(async (tx) => {
+    // replayable commit together, or neither does (spec 5.2). A caller's
+    // transaction, when given, is that transaction.
+    const run = async (tx: Tx): Promise<void> => {
       const runner = drizzleRunner(tx);
       await runner.query('SET LOCAL search_path = ag_catalog, "$user", public');
+      await lockNodes(runner, options.locks ?? []);
       await runCypher(runner, cypher, bound);
       await this.writer.append(
         {
@@ -1265,7 +1935,8 @@ export class OntologyRepository {
         },
         tx,
       );
-    });
+    };
+    await (options.tx === undefined ? this.db.transaction(run) : run(options.tx));
   }
 }
 

@@ -11,7 +11,12 @@ import {
 } from '@lance/shared';
 import { ATTR_AGENT, ATTR_CORRELATION_ID, currentTraceIds, withSpan } from '@lance/telemetry';
 import type { z } from 'zod';
-import { BudgetExceededError, checkDailyBudget, type SpendReader } from './budget.js';
+import {
+  BudgetExceededError,
+  checkDailyBudget,
+  type BudgetCheck,
+  type SpendReader,
+} from './budget.js';
 import { supportsAdaptiveThinking } from './models.js';
 import type { BetaMessage, BetaToolRunnerParams, ModelRunner } from './client.js';
 import { addUsage, estimateCostUsd, ZERO_USAGE, type TokenUsage } from './cost.js';
@@ -57,6 +62,18 @@ export interface AgentDeps {
   readSpendUsd: SpendReader;
   /** Today's ceiling in GBP as Settings last set it; the config value is the fallback. */
   readCeilingGbp?: () => Promise<number>;
+  /**
+   * Today's spend across every active principal against the organisation
+   * ceiling (multi-user plan M5). Checked after the principal's own, so a
+   * run is refused when either is exceeded. Absent in single-principal
+   * tests and tools.
+   */
+  checkOrganisationBudget?: () => Promise<BudgetCheck>;
+  /**
+   * The per-process fair-share limiter, bound to this principal. Each model
+   * tool loop waits for a slot; absent means no limit.
+   */
+  limit?: <T>(work: () => Promise<T>) => Promise<T>;
   now?: () => string;
 }
 
@@ -123,6 +140,9 @@ export async function runAgent<TOutput>(
     usdToGbp: deps.config.cost.usdToGbp,
   });
   if (budget.state === 'exceeded') throw new BudgetExceededError(budget);
+  const organisation = await deps.checkOrganisationBudget?.();
+  if (organisation?.state === 'exceeded') throw new BudgetExceededError(organisation);
+  const limit = deps.limit ?? (<T>(work: () => Promise<T>): Promise<T> => work());
 
   const price = deps.config.prices[definition.model.id];
   if (price === undefined) {
@@ -151,7 +171,9 @@ export async function runAgent<TOutput>(
       let iterations = 0;
       const messages: BetaMessageParam[] = [{ role: 'user', content: input.prompt }];
 
-      const runOnce = async (): Promise<BetaMessage> => {
+      const runOnce = (): Promise<BetaMessage> => limit(runLoop);
+
+      const runLoop = async (): Promise<BetaMessage> => {
         const run = deps.runner.run({
           model: definition.model.id,
           max_tokens: definition.maxTokens ?? 16_000,

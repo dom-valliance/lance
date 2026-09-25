@@ -1,0 +1,49 @@
+{
+  "object": "list",
+  "results": [
+    {
+      "object": "user",
+      "id": "1fdd872b-594c-8146-b22f-00028f1f5a41",
+      "type": "person",
+      "name": "Principal One",
+      "person": { "email": "principal.one@example.test" }
+    },
+    {
+      "object": "user",
+      "id": "2a0e1c55-0b7d-4c1e-9f0a-3c4d5e6f7a81",
+      "type": "person",
+      "name": "Colleague Two",
+      "person": { "email": "Colleague.Two@Example.test" }
+    },
+    {
+      "object": "user",
+      "id": "3b1f2d66-1c8e-4d2f-8a1b-4d5e6f7a8b92",
+      "type": "person",
+      "name": "Shared Mailbox A",
+      "person": { "email": "shared@example.test" }
+    },
+    {
+      "object": "user",
+      "id": "4c2a3e77-2d9f-4e3a-9b2c-5e6f7a8b9ca3",
+      "type": "person",
+      "name": "Shared Mailbox B",
+      "person": { "email": "shared@example.test" }
+    },
+    {
+      "object": "user",
+      "id": "5d3b4f88-3e0a-4f4b-8c3d-6f7a8b9cadb4",
+      "type": "bot",
+      "name": "Lance",
+      "bot": {}
+    },
+    {
+      "object": "user",
+      "id": "6e4c5a99-4f1b-4a5c-9d4e-7a8b9cadbec5",
+      "type": "person",
+      "name": "Guest Without Email",
+      "person": {}
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

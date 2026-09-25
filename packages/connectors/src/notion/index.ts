@@ -17,6 +17,13 @@ export type {
   NotionRequest,
 } from './client.js';
 
+export { matchNotionUserByEmail, resolveNotionUserId } from './principalUser.js';
+export type {
+  NotionUserMatch,
+  NotionUserResolution,
+  ResolveNotionUserOptions,
+} from './principalUser.js';
+
 export {
   getDataSourceSchema,
   getPageText,

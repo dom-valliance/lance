@@ -14,3 +14,7 @@ Spec section 8 makes connector write functions callable only from the executor, 
 ## Consequences
 
 The worker's proposal router and the api's interaction handler import the surface without crossing the executor boundary. A future connector write to Slack outside Lance's channel goes through `writes` and the executor like any other. The boundary test in `packages/shared` stays as it is.
+
+## Amendment, 2026-09-24 (package 5.4)
+
+With a private channel per principal (ADR 0023), each principal's surface is pinned to that principal's channel rather than to the channel in config; it still cannot post anywhere else. Creating a principal's private channel and inviting them are Lance's own surface management in the same sense, so `createSlackChannelProvisioner` sits beside the surface in the package root and is used by the api when a link is confirmed. It posts nothing. The `post_slack` seed rule still names the config channel; a model-proposed post to a principal's own channel is outside this package.

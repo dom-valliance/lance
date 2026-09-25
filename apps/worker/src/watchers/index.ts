@@ -8,8 +8,6 @@ export type {
 } from './types.js';
 export {
   WATCHER_ACTOR_PREFIX,
-  pgBossTriageEnqueuer,
-  registerWatcher,
   resetPartitionBreaker,
   runWatcher,
   watcherQueue,

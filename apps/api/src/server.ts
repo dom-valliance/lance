@@ -8,8 +8,9 @@ import Fastify, {
   type FastifyServerOptions,
 } from 'fastify';
 import { requireEntra } from './auth/require-entra.js';
-import type { ApiDeps } from './deps.js';
+import type { ServerDeps } from './deps.js';
 import { adminRoutes } from './routes/admin.js';
+import { credentialRoutes } from './routes/credentials.js';
 import { eventsRoutes } from './routes/events.js';
 import { graphConsentRoutes } from './routes/graph-consent.js';
 import { healthRoutes } from './routes/health.js';
@@ -43,6 +44,9 @@ export const LOGGER_REDACT_PATHS = [
   'secret',
   '*.secret',
   '*.*.secret',
+  'apiKey',
+  '*.apiKey',
+  '*.*.apiKey',
 ];
 
 type LoggerOptions = NonNullable<FastifyServerOptions['logger']>;
@@ -58,10 +62,21 @@ const CENSOR = '[redacted]';
 export const scrubAccessToken = (url: string): string =>
   url.replace(/([?&]access_token=)[^&]*/gi, `$1${CENSOR}`);
 
-export const loggerOptions = (config: Config): LoggerOptions => {
-  if (config.nodeEnv === 'test') return false;
+/** Where a test sends the log, to read back every line the server wrote. */
+export interface LogStream {
+  write(line: string): void;
+}
+
+export interface BuildServerOptions {
+  /** Every log line, at trace level, with the production redaction. Tests only. */
+  logStream?: LogStream;
+}
+
+export const loggerOptions = (config: Config, stream?: LogStream): LoggerOptions => {
+  if (config.nodeEnv === 'test' && stream === undefined) return false;
   return {
-    level: config.nodeEnv === 'production' ? 'info' : 'debug',
+    ...(stream === undefined ? {} : { stream }),
+    level: stream !== undefined ? 'trace' : config.nodeEnv === 'production' ? 'info' : 'debug',
     redact: { paths: LOGGER_REDACT_PATHS, censor: CENSOR },
     serializers: {
       req: (request: FastifyRequest) => ({
@@ -77,10 +92,11 @@ export const loggerOptions = (config: Config): LoggerOptions => {
 
 /** Admin and tRPC, both behind one Entra check. */
 const protectedRoutes =
-  (deps: ApiDeps): FastifyPluginAsync =>
+  (deps: ServerDeps): FastifyPluginAsync =>
   async (fastify): Promise<void> => {
     fastify.addHook('onRequest', requireEntra(deps));
     await fastify.register(adminRoutes(deps));
+    await fastify.register(credentialRoutes(deps));
     await fastify.register(fastifyTRPCPlugin, {
       prefix: '/trpc',
       trpcOptions: {
@@ -90,8 +106,11 @@ const protectedRoutes =
     } satisfies FastifyTRPCPluginOptions<AppRouter>);
   };
 
-export const buildServer = (deps: ApiDeps): FastifyInstance => {
-  const fastify = Fastify({ logger: loggerOptions(deps.config) });
+export const buildServer = (
+  deps: ServerDeps,
+  options: BuildServerOptions = {},
+): FastifyInstance => {
+  const fastify = Fastify({ logger: loggerOptions(deps.config, options.logStream) });
 
   fastify.setErrorHandler((error: FastifyError, request, reply) => {
     const statusCode = error.statusCode ?? 500;

@@ -1,5 +1,7 @@
 import {
   getPageText,
+  getTask,
+  isConnectorError,
   queryMeetingsEditedSince,
   queryOpenTasks,
   queryTasksEditedSince,
@@ -62,12 +64,19 @@ export interface NotionWatcherReads {
   queryOpenTasks(args: QueryOpenTasksArgs): Promise<readonly TaskRecord[]>;
   queryMeetingsEditedSince(args: QueryMeetingsArgs): Promise<QueryMeetingsResult>;
   getPageText(pageId: string, options?: GetPageTextOptions): Promise<string>;
+  getTask(pageId: string): Promise<TaskRecord>;
 }
 
 export interface NotionWatcherOptions {
   reads: NotionWatcherReads;
   /** `notion.tasksDataSourceId` from config. */
   tasksDataSourceId: string;
+  /**
+   * The principal's Notion user id (ADR 0022). Every task read is filtered
+   * on it as assignee, so the shared All Tasks database yields only the
+   * principal's own tasks. The watcher is not built while it is unresolved.
+   */
+  assigneeId: string;
   /** `notion.meetingsDataSourceId` from config; null leaves the meetings partition out entirely. */
   meetingsDataSourceId: string | null;
   /**
@@ -89,6 +98,7 @@ export function notionWatcherReads(notion: NotionConnector): NotionWatcherReads 
     queryOpenTasks: (args) => queryOpenTasks(notion, args),
     queryMeetingsEditedSince: (args) => queryMeetingsEditedSince(notion, args),
     getPageText: (pageId, options) => getPageText(notion, pageId, options),
+    getTask: (pageId) => getTask(notion, pageId),
   };
 }
 
@@ -139,20 +149,53 @@ export function createNotionWatcher(options: NotionWatcherOptions): Watcher {
   const now = options.now ?? nowIso;
 
   /**
-   * The removal sweep: one status-filtered read of the open tasks per poll
-   * (a few hundred rows, so a handful of calls), against the open tasks the
-   * ledger knows. The cursor is untouched; a removal is dated by the poll.
+   * Whether a known task the principal's queries no longer return was
+   * reassigned to someone else, rather than trashed or shared away. One
+   * page read each, for the few tasks that leave a principal's view in a
+   * poll. A page Notion cannot find has gone; a page that still names the
+   * principal as assignee yet came back from neither query is in the trash.
+   */
+  async function reassignedAway(id: string): Promise<boolean> {
+    try {
+      const page = await options.reads.getTask(id);
+      return !page.assigneeIds.includes(options.assigneeId);
+    } catch (error) {
+      if (isConnectorError(error) && error.status === 404) return false;
+      throw error;
+    }
+  }
+
+  /**
+   * The removal sweep: one status-filtered read of the principal's open
+   * tasks per poll (a few hundred rows, so a handful of calls), against the
+   * open tasks the ledger knows. A task missing from both reads has left
+   * the principal's view: reassigned to someone else, or removed from
+   * Notion. The cursor is untouched; a removal is dated by the poll.
    */
   async function removedTaskRecords(edited: readonly TaskRecord[]): Promise<SourceRecord[]> {
     const known = await options.knownOpenTaskIds();
     if (known.length === 0) return [];
-    const open = await options.reads.queryOpenTasks({ dataSourceId: options.tasksDataSourceId });
+    const open = await options.reads.queryOpenTasks({
+      dataSourceId: options.tasksDataSourceId,
+      assigneeId: options.assigneeId,
+    });
     const observedAt = now();
-    return removedTaskIds(
+    const gone = removedTaskIds(
       known,
       edited.map((task) => task.id),
       open.map((task) => task.id),
-    ).map((id) => ({ id, observedAt, raw: { id }, removed: true }));
+    );
+    const records: SourceRecord[] = [];
+    for (const id of gone) {
+      const reassigned = await reassignedAway(id);
+      records.push({
+        id,
+        observedAt,
+        raw: reassigned ? { id, reassigned } : { id },
+        removed: true,
+      });
+    }
+    return records;
   }
 
   return {
@@ -178,6 +221,7 @@ export function createNotionWatcher(options: NotionWatcherOptions): Watcher {
         const result = await options.reads.queryTasksEditedSince({
           dataSourceId: options.tasksDataSourceId,
           since,
+          assigneeId: options.assigneeId,
         });
         const edited = pollResultFor(result.tasks);
         const removed = await removedTaskRecords(result.tasks);

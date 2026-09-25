@@ -24,10 +24,13 @@ export const systemState = pgTable(
     quietHoursStart: text('quiet_hours_start').notNull().default('19:00'),
     quietHoursEnd: text('quiet_hours_end').notNull().default('07:00'),
     pushBudgetPerHour: integer('push_budget_per_hour').notNull().default(3),
-    /** Spec 13: daily model spend ceiling in GBP, changed from Settings. */
+    /**
+     * The organisation's daily model spend ceiling in GBP across every
+     * principal (multi-user plan M5), set by an admin. Default 30.
+     */
     costCeilingGbp: numeric('cost_ceiling_gbp', { precision: 10, scale: 2, mode: 'number' })
       .notNull()
-      .default(15),
+      .default(30),
     updatedAt: updatedAt(),
   },
   () => [check('system_state_single_row', sql.raw('"id" = 1'))],

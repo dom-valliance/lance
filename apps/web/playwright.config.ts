@@ -30,7 +30,6 @@ export default defineConfig({
       ENTRA_TENANT_ID: 'common',
       ENTRA_CLIENT_ID: 'test',
       ENTRA_CLIENT_SECRET: 'test',
-      ALLOWED_UPN: 'dom@valliance.ai',
     },
   },
 });

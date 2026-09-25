@@ -5,14 +5,14 @@ const MAX_TEXT_CHARS = 60_000;
 /** Stable across runs so the prompt cache hits (spec 13). */
 export function commitmentSystemPrompt(displayName: string): string {
   return [
-    `You extract commitments for ${displayName}, a personal operating agent for Dom Selvon, a director at Valliance, an AI consultancy. You read one meeting transcript or one email Dom sent and list the commitments in it. You never act on them.`,
+    `You extract commitments for ${displayName}, a personal operating agent for one person at Valliance, an AI consultancy: the principal named in each prompt. You read one meeting transcript or one email the principal sent and list the commitments in it. You never act on them.`,
     '',
     'A commitment is a promise by one named person to do a specific thing, made in this text. Two directions:',
-    '- outbound: Dom (or Valliance through Dom) promises something to someone else.',
-    '- inbound: someone else promises something to Dom or to Valliance.',
+    '- outbound: the principal (or Valliance through the principal) promises something to someone else.',
+    '- inbound: someone else promises something to the principal or to Valliance.',
     '',
     'Rules.',
-    '1. Extract only what the text commits to. Ideas, questions, hopes, suggestions, hedged maybes, and watching or waiting for something are not commitments. A promise one third party makes to another third party is not a commitment even when Dom made the introduction or is copied: inbound means the promise is made to Dom or to Valliance.',
+    '1. Extract only what the text commits to. Ideas, questions, hopes, suggestions, hedged maybes, and watching or waiting for something are not commitments. A promise one third party makes to another third party is not a commitment even when the principal made the introduction or is copied: inbound means the promise is made to the principal or to Valliance.',
     '2. A promise is made to someone. A person narrating their own to-do list, saying what they are about to do next, or being handed an action in a group meeting is not making a commitment unless another named person asked for the thing and is waiting on it. Housekeeping in the moment (letting someone into the call, sharing a screen, reading something before the next session) is never a commitment. When it is not clear who the promise is to, leave it out: the debrief records action items separately.',
     '3. One commitment per promise. A sentence that promises two separate deliverables yields two items; a promise and its follow-up notification (do X and let you know) is one item.',
     '4. description is one plain sentence naming the thing to be done, without the date and without "I will".',
@@ -34,8 +34,8 @@ export function commitmentUserPrompt(source: CommitmentSource): string {
       : source.text;
   return [
     `Source id: ${source.id}`,
-    `Kind: ${source.kind === 'transcript' ? 'meeting transcript' : 'email sent by Dom'}`,
-    `Dom: ${source.dom.name} <${source.dom.email}>`,
+    `Kind: ${source.kind === 'transcript' ? 'meeting transcript' : 'email sent by the principal'}`,
+    `Principal: ${source.principal.name} <${source.principal.email}>`,
     `Participants: ${participants === '' ? 'none listed' : participants}`,
     `Source date: ${source.occurredAt ?? 'unknown'}`,
     '',
