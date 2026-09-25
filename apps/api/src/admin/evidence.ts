@@ -109,7 +109,7 @@ export function evidenceSignerFromEnv(env: NodeJS.ProcessEnv = process.env): Evi
   return evidenceSignerFromPem(value ?? '');
 }
 
-interface EventRow extends Record<string, unknown> {
+export interface EventRow extends Record<string, unknown> {
   id: string;
   principal_id: string;
   ts: string;
@@ -117,7 +117,6 @@ interface EventRow extends Record<string, unknown> {
   actor: string;
   kind: string;
   source_system: string | null;
-  source_record_hash: string | null;
   correlation_id: string;
   payload_hash: string;
   payload: unknown;
@@ -145,7 +144,6 @@ export interface EvidenceEventMetadata {
   actor: string;
   kind: string;
   sourceSystem: string | null;
-  sourceRecordHash: string | null;
   correlationId: string;
   payloadHash: string;
   /** False once retention has nulled the payload (ADR 0011). */
@@ -180,14 +178,18 @@ const toEvent = (row: EventRow): EvidenceEvent => ({
   payload: row.payload ?? null,
 });
 
-const toMetadata = (row: EventRow): EvidenceEventMetadata => ({
+/**
+ * A ledger event as the per-principal export carries it (ADR 0024): no
+ * payload and no source record hash, which fingerprints the content of the
+ * mail or transcript it was taken from; the payload hash proves the row.
+ */
+export const toMetadata = (row: EventRow): EvidenceEventMetadata => ({
   id: row.id,
   ts: new Date(row.ts).toISOString(),
   recordedAt: new Date(row.created_at).toISOString(),
   actor: row.actor,
   kind: row.kind,
   sourceSystem: row.source_system,
-  sourceRecordHash: row.source_record_hash,
   correlationId: row.correlation_id,
   payloadHash: row.payload_hash,
   payloadHeld: row.payload !== null && row.payload !== undefined,
@@ -232,7 +234,7 @@ export function createEvidenceExporter(options: EvidenceExporterOptions): Eviden
     const scoped = scopedDb(options.root, { principalId });
     const result = await scoped.execute<EventRow>(sql`
       SELECT id, principal_id, ts, created_at, actor, kind::text AS kind, source_system,
-             source_record_hash, correlation_id, payload_hash, payload
+             correlation_id, payload_hash, payload
         FROM ledger_events
        WHERE created_at >= ${period.from.toISOString()}::timestamptz
          AND created_at < ${period.to.toISOString()}::timestamptz

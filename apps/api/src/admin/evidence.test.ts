@@ -1,7 +1,13 @@
 import { createPublicKey, generateKeyPairSync, verify } from 'node:crypto';
 import { PLACEHOLDER_SECRET_VALUE } from '@lance/shared';
 import { describe, expect, it } from 'vitest';
-import { checkPeriod, evidenceSignerFromEnv, evidenceSignerFromPem } from './evidence.js';
+import {
+  checkPeriod,
+  evidenceSignerFromEnv,
+  evidenceSignerFromPem,
+  toMetadata,
+  type EventRow,
+} from './evidence.js';
 
 const ed25519 = (): string =>
   generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -50,5 +56,30 @@ describe('the evidence period', () => {
     expect(() => checkPeriod('2026-01-01T00:00:00Z', '2027-01-03T00:00:00Z')).toThrow(/366 days/);
     expect(() => checkPeriod('2026-09-24T00:00:00Z', '2026-09-01T00:00:00Z')).toThrow(/end after/);
     expect(() => checkPeriod('yesterday', '2026-09-01T00:00:00Z')).toThrow(/ISO-8601/);
+  });
+});
+
+describe('the per-principal ledger metadata', () => {
+  it('carries the payload hash and never the source record hash', () => {
+    const row = {
+      id: '01K5S9V6QW3SWCCPVB0N0E3E01',
+      principal_id: '01K5S9V6QW3SWCCPVB0N0E300H',
+      ts: '2026-09-22T08:00:00.000Z',
+      created_at: '2026-09-22T08:00:01.000Z',
+      actor: 'watcher:graph-mail',
+      kind: 'observed',
+      source_system: 'graph',
+      source_record_hash: 'hash-of-the-mail-content',
+      correlation_id: 'corr-1',
+      payload_hash: 'hash-of-the-payload',
+      payload: { subject: 'Private' },
+    } as EventRow;
+
+    const metadata = toMetadata(row);
+
+    expect(metadata.payloadHash).toBe('hash-of-the-payload');
+    expect(metadata.payloadHeld).toBe(true);
+    expect(JSON.stringify(metadata)).not.toContain('hash-of-the-mail-content');
+    expect(JSON.stringify(metadata)).not.toContain('Private');
   });
 });
