@@ -18,7 +18,7 @@ CREATE TABLE "graph_consent_states" (
 	"principal_id" char(26) DEFAULT app_principal() NOT NULL,
 	"code_verifier" text NOT NULL,
 	"issued_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"expires_at" timestamp with time zone NOT NULL,
+	"expires_at" timestamp with time zone DEFAULT now() + interval '10 minutes' NOT NULL,
 	"bound_at" timestamp with time zone,
 	"used_at" timestamp with time zone,
 	CONSTRAINT "graph_consent_states_principal_id_ulid" CHECK ("principal_id" ~ '^[0-9A-HJKMNP-TV-Z]{26}$'),

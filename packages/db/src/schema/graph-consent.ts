@@ -22,7 +22,9 @@ export const graphConsentStates = pgTable(
     principalId: principalId(),
     codeVerifier: text('code_verifier').notNull(),
     issuedAt: timestamptz('issued_at').notNull().defaultNow(),
-    expiresAt: timestamptz('expires_at').notNull(),
+    expiresAt: timestamptz('expires_at')
+      .notNull()
+      .default(sql`now() + interval '10 minutes'`),
     boundAt: timestamptz('bound_at'),
     usedAt: timestamptz('used_at'),
   },

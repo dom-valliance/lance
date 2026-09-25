@@ -18,7 +18,7 @@ import { and, eq, gt, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
  * makes the state unguessable. Only its SHA-256 is stored.
  */
 
-/** How long a consent attempt may stay open. The table's CHECK holds the same bound. */
+/** How long a consent attempt may stay open: the table's default and CHECK hold the same ten minutes. */
 export const CONSENT_STATE_TTL_MINUTES = 10;
 
 const ULID = new RegExp(ULID_PATTERN);
@@ -117,11 +117,11 @@ export function createConsentStateStore(root: Db): ConsentStateStoreLike {
         .where(
           or(lt(graphConsentStates.expiresAt, sql`now()`), isNotNull(graphConsentStates.usedAt)),
         );
+      // expires_at takes its default, ten minutes from now (migration 0021).
       await db.insert(graphConsentStates).values({
         stateHash: hashOf(state),
         principalId,
         codeVerifier,
-        expiresAt: sql`now() + make_interval(mins => ${CONSENT_STATE_TTL_MINUTES})`,
       });
     },
 

@@ -23,6 +23,7 @@ const EXPECTED_TABLES = [
   'briefs',
   'commitments',
   'cursors',
+  'graph_consent_states',
   'jobs',
   'ledger_events',
   'observations',
