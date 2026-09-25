@@ -27,8 +27,9 @@ param containerImageTag = readEnvironmentVariable('LANCE_IMAGE_TAG')
 // the deployment refuses to start. An empty value means a vault with no secrets yet.
 param existingStaticSecretNames = split(readEnvironmentVariable('LANCE_EXISTING_SECRETS'), ',')
 
-// Dom's Slack user id in the Valliance workspace. Not a secret.
-param slackAllowedUserId = 'U0BN7JN7BAN'
+// Empty since Dom linked Slack through /lance login on 2026-09-25; the api
+// resolves every Slack user through slack_links (slack-app-setup.md 8.4).
+param slackAllowedUserId = ''
 
 // The executor's write flags. Both stay false for the dry-run week; flip them to
 // true and redeploy on the day Lance goes live (docs/runbooks/deploy.md, going live).
