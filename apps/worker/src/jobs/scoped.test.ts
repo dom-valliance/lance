@@ -25,6 +25,7 @@ const principal = (overrides: Partial<Principal>): Principal => ({
   foundryEmployeeId: null,
   timeZone: 'Europe/London',
   status: 'active',
+  statusChangedAt: null,
   lanceRoles: [],
   rolesRecordedAt: null,
   activatedAt: null,

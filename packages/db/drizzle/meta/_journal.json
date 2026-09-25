@@ -141,6 +141,13 @@
       "when": 1790320547825,
       "tag": "0019_slack_links_replace_revoked",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790320946121,
+      "tag": "0020_principals_status_changed_at",
+      "breakpoints": true
     }
   ]
 }

@@ -163,6 +163,38 @@ describe('principals writes as lance_app', () => {
     expect(await row(BOUND_ID)).toMatchObject({ status: 'paused' });
   });
 
+  it('stamps status_changed_at on a status change and on nothing else (migration 0020)', async () => {
+    const admin = scopedDb(app, { principalId: SEED_PRINCIPAL_ID, admin: true });
+    const stamp = async (): Promise<unknown> => {
+      const result = await fixture.$client.query(
+        'SELECT status_changed_at FROM principals WHERE id = $1',
+        [BOUND_ID],
+      );
+      return (result.rows as { status_changed_at: Date | null }[])[0]?.status_changed_at;
+    };
+
+    const before = await stamp();
+    await admin.$client.query("UPDATE principals SET status = 'paused' WHERE id = $1", [BOUND_ID]);
+    const paused = await stamp();
+    await admin.$client.query('UPDATE principals SET updated_at = now() WHERE id = $1', [BOUND_ID]);
+    const untouched = await stamp();
+
+    expect(paused).toBeInstanceOf(Date);
+    expect(paused).not.toEqual(before);
+    expect(untouched).toEqual(paused);
+  });
+
+  it('refuses to set status_changed_at directly, even from an admin scope', async () => {
+    const admin = scopedDb(app, { principalId: SEED_PRINCIPAL_ID, admin: true });
+    const code = await codeOf(() =>
+      admin.$client.query(
+        "UPDATE principals SET status_changed_at = now() - interval '30 days' WHERE id = $1",
+        [BOUND_ID],
+      ),
+    );
+    expect(code).toBe(PERMISSION_DENIED);
+  });
+
   it('refuses a change to the UPN or the Slack user id, even from an admin scope', async () => {
     const admin = scopedDb(app, { principalId: SEED_PRINCIPAL_ID, admin: true });
     const upn = await codeOf(() =>

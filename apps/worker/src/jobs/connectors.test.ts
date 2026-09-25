@@ -375,6 +375,7 @@ describe("a principal's Slack surface", () => {
     foundryEmployeeId: null,
     timeZone: 'Europe/London',
     status: 'active',
+    statusChangedAt: null,
     lanceRoles: [],
     rolesRecordedAt: null,
     activatedAt: null,

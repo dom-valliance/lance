@@ -28,6 +28,14 @@ export const principals = pgTable(
     foundryEmployeeId: text('foundry_employee_id'),
     timeZone: text('time_zone').notNull().default('Europe/London'),
     status: principalStatus('status').notNull().default('active'),
+    /**
+     * When `status` last changed, stamped by the database on every status
+     * change whoever makes it (migration 0020); no role may set it. Null
+     * for a row whose status has not changed since the column was added.
+     * The role check offboards only a principal whose last status change
+     * was its own pause.
+     */
+    statusChangedAt: timestamptz('status_changed_at'),
     /** The principal's private Slack channel (ADR 0023); every delivery posts here. */
     slackChannelId: text('slack_channel_id').unique(),
     /**

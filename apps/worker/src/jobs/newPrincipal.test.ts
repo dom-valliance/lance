@@ -28,6 +28,7 @@ const second: Principal = {
   foundryEmployeeId: null,
   timeZone: 'Europe/London',
   status: 'active',
+  statusChangedAt: null,
   lanceRoles: ['Lance.User'],
   rolesRecordedAt: null,
   activatedAt: new Date('2026-09-28T09:00:00.000Z'),
