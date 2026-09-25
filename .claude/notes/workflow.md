@@ -49,3 +49,17 @@ Lesson: use plain git for branches and commits. Do not install or use the `gh` C
 **Correction**: Dom asked why the load test was touching four hours and whether it used tokens.
 **Rule**: Brief any long-running agent job with an explicit cap on runs and on wall time, and with "report and stop" when a target still fails. Find out how long one run takes before estimating. Check on an agent that passes its estimate rather than waiting.
 **Applies to**: global, subagent briefs
+
+### [2026-09-25] Say where and how to run a step, not just its name
+
+**Context**: Checklist step 2 said "redeploy `infra/deployer.bicep` from the branch".
+**Correction**: Dom: "It's not clear what redeploy means here. Should I push, merge, pull, build and deploy?"
+**Rule**: A hand-over step names the directory, the branch, the exact commands, and what they do not involve (no push, no merge, no build). Avoid "redeploy" and "run from the branch" as shorthand; say "run these two commands in your terminal from <dir> while it is on <branch>".
+**Applies to**: global, hand-over steps and runbooks
+
+### [2026-09-25] Check the operator's Entra rights before handing over an Entra script
+
+**Context**: `setup-app-roles.sh` was handed to Dom having been checked only with read queries of the objects, not of who may change them. It failed three times: the app and enterprise app had no owner, an owner's CLI token cannot assign app roles, and the tenant has no Entra ID P1 for group assignment.
+**Correction**: Dom ran it and pasted each failure; he chose the portal over signing in as the tenant admin.
+**Rule**: Before handing over a script that changes Entra, read with the operator's own account: owners of every object it edits (`az ad app owner list`, `/servicePrincipals/{id}/owners`), the operator's directory roles (`/me/memberOf`), and the tenant's licences (`/subscribedSkus`). Give the portal route beside any step the operator's CLI token may not be allowed to do.
+**Applies to**: global, Entra and tenant changes
