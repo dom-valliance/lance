@@ -57,6 +57,21 @@ const writeAccess = new WeakMap<SlackClient, SlackWrite>();
  * The write half of a Slack client, for `slack/writes.ts` only. Deliberately
  * absent from `slack/index.js` and from the package root.
  */
+/**
+ * A read method's arguments, form-encoded. Slack accepts a JSON body only on
+ * some methods: `users.info` ignores one and answers `user_not_found`, so
+ * every read goes form-encoded, which every method accepts. Writes keep
+ * JSON, which `chat.postMessage` needs for its blocks.
+ */
+function formBody(body: Record<string, unknown>): URLSearchParams {
+  const form = new URLSearchParams();
+  for (const [key, value] of Object.entries(body)) {
+    if (value === undefined || value === null) continue;
+    form.set(key, typeof value === 'string' ? value : JSON.stringify(value));
+  }
+  return form;
+}
+
 export function slackWriteAccess(client: SlackClient): SlackWrite {
   const write = writeAccess.get(client);
   if (write === undefined) {
@@ -131,7 +146,11 @@ export function createSlackClient(options: SlackClientOptions): SlackClient {
         'slack',
         method,
         `${SLACK_API}/${method}`,
-        { method: 'POST', headers: { authorization: `Bearer ${options.token}` }, body },
+        {
+          method: 'POST',
+          headers: { authorization: `Bearer ${options.token}` },
+          body: kind === 'read' ? formBody(body) : body,
+        },
         fetchImpl,
       );
       const envelope = SlackEnvelope.parse(response.body);
