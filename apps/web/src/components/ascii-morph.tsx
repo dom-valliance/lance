@@ -7,12 +7,15 @@ import {
   pairParticles,
   particleAt,
   perspective,
+  timelineAt,
   type Particle,
 } from '@/lib/ascii-morph';
 
 /**
- * The sign-in page's opening: a robot drawn in ASCII bursts towards the
- * viewer and settles as the Valliance star. The pictures are drawn at a
+ * The sign-in page's loop: a robot drawn in ASCII bursts towards the
+ * viewer and settles as the Valliance star, which bursts back into the
+ * robot, and round again. Each direction has its own pairing, so the
+ * return is a fresh burst rather than a rewind. The pictures are drawn at a
  * fixed world size, sampled into a glyph grid, and flown by the pure
  * functions in `lib/ascii-morph`. The canvas covers the viewport so the
  * burst can sweep behind the card; a placeholder of the picture's size holds
@@ -27,7 +30,8 @@ const CELL_H = 8;
 const WORLD_W = COLS * CELL_W;
 const WORLD_H = ROWS * CELL_H;
 
-const HOLD_MS = 1300;
+/** How long each picture holds between morphs. */
+const HOLD_MS = 1600;
 const MORPH_MS = 2400;
 const MAX_DELAY = 0.3;
 /** Burst depth and focal length, in grid cells. */
@@ -211,23 +215,30 @@ export function AsciiMorph({ className }: { className?: string }) {
     const ctx = canvas?.getContext('2d');
     if (anchorEl === null || canvas === null || ctx === undefined || ctx === null) return;
 
-    const particles = pairParticles(rasterise(paintRobot), rasterise(paintStar), {
-      cols: COLS,
-      rows: ROWS,
-      maxDelay: MAX_DELAY,
-      depth: DEPTH,
-      seed: 20260925,
-    });
+    const robot = rasterise(paintRobot);
+    const star = rasterise(paintStar);
+    const pair = (from: typeof robot, to: typeof robot, seed: number) =>
+      pairParticles(from, to, { cols: COLS, rows: ROWS, maxDelay: MAX_DELAY, depth: DEPTH, seed });
+    // Transition i runs from picture i to the next: robot to star, star to robot.
+    const transitions = [pair(robot, star, 20260925), pair(star, robot, 20260926)];
     const colour = getComputedStyle(canvas).color;
     const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let dpr = 1;
+    // Reduced motion shows the star, the end of the first transition, and never moves.
+    let index = 0;
     let progress = still ? 1 : 0;
     let frame = 0;
     let raf = 0;
 
     const render = () => {
       drawFrame(
-        { ctx, anchor: anchorEl.getBoundingClientRect(), colour, particles, dpr },
+        {
+          ctx,
+          anchor: anchorEl.getBoundingClientRect(),
+          colour,
+          particles: transitions[index] ?? [],
+          dpr,
+        },
         progress,
         frame,
       );
@@ -245,10 +256,14 @@ export function AsciiMorph({ className }: { className?: string }) {
     if (!still) {
       const started = performance.now();
       const tick = (now: number) => {
-        progress = clamp01((now - started - HOLD_MS) / MORPH_MS);
+        const at = timelineAt(now - started, HOLD_MS, MORPH_MS, transitions.length);
+        // A held picture is already on the canvas; only a morph needs a new frame.
+        const holding = at.progress === 0 && progress === 0 && at.index === index;
+        index = at.index;
+        progress = at.progress;
         frame += 1;
-        render();
-        if (progress < 1) raf = requestAnimationFrame(tick);
+        if (!holding) render();
+        raf = requestAnimationFrame(tick);
       };
       raf = requestAnimationFrame(tick);
     }
