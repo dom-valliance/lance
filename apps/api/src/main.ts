@@ -63,6 +63,7 @@ import { createPrincipalDirectory } from './principals/directory.js';
 import { applyDecision, type DecideDeps } from './proposals/decide.js';
 import { buildServer } from './server.js';
 import { createConsentStateStore } from './auth/graph-state.js';
+import { currentNoticeSha256 } from './onboarding/notice.js';
 import { createSlackLinks, type ChannelProvisionerLike } from './slack/links.js';
 import { createReplayGuard, type ReplayGuardLike } from './slack/replay.js';
 import { createDbStatusSource } from './status.js';
@@ -226,6 +227,8 @@ export interface ServerRuntimeOptions {
   executeQueue?: ExecuteQueue;
   /** Signs the evidence export (`EVIDENCE_SIGNING_KEY`); null or omitted leaves it unavailable. */
   evidenceSigner?: EvidenceSigner | null;
+  /** The notice's hash; read from the file when omitted. */
+  noticeSha256?: string;
 }
 
 /** Everything `buildServer` needs, over the real database. */
@@ -269,6 +272,7 @@ export const createServerDeps = (options: ServerRuntimeOptions): ServerDeps => {
             signer: options.evidenceSigner,
           }),
         }),
+    noticeSha256: options.noticeSha256 ?? currentNoticeSha256(),
     onboarding: createOnboardingService({
       root: options.root,
       afterActivation: (principalId) => executeQueue.enqueueReconcile(principalId),

@@ -206,6 +206,23 @@ const NoticeSha256Schema = z
   .string()
   .regex(/^[0-9a-f]{64}$/, 'must be the SHA-256 of the notice as 64 lowercase hex characters');
 
+/**
+ * The api's own hash of the notice, after checking the page showed that
+ * notice. A client naming any other hash, from a stale page or of its
+ * own making, is refused: an acceptance records the text this build
+ * carries (docs/plans/multi-user.md M3).
+ */
+const currentNotice = (ctx: { server: { noticeSha256: string } }, claimed: string): string => {
+  if (claimed !== ctx.server.noticeSha256) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message:
+        'The data-processing notice on this page is not the current one. Reload the page, read the notice it shows, then accept it. Nothing was recorded.',
+    });
+  }
+  return ctx.server.noticeSha256;
+};
+
 /** Onboarding step 6: the quiet hours and time zone the principal confirms. */
 export const PreferencesInputSchema = z.object({
   timeZone: z
@@ -323,7 +340,7 @@ export const appRouter = router({
     state: signedInProcedure
       .input(z.object({ noticeSha256: NoticeSha256Schema }))
       .query(({ ctx, input }) =>
-        ctx.server.onboarding.state(ctx.caller.principal, input.noticeSha256),
+        ctx.server.onboarding.state(ctx.caller.principal, currentNotice(ctx, input.noticeSha256)),
       ),
     acceptNotice: signedInProcedure
       .input(z.object({ noticeSha256: NoticeSha256Schema }))
@@ -331,7 +348,7 @@ export const appRouter = router({
         precondition(() =>
           ctx.server.onboarding.acceptNotice(
             ctx.caller.principal,
-            input.noticeSha256,
+            currentNotice(ctx, input.noticeSha256),
             actorFromUpn(ctx.upn),
           ),
         ),
@@ -351,7 +368,10 @@ export const appRouter = router({
       .input(z.object({ noticeSha256: NoticeSha256Schema }))
       .mutation(({ ctx, input }) =>
         precondition(() =>
-          ctx.server.onboarding.complete(ctx.caller.principal, input.noticeSha256),
+          ctx.server.onboarding.complete(
+            ctx.caller.principal,
+            currentNotice(ctx, input.noticeSha256),
+          ),
         ),
       ),
   }),

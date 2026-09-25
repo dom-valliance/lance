@@ -107,6 +107,8 @@ export const TEST_CHANNEL_ID = 'C0BU7P278N5';
 /** The seed principal's id, `SEED_PRINCIPAL_ID` in `@lance/db`. */
 export const TEST_PRINCIPAL_ID = '01K5S9V6QW3SWCCPVB0N0E300H';
 export const TEST_OID = '19fb2afd-6814-4600-8697-eb798ec5691f';
+/** The notice hash the fake server carries. */
+export const TEST_NOTICE_SHA256 = 'a'.repeat(64);
 
 export const fakePrincipal = (overrides: Partial<PrincipalRef> = {}): PrincipalRef => ({
   id: TEST_PRINCIPAL_ID,
@@ -1242,6 +1244,7 @@ export const fakeDeps = (overrides: FakeDepsOverrides = {}): FakeDeps => {
     depsFor: () => deps,
     admin: new FakeAdminStore(directory),
     onboarding,
+    noticeSha256: TEST_NOTICE_SHA256,
     readiness: async () => {
       const state = await deps.control.read();
       return { paused: state.paused, mode: state.mode };

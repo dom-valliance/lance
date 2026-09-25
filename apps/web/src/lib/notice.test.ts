@@ -19,7 +19,7 @@ describe('dataProcessingNotice', () => {
 
   it('fails loudly, naming the file, when the build carried no notice', () => {
     expect(() => dataProcessingNotice(undefined, undefined)).toThrow(
-      'apps/web/src/content/data-processing-notice.md',
+      'packages/shared/content/data-processing-notice.md',
     );
     expect(() => dataProcessingNotice('', 'abc')).toThrow('carries no data-processing notice');
   });

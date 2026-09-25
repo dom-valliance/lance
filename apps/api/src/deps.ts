@@ -515,6 +515,12 @@ export interface ServerDeps {
   evidence?: EvidenceExporterLike;
   /** The onboarding checklist and its completion (docs/plans/multi-user.md M3). */
   onboarding: OnboardingServiceLike;
+  /**
+   * The SHA-256 of the data-processing notice this build carries, computed
+   * by the api from the file (`onboarding/notice.ts`). The only hash an
+   * acceptance may name.
+   */
+  noticeSha256: string;
   /** The global `system_state` row, for the readiness probe. */
   readiness: () => Promise<{ paused: boolean; mode: SystemMode }>;
   slack: SlackDeps;

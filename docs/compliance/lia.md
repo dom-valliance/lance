@@ -10,7 +10,7 @@ Lance is an assistant each participating colleague (a "principal") signs up to. 
 
 Two groups of people are affected:
 
-- **Principals**: Valliance colleagues who choose to use Lance, after reading the data-processing notice ([apps/web/src/content/data-processing-notice.md](../../apps/web/src/content/data-processing-notice.md)) and accepting it at onboarding.
+- **Principals**: Valliance colleagues who choose to use Lance, after reading the data-processing notice ([packages/shared/content/data-processing-notice.md](../../packages/shared/content/data-processing-notice.md)) and accepting it at onboarding.
 - **Third parties**: anyone in a principal's mail, calendar and meetings: other colleagues, clients, prospects, suppliers, candidates. They are not told individually and have not agreed to an assistant reading their correspondence.
 
 ## 2. Purpose test: is there a legitimate interest?

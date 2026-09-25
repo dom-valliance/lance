@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
  * shipping an onboarding page with nothing to accept.
  */
 const NOTICE_PATH = fileURLToPath(
-  new URL('./src/content/data-processing-notice.md', import.meta.url),
+  new URL('../../packages/shared/content/data-processing-notice.md', import.meta.url),
 );
 
 function readNotice() {

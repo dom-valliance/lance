@@ -627,6 +627,21 @@ describe('the onboarding procedures', () => {
     expect(harness.onboarding.accepted).toEqual([]);
   });
 
+  it('refuses a well-formed hash that is not the notice this api carries', async () => {
+    const stale = 'b'.repeat(64);
+
+    await expect(
+      onboarding().onboarding.acceptNotice({ noticeSha256: stale }),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: expect.stringContaining('not the current one') as unknown,
+    });
+    await expect(onboarding().onboarding.complete({ noticeSha256: stale })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
+    expect(harness.onboarding.accepted).toEqual([]);
+  });
+
   it('refuses a time zone that does not exist', async () => {
     await expect(
       onboarding().onboarding.confirmPreferences({

@@ -40,6 +40,8 @@ COPY packages/db/drizzle packages/db/drizzle
 COPY packages/ledger/src packages/ledger/src
 COPY packages/ontology/src packages/ontology/src
 COPY packages/shared/src packages/shared/src
+# The data-processing notice: the api hashes it at start up (onboarding/notice.ts).
+COPY packages/shared/content packages/shared/content
 COPY packages/telemetry/src packages/telemetry/src
 
 FROM node:22-alpine AS runtime

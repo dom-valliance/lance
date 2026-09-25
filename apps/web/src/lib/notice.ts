@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 /**
  * The data-processing notice (docs/plans/multi-user.md M3, step 1), inlined
  * at build time by `next.config.ts` from
- * `apps/web/src/content/data-processing-notice.md` with its SHA-256. The
+ * `packages/shared/content/data-processing-notice.md` with its SHA-256. The
  * hash is what an acceptance records, so a changed notice is a new hash
  * and every principal is asked again.
  */
@@ -29,7 +29,7 @@ export function dataProcessingNotice(
 ): Notice {
   if (markdown === undefined || markdown === '' || sha256 === undefined || sha256 === '') {
     throw new Error(
-      'This build carries no data-processing notice. next.config.ts inlines apps/web/src/content/data-processing-notice.md at build time; build the web app with that file in place.',
+      'This build carries no data-processing notice. next.config.ts inlines packages/shared/content/data-processing-notice.md at build time; build the web app with that file in place.',
     );
   }
   return { markdown, sha256 };
