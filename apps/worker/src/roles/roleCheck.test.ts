@@ -33,6 +33,7 @@ const DOM_OID = 'oid-dom';
 const ANN_OID = 'oid-ann';
 const ANN_ID = '01K5S9V6QW3SWCCPVB0N0E3R01';
 const UNBOUND_ID = '01K5S9V6QW3SWCCPVB0N0E3R02';
+const NEWCOMER_ID = '01K5S9V6QW3SWCCPVB0N0E3R03';
 const NOW = '2026-09-24T02:00:00.000Z';
 
 const graph = setupServer();
@@ -43,15 +44,63 @@ let fixture: Db;
 
 const user = (id: string) => ({ '@odata.type': '#microsoft.graph.user', id });
 
-/** Graph as the tenant would answer: groups assigned the roles, and their members. */
-const answerWith = (members: { users: unknown[]; admins: unknown[] }): void => {
+const tokenHandler = () =>
+  http.post(TOKEN_URL, () => HttpResponse.json({ access_token: 'app-token' }));
+
+/** Group member reads the check made; none while every role is assigned to users directly. */
+let groupReads: string[] = [];
+
+/**
+ * Graph as the tenant answers: Lance.User and Lance.Admin assigned to users
+ * directly on the enterprise application, over two pages.
+ */
+const answerWith = (holders: { users: string[]; admins: string[] }): void => {
+  const value = [
+    ...holders.users.map((principalId) => ({
+      principalId,
+      principalType: 'User',
+      appRoleId: LANCE_ROLE_IDS['Lance.User'],
+    })),
+    ...holders.admins.map((principalId) => ({
+      principalId,
+      principalType: 'User',
+      appRoleId: LANCE_ROLE_IDS['Lance.Admin'],
+    })),
+    // The default access role another account holds; not a Lance role.
+    {
+      principalId: 'oid-other',
+      principalType: 'User',
+      appRoleId: '00000000-0000-0000-0000-000000000000',
+    },
+  ];
   graph.use(
-    http.post(TOKEN_URL, () => HttpResponse.json({ access_token: 'app-token' })),
+    tokenHandler(),
     http.get(ASSIGNMENTS_URL, ({ request }) => {
       if (request.headers.get('authorization') !== 'Bearer app-token') {
         return new HttpResponse(null, { status: 401 });
       }
+      // The second page proves the check follows @odata.nextLink.
+      if (new URL(request.url).searchParams.get('page') === '2') {
+        return HttpResponse.json({ value: value.slice(1) });
+      }
       return HttpResponse.json({
+        value: value.slice(0, 1),
+        '@odata.nextLink': `https://graph.microsoft.com/v1.0/servicePrincipals(appId='${CLIENT}')/appRoleAssignedTo?page=2`,
+      });
+    }),
+    http.get(/^https:\/\/graph\.microsoft\.com\/v1\.0\/groups\//, ({ request }) => {
+      groupReads.push(request.url);
+      return new HttpResponse(null, { status: 403 });
+    }),
+  );
+};
+
+/** A tenant with Entra ID P1 that assigns the roles to groups as well. */
+const answerWithGroups = (members: { users: unknown[]; admins: unknown[] }): void => {
+  graph.use(
+    tokenHandler(),
+    http.get(ASSIGNMENTS_URL, () =>
+      HttpResponse.json({
         value: [
           {
             principalId: USERS_GROUP,
@@ -63,17 +112,15 @@ const answerWith = (members: { users: unknown[]; admins: unknown[] }): void => {
             principalType: 'Group',
             appRoleId: LANCE_ROLE_IDS['Lance.Admin'],
           },
-          // The default access role another account holds; not a Lance role.
           {
-            principalId: 'oid-other',
+            principalId: 'oid-direct',
             principalType: 'User',
-            appRoleId: '00000000-0000-0000-0000-000000000000',
+            appRoleId: LANCE_ROLE_IDS['Lance.User'],
           },
         ],
-      });
-    }),
+      }),
+    ),
     http.get(membersUrl(USERS_GROUP), ({ request }) => {
-      // The second page proves the check follows @odata.nextLink.
       if (new URL(request.url).searchParams.get('page') === '2') {
         return HttpResponse.json({ value: members.users.slice(1) });
       }
@@ -112,6 +159,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   graph.resetHandlers();
+  groupReads = [];
 });
 
 afterAll(async () => {
@@ -136,16 +184,48 @@ beforeEach(async () => {
 });
 
 describe('listRoleHolders', () => {
-  it('lists every user holding each role through the groups assigned to it', async () => {
-    answerWith({
-      users: [user(DOM_OID), user(ANN_OID), { '@odata.type': '#microsoft.graph.device', id: 'd1' }],
-      admins: [user(DOM_OID)],
-    });
+  it('lists every user assigned each role directly, reading no group', async () => {
+    answerWith({ users: [DOM_OID, ANN_OID], admins: [DOM_OID] });
 
     await expect(listRoleHolders(credentials)).resolves.toEqual({
       'Lance.User': [ANN_OID, DOM_OID],
       'Lance.Admin': [DOM_OID],
     });
+    expect(groupReads).toEqual([]);
+  });
+
+  it("counts a group's transitive user members when a group is assigned a role", async () => {
+    answerWithGroups({
+      users: [user(DOM_OID), user(ANN_OID), { '@odata.type': '#microsoft.graph.device', id: 'd1' }],
+      admins: [user(DOM_OID)],
+    });
+
+    await expect(listRoleHolders(credentials)).resolves.toEqual({
+      'Lance.User': [ANN_OID, 'oid-direct', DOM_OID],
+      'Lance.Admin': [DOM_OID],
+    });
+  });
+
+  it('names GroupMember.ReadBasic.All only when an assigned group cannot be read', async () => {
+    graph.use(
+      tokenHandler(),
+      http.get(ASSIGNMENTS_URL, () =>
+        HttpResponse.json({
+          value: [
+            {
+              principalId: USERS_GROUP,
+              principalType: 'Group',
+              appRoleId: LANCE_ROLE_IDS['Lance.User'],
+            },
+          ],
+        }),
+      ),
+      http.get(membersUrl(USERS_GROUP), () => new HttpResponse(null, { status: 403 })),
+    );
+
+    await expect(listRoleHolders(credentials)).rejects.toThrow(
+      /GroupMember\.ReadBasic\.All \(needed only because a group is assigned a Lance role\)/,
+    );
   });
 
   it('names the missing permission when Graph refuses the read', async () => {
@@ -160,7 +240,7 @@ describe('listRoleHolders', () => {
 
 describe('runRoleCheck', () => {
   it('pauses an active principal who holds neither role, records it and alerts the admin', async () => {
-    answerWith({ users: [user(DOM_OID)], admins: [user(DOM_OID)] });
+    answerWith({ users: [DOM_OID], admins: [DOM_OID] });
 
     const result = await runRoleCheck({ root, credentials, now: () => NOW });
 
@@ -175,7 +255,13 @@ describe('runRoleCheck', () => {
       kind: 'state_changed',
     });
     expect(annEvents.map((event) => event.payload)).toEqual([
-      { change: 'principal_paused', principalId: ANN_ID, reason: 'holds neither Lance app role' },
+      {
+        change: 'principal_paused',
+        principalId: ANN_ID,
+        reason: 'holds neither Lance app role',
+        from: 'active',
+        statusChangedAt: expect.any(String) as unknown,
+      },
     ]);
     expect(annEvents[0]?.actor).toBe('system:role-check');
 
@@ -185,10 +271,13 @@ describe('runRoleCheck', () => {
     expect(domAlerts.map((alert) => [alert.kind, alert.severity, alert.dedupeKey])).toEqual([
       ['principal_access_revoked', 'P1', `principal_access_revoked:${ANN_ID}`],
     ]);
+    expect(domAlerts[0]?.body).toContain(
+      'give them the Lance.User role again with scripts/entra/grant-access.sh and set their status to active.',
+    );
   });
 
   it('records one observation of each checked principal and none again for the same answer', async () => {
-    answerWith({ users: [user(DOM_OID), user(ANN_OID)], admins: [user(DOM_OID)] });
+    answerWith({ users: [DOM_OID, ANN_OID], admins: [DOM_OID] });
     const domLedger = new LedgerReader(scopedDb(root, { principalId: SEED_PRINCIPAL_ID }));
     const first = await runRoleCheck({ root, credentials, now: () => NOW });
     const afterFirst = await domLedger.query({ kind: 'observed' });
@@ -215,7 +304,7 @@ describe('runRoleCheck', () => {
   });
 
   it('offboards a principal it paused who still holds no role once the grace period has passed', async () => {
-    answerWith({ users: [user(DOM_OID)], admins: [user(DOM_OID)] });
+    answerWith({ users: [DOM_OID], admins: [DOM_OID] });
     const requests: { principalId: string; actor: string; reason: string }[] = [];
     const offboarding = {
       afterDays: 7,
@@ -255,9 +344,9 @@ describe('runRoleCheck', () => {
   });
 
   it('never offboards a paused principal who holds a role again', async () => {
-    answerWith({ users: [user(DOM_OID)], admins: [user(DOM_OID)] });
+    answerWith({ users: [DOM_OID], admins: [DOM_OID] });
     await runRoleCheck({ root, credentials, now: () => NOW });
-    answerWith({ users: [user(DOM_OID), user(ANN_OID)], admins: [user(DOM_OID)] });
+    answerWith({ users: [DOM_OID, ANN_OID], admins: [DOM_OID] });
     const requests: string[] = [];
     const later = await runRoleCheck({
       root,
@@ -272,6 +361,63 @@ describe('runRoleCheck', () => {
       },
     });
     expect(later.offboarded).toEqual([]);
+    expect(requests).toEqual([]);
+    expect(await statusOf(ANN_ID)).toBe('paused');
+  });
+
+  it('pauses an onboarding principal who holds neither role, which stops their prefill', async () => {
+    await fixture.$client.query(
+      `INSERT INTO principals (id, entra_oid, upn, status)
+       VALUES ($1, 'oid-newcomer', 'newcomer@valliance.ai', 'onboarding')
+       ON CONFLICT (id) DO UPDATE SET status = 'onboarding'`,
+      [NEWCOMER_ID],
+    );
+    answerWith({ users: [DOM_OID, ANN_OID], admins: [DOM_OID] });
+
+    try {
+      const result = await runRoleCheck({ root, credentials, now: () => NOW });
+
+      expect(result.paused).toEqual([{ principalId: NEWCOMER_ID, upn: 'newcomer@valliance.ai' }]);
+      expect(await statusOf(NEWCOMER_ID)).toBe('paused');
+      const domAlerts = await scopedDb(root, { principalId: SEED_PRINCIPAL_ID })
+        .select()
+        .from(alerts);
+      expect(domAlerts.map((alert) => alert.dedupeKey)).toEqual([
+        `principal_access_revoked:${NEWCOMER_ID}`,
+      ]);
+      expect(domAlerts[0]?.body).toContain('and so does their onboarding prefill');
+      expect(domAlerts[0]?.body).toContain('set their status to onboarding.');
+    } finally {
+      // Out of every later case's way: offboarding looks at every paused principal.
+      await fixture.$client.query("UPDATE principals SET status = 'offboarded' WHERE id = $1", [
+        NEWCOMER_ID,
+      ]);
+    }
+  });
+
+  it('does not offboard a principal whose status changed after its pause', async () => {
+    answerWith({ users: [DOM_OID], admins: [DOM_OID] });
+    const requests: string[] = [];
+    const offboarding = {
+      afterDays: 7,
+      run: (request: { principalId: string }) => {
+        requests.push(request.principalId);
+        return Promise.resolve();
+      },
+    };
+    await runRoleCheck({ root, credentials, now: () => NOW, offboarding });
+    // An admin resumes Ann and pauses her again before the next night.
+    await fixture.$client.query("UPDATE principals SET status = 'active' WHERE id = $1", [ANN_ID]);
+    await fixture.$client.query("UPDATE principals SET status = 'paused' WHERE id = $1", [ANN_ID]);
+
+    const eightDays = await runRoleCheck({
+      root,
+      credentials,
+      now: () => '2026-10-02T02:00:00.000Z',
+      offboarding,
+    });
+
+    expect(eightDays.offboarded).toEqual([]);
     expect(requests).toEqual([]);
     expect(await statusOf(ANN_ID)).toBe('paused');
   });
