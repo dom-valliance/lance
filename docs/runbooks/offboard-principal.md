@@ -30,22 +30,17 @@ Known values:
 | Resource group | `rg-lance-dev` | `az group list --query "[?starts_with(name, 'rg-lance-')].name" -o tsv` |
 | Principal vault | `kv-lance-p-dev-<suffix>`, created by `principal-vault.bicep` | `az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-p-')].name" -o tsv` |
 | Worker app | `ca-lance-worker-dev` | `az containerapp list -g rg-lance-dev --query "[].name" -o tsv` |
-| Group `Lance Users` | object id in `entra-setup.md`'s known values | `az ad group list --filter "displayName eq 'Lance Users'" --query "[0].id" -o tsv` |
-| Group `Lance Admins` | object id in `entra-setup.md`'s known values | `az ad group list --filter "displayName eq 'Lance Admins'" --query "[0].id" -o tsv` |
+| Enterprise application | `Lance (Valliance)`, service principal in `entra-setup.md`'s known values | `az ad sp list --display-name "Lance (Valliance)" --query "[0].id" -o tsv` |
 
 ## 1. Remove their Lance access in Entra
 
-Take the person out of both groups, so Microsoft refuses their next sign-in to Lance. This is a change in Entra, made by Dom:
+Remove both of the person's Lance roles, so Microsoft refuses their next sign-in to Lance. This is a change in Entra, made by Dom:
 
 ```
-PERSON_UPN=<their UPN>
-PERSON_OID=$(az ad user show --id "$PERSON_UPN" --query id -o tsv)
-echo "$PERSON_OID"
-az ad group member remove --group "Lance Users" --member-id "$PERSON_OID"
-az ad group member check --group "Lance Admins" --member-id "$PERSON_OID" --query value -o tsv
+scripts/entra/grant-access.sh dev <their UPN> user --remove
 ```
 
-If the last command prints `true`, remove them from `Lance Admins` the same way. Offboarding does not depend on this step, but without it the person could still sign in and would meet the app's refusal for an offboarded principal rather than Microsoft's.
+It removes `Lance.User` and `Lance.Admin` wherever the person holds them and prints each removal. Offboarding does not depend on this step, but without it the person could still sign in and would meet the app's refusal for an offboarded principal rather than Microsoft's.
 
 ## 2. Find the principal
 
@@ -145,7 +140,7 @@ For the principal whose UPN is `DOM_EMAIL`, the pre-ADR 0022 secrets `graph-refr
 
 ## Rehearse in dev with a synthetic principal
 
-Once per environment, before the first real offboarding: add a test account to `Lance Users`, sign in to the web app once with it (which creates an `onboarding` principal), then run steps 2 to 5 for that account and step 1 last. Record the date and the principal id in `docs/adr/0000-phase-log.md`, Multi-user track, row "Offboarding is defined and exercised".
+Once per environment, before the first real offboarding: give a test account the `Lance.User` role (`scripts/entra/grant-access.sh dev <test UPN> user`), sign in to the web app once with it (which creates an `onboarding` principal), then run steps 2 to 5 for that account and step 1 last. Record the date and the principal id in `docs/adr/0000-phase-log.md`, Multi-user track, row "Offboarding is defined and exercised".
 
 ## Worked example: local rehearsal, 2026-09-24
 

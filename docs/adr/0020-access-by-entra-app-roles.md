@@ -14,3 +14,7 @@ The app registration is renamed `Lance (Valliance)`, as `CLAUDE.md` names it, an
 ## Consequences
 
 Granting or removing access is a group change in Entra, recorded where access reviews already look. Every Entra change in this ADR is made by a script under `scripts/entra/`, run once by Dom, and every identifier it produces goes into the runbook's known-values table. Requiring assignment before Dom holds a role would lock him out, so the script assigns the groups first and switches assignment on last.
+
+## Amendment, 2026-09-25: roles are assigned to users
+
+Assigning a group to an app role needs Entra ID P1. The Valliance tenant has none: `GET /subscribedSkus` on 2026-09-25 lists no service plan with `AAD_PREMIUM` (its Microsoft 365 plan is Business Standard, `O365_BUSINESS_PREMIUM`). So `Lance.User` and `Lance.Admin` are assigned to users directly on the enterprise application, which the free tier allows, and the groups `Lance Users` and `Lance Admins` are not created. The access list is still held in Entra: it is the enterprise application's list of users and their roles, which `scripts/entra/grant-access.sh` changes and the ISO 27001 access review reads. The nightly role check reads the same list and needs only `Application.Read.All`. If the tenant gains P1, assigning the two groups instead is a change to the script and nothing else.

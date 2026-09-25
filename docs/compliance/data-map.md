@@ -109,4 +109,4 @@ Deleted at offboarding, then soft-deleted for 90 days.
 | Microsoft 365 | Drafts and holds Lance creates on approval, in the principal's own mailbox | The principal's mailbox | Lance never sends mail |
 | Application Insights and Log Analytics | Traces and structured logs; no mail or transcript content at `info` level (spec 13) | 30 days (`infra/modules/monitoring.bicep`) | |
 | Postgres backups | Everything in the database | 35 days (`infra/modules/postgres.bicep`) | Nulled payloads remain in backups until the backups age out |
-| Entra ID | Membership of `Lance Users` and `Lance Admins` | Entra | The access list ([iso27001-access-review.md](iso27001-access-review.md)) |
+| Entra ID | Who holds the `Lance.User` and `Lance.Admin` roles on the enterprise application | Entra | The access list ([iso27001-access-review.md](iso27001-access-review.md)) |

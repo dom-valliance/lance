@@ -27,8 +27,8 @@ Section 8 (app roles and groups, ADR 0020) comes last: it reads the client id fr
 | Dom's object id | `19fb2afd-6814-4600-8697-eb798ec5691f` | `az ad signed-in-user show --query id -o tsv`. Already in `infra/params/dev.bicepparam` as the Postgres Entra administrator. |
 | App role `Lance.User` id | `b98fd184-521c-4ebe-9889-bb9d03c8322c` | Generated once, in `scripts/entra/setup-app-roles.sh` and `packages/shared/src/roles.ts` |
 | App role `Lance.Admin` id | `3f59d957-584d-4fc7-9233-45d4979d06f8` | As above |
-| Group `Lance Users` object id | Printed by section 8; record it here after the run | `az ad group list --filter "displayName eq 'Lance Users'" --query "[0].id" -o tsv` |
-| Group `Lance Admins` object id | Printed by section 8; record it here after the run | `az ad group list --filter "displayName eq 'Lance Admins'" --query "[0].id" -o tsv` |
+| Service principal (enterprise application) object id | `6a1e3a1b-e37e-44fc-aa47-a30fa68f2c80` | `az ad sp show --id d72a4e64-a707-4387-b7e3-fdfd3e75a64b --query id -o tsv` |
+| Entra ID P1 | None in the tenant, checked 2026-09-25, so roles are assigned to users, not groups (ADR 0020 amendment) | `az rest --method GET --uri https://graph.microsoft.com/v1.0/subscribedSkus --query "value[].servicePlans[?contains(servicePlanName,'AAD_PREMIUM')].servicePlanName"` prints only empty lists |
 | Microsoft Graph service principal | `33c5497c-a4e7-4249-ac4f-23ce45cd3f09` | `az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv` |
 | Static Key Vault | `kv-lance-dev-j7riq4` | `az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-dev-')].name" -o tsv` |
 | Principal vault | `kv-lance-p-dev-j7riq4` | `az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-p-dev-')].name" -o tsv`; exists after the first deploy that carries ADR 0022 |
@@ -99,13 +99,13 @@ The api exchanges the code and stores the refresh token in the principal vault a
 
 Dom's token from before ADR 0022 is in the static vault as `graph-refresh-token`. The worker copies it once into his own secret, so Dom does not need to consent again (`deploy.md`, last section).
 
-## 8. App roles, groups and assignment required
+## 8. App roles, assignment and who has access
 
-ADR 0020: access to Lance is granted by the Entra app roles `Lance.User` and `Lance.Admin`, assigned to the security groups `Lance Users` and `Lance Admins`, and the enterprise application requires assignment, so nobody outside the groups gets a token. `ALLOWED_UPN` is retired.
+ADR 0020 and its amendment: access to Lance is granted by the Entra app roles `Lance.User` and `Lance.Admin`, assigned to people directly on the enterprise application, and the enterprise application requires assignment, so nobody without a Lance role gets a token. Groups are not used: assigning a group to an app role needs Entra ID P1, which the tenant does not have (known values above). `ALLOWED_UPN` is retired.
 
-**What must exist first.** The app registration and its service principal (section 1), and the environment's Key Vault holding `entra-client-id` (created by `infra/main.bicep` through `deploy.md` steps 1 to 4, filled in section 5). The person running the script signs in to `az` as an Entra administrator who may create groups, edit the app registration and assign app roles; the script adds that person to both groups, so for dev it is Dom.
+**What must exist first.** The app registration and its service principal (section 1), and the environment's static Key Vault `kv-lance-<env>-<suffix>` holding `entra-client-id` (created by `infra/main.bicep` through `deploy.md` steps 1 to 4, filled in section 5). The person running the script signs in to `az` as an Entra administrator who may edit the app registration and assign app roles; the script gives that person both roles, so for dev it is Dom.
 
-**Run it before deploying the build that carries ADR 0020.** The old build admits by UPN and ignores roles, so the script changes nothing Dom sees. The new build refuses a token without a Lance role, so deployed first it would keep Dom out of the web app until the script had run (the script needs only `az`, so that is recoverable, not a lock-out). Then deploy (`deploy.md`), then sign in once to bind Dom's object id.
+**Run it before merging the build that carries ADR 0020.** The old build admits by UPN and ignores roles, so the script changes nothing Dom sees. The new build refuses a token without a Lance role, so deployed first it would keep Dom out of the web app until the script had run (recoverable, since the script needs only `az`). The full upgrade order is at the top of `deploy.md`.
 
 **Run it.**
 
@@ -113,21 +113,32 @@ ADR 0020: access to Lance is granted by the Entra app roles `Lance.User` and `La
 scripts/entra/setup-app-roles.sh dev
 ```
 
-It reads every identifier itself (tenant from `az account show`, vault from `rg-lance-<env>`, client id from the vault, service principal, the signed-in administrator, Graph's service principal), echoes each one as `NAME=value`, and does the following, each step skipped when already done, so a rerun is safe:
+It reads every identifier itself (tenant from `az account show`, the static vault from `rg-lance-<env>` by its `kv-lance-<env>-` prefix, client id from the vault, service principal, the signed-in administrator, Graph's service principal), echoes each one as `NAME=value`, and does the following, each step skipped when already done, so a rerun is safe:
 
 | Step | Changes in the tenant |
 |---|---|
-| 1 | Renames the app registration and the enterprise application to `Lance (Valliance)` |
+| 1 | Renames the app registration and the enterprise application from `Lance (Dom)` to `Lance (Valliance)` |
 | 2 | Adds the app roles `Lance.User` (`b98fd184-...`) and `Lance.Admin` (`3f59d957-...`); any other role is left as it is |
-| 3 | Creates the security groups `Lance Users` and `Lance Admins` if absent |
-| 4 | Adds the signed-in administrator to both groups |
-| 5 | Assigns `Lance Users` the `Lance.User` role and `Lance Admins` the `Lance.Admin` role on the enterprise application |
-| 6 | Requests two Microsoft Graph application permissions on the app registration, without consenting to them: `Application.Read.All` and `GroupMember.ReadBasic.All` |
-| 7 | Sets "Assignment required" on the enterprise application, last, once the administrator already holds both roles |
+| 3 | Assigns both roles to the signed-in administrator on the enterprise application |
+| 4 | Requests one Microsoft Graph application permission on the app registration, without consenting to it: `Application.Read.All` |
+| 5 | Sets "Assignment required" on the enterprise application, last, once the administrator already holds both roles |
 
-It ends by printing the known-values table (record the two group ids in the table at the top of this runbook) and the two admin-consent commands.
+It ends by printing the known-values table and the admin-consent command.
 
-**Admin consent for the nightly role check.** The worker's role check (`apps/worker/src/roles/roleCheck.ts`) reads `GET /servicePrincipals(appId=...)/appRoleAssignedTo` and `GET /groups/{id}/transitiveMembers` with the app's own client credentials. The least-privileged application permissions for those two reads, as the Graph reference lists them, are `Application.Read.All` (the alternatives are write permissions or `Directory.Read.All`) and `GroupMember.ReadBasic.All` (member ids without their profiles, which is all the check needs). Roles are assigned to groups, so the assignment list alone names groups, not people; the second permission is what turns a group into its members. Consent is not granted by the script. Read what each permission grants, then run the two `az rest ... /appRoleAssignments` commands the script prints; each grants one permission to Lance's own service principal. `az ad app permission admin-consent` would do the same, but it also re-consents every delegated scope the app requests, so the targeted commands are preferred.
+**The existing default assignment.** On 2026-09-25 the enterprise application's only assignment is a default-access one for the account "365 Admin - Dom Selvon". After step 5 that account can still get a token but holds no Lance role, so Lance refuses it. That is intended unless Dom uses that account for Lance.
+
+**Admin consent for the nightly role check.** The worker's role check (`apps/worker/src/roles/roleCheck.ts`) reads `GET /servicePrincipals/{id}/appRoleAssignedTo` with the app's own client credentials. The least-privileged application permission for that read, as the Graph reference lists it, is `Application.Read.All` (the alternatives are write permissions or `Directory.Read.All`). Roles are assigned to users, so the assignment list names the people directly. Consent is not granted by the script: read what the permission grants, then run the `az rest ... /appRoleAssignments` command the script prints, which grants that one permission to Lance's own service principal. Until consent, the role check logs that it lacks the permission and pauses nobody.
+
+**Giving or removing access.**
+
+```
+scripts/entra/grant-access.sh dev colleague@valliance.ai user          # Lance.User
+scripts/entra/grant-access.sh dev colleague@valliance.ai admin         # Lance.User and Lance.Admin
+scripts/entra/grant-access.sh dev colleague@valliance.ai admin --remove  # Lance.Admin only
+scripts/entra/grant-access.sh dev colleague@valliance.ai user --remove   # both roles
+```
+
+A person given `Lance.User` arrives at their first sign-in as an `onboarding` principal. Removing both roles stops their next sign-in; the nightly role check pauses their principal and, seven days later, offboards it (`docs/runbooks/offboard-principal.md`).
 
 **Check it.**
 
@@ -136,6 +147,6 @@ az ad sp show --id <client id> --query "{name:displayName, required:appRoleAssig
 az rest --method GET --uri "https://graph.microsoft.com/v1.0/servicePrincipals/<sp id>/appRoleAssignedTo" --query "value[].{who:principalDisplayName, type:principalType, role:appRoleId}" -o table
 ```
 
-Then sign out of the web app and in again: the id token now carries `roles`, the api binds Dom's Entra object id to his principal on that first request (a `state_changed` event with `change: principal_bound`), and every page loads as before. Someone outside both groups is stopped by Microsoft before they reach Lance; someone added to `Lance Users` arrives as an `onboarding` principal who sees only the onboarding placeholder.
+Then sign out of the web app and in again: the id token now carries `roles`, the api binds Dom's Entra object id to his principal on that first request (a `state_changed` event with `change: principal_bound`), and every page loads as before.
 
 **Undo.** To stop requiring assignment: `az ad sp update --id <sp id> --set appRoleAssignmentRequired=false`. Nothing else the script created needs removing for Lance to keep working.

@@ -64,7 +64,7 @@ export const adminProcedure = procedure.use(({ ctx, next }) => {
     throw new TRPCError({
       code: 'FORBIDDEN',
       message:
-        'Admin procedures need the Lance.Admin role. Ask a Lance admin to add you to the Lance Admins group.',
+        'Admin procedures need the Lance.Admin role. Ask a Lance admin to give you the Lance.Admin role.',
     });
   }
   return next();

@@ -21,7 +21,7 @@ function Refusal() {
     <div className="flex flex-col gap-6">
       <PageHeader title="Admin" />
       <div className="rounded-xl bg-card p-6 text-sm">
-        This page is for Lance admins. Ask a Lance admin to add you to the Lance Admins group if you
+        This page is for Lance admins. Ask a Lance admin to give you the Lance.Admin role if you
         need it. <TextLink href="/today">Go to Today</TextLink>.
       </div>
     </div>

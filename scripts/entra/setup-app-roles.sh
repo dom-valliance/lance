@@ -14,13 +14,16 @@
 # The order keeps the person running it signed in throughout:
 #   1. rename the app registration and its service principal to "Lance (Valliance)"
 #   2. add the app roles Lance.User and Lance.Admin
-#   3. create the security groups "Lance Users" and "Lance Admins"
-#   4. add the signed-in administrator to both groups
-#   5. assign each group its app role on the service principal
-#   6. request the Graph application permissions the nightly role check needs
-#   7. only then require assignment on the service principal
+#   3. assign Lance.User and Lance.Admin to the signed-in administrator
+#   4. request the Graph application permission the nightly role check needs
+#   5. only then require assignment on the service principal
 #
-# Admin consent for step 6 is not granted here; the command is printed at the
+# Roles are assigned to users, not groups: assigning a group to an app role
+# needs Entra ID P1, which this tenant does not have (read from
+# GET /subscribedSkus on 2026-09-25; ADR 0020 amendment). A colleague is
+# given access with scripts/entra/grant-access.sh.
+#
+# Admin consent for step 4 is not granted here; the command is printed at the
 # end for the administrator to run once they have read what it grants.
 
 set -euo pipefail
@@ -45,15 +48,11 @@ LANCE_USER_ROLE_ID='b98fd184-521c-4ebe-9889-bb9d03c8322c'
 LANCE_ADMIN_ROLE_ID='3f59d957-584d-4fc7-9233-45d4979d06f8'
 
 APP_DISPLAY_NAME='Lance (Valliance)'
-USERS_GROUP_NAME='Lance Users'
-ADMINS_GROUP_NAME='Lance Admins'
 
-# Microsoft Graph, and the two application permissions the role check uses:
-#   Application.Read.All       GET /servicePrincipals/{id}/appRoleAssignedTo
-#   GroupMember.ReadBasic.All  GET /groups/{id}/transitiveMembers
+# Microsoft Graph, and the application permission the role check uses:
+#   Application.Read.All  GET /servicePrincipals/{id}/appRoleAssignedTo
 GRAPH_APP_ID='00000003-0000-0000-c000-000000000000'
 GRAPH_APPLICATION_READ_ALL='9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30'
-GRAPH_GROUP_MEMBER_READ_BASIC_ALL='8222c640-cae5-4860-8d11-b32cfad95e03'
 
 GRAPH='https://graph.microsoft.com/v1.0'
 
@@ -65,7 +64,9 @@ TENANT_ID=$(az account show --query tenantId -o tsv)
 found TENANT_ID "${TENANT_ID}" "az account show"
 
 RESOURCE_GROUP="rg-lance-${ENVIRONMENT}"
-KEY_VAULT=$(az keyvault list -g "${RESOURCE_GROUP}" --query "[0].name" -o tsv)
+# The static vault, kv-lance-<env>-<suffix>; the principal vault beside it
+# (kv-lance-p-<env>-...) holds no entra-client-id.
+KEY_VAULT=$(az keyvault list -g "${RESOURCE_GROUP}" --query "[?starts_with(name, 'kv-lance-${ENVIRONMENT}-')].name | [0]" -o tsv)
 if [[ -z "${KEY_VAULT}" ]]; then
   echo "No Key Vault in ${RESOURCE_GROUP}. Run docs/runbooks/deploy.md first; infra/main.bicep creates the vault." >&2
   exit 1
@@ -131,66 +132,31 @@ fi
 found LANCE_USER_ROLE_ID "${LANCE_USER_ROLE_ID}" "Lance.User"
 found LANCE_ADMIN_ROLE_ID "${LANCE_ADMIN_ROLE_ID}" "Lance.Admin"
 
-# Prints the object id of the security group with this display name, creating it if absent.
-ensure_group() {
-  local name="$1" nickname="$2" description="$3" id count
-  count=$(az ad group list --filter "displayName eq '${name}'" --query "length(@)" -o tsv)
-  if (( count > 1 )); then
-    echo "   ${count} groups are named ${name}. Remove the duplicates in the Entra admin centre and run the script again." >&2
-    exit 1
-  fi
-  if (( count == 1 )); then
-    id=$(az ad group list --filter "displayName eq '${name}'" --query "[0].id" -o tsv)
-    echo "   Found the group ${name}." >&2
-  else
-    id=$(az ad group create --display-name "${name}" --mail-nickname "${nickname}" \
-      --description "${description}" --query id -o tsv)
-    echo "   Created the security group ${name}." >&2
-  fi
-  printf '%s' "${id}"
-}
-
-step "3. Creating the security groups"
-USERS_GROUP_ID=$(ensure_group "${USERS_GROUP_NAME}" lance-users "Members may sign in to Lance (app role Lance.User).")
-found USERS_GROUP_ID "${USERS_GROUP_ID}" "${USERS_GROUP_NAME}"
-ADMINS_GROUP_ID=$(ensure_group "${ADMINS_GROUP_NAME}" lance-admins "Members administer Lance (app role Lance.Admin).")
-found ADMINS_GROUP_ID "${ADMINS_GROUP_ID}" "${ADMINS_GROUP_NAME}"
-
-step "4. Adding ${ADMIN_UPN} to both groups"
-for group_id in "${USERS_GROUP_ID}" "${ADMINS_GROUP_ID}"; do
-  is_member=$(az ad group member check --group "${group_id}" --member-id "${ADMIN_OID}" --query value -o tsv)
-  if [[ "${is_member}" == "true" ]]; then
-    echo "   Already a member of ${group_id}."
-  else
-    az ad group member add --group "${group_id}" --member-id "${ADMIN_OID}"
-    echo "   Added to ${group_id}."
-  fi
-done
-
-# Assigns an app role to a group on the Lance service principal unless it already holds it.
+# Assigns an app role to the signed-in administrator on the Lance service
+# principal unless they already hold it.
 ensure_assignment() {
-  local group_id="$1" role_id="$2" label="$3" count
+  local user_id="$1" role_id="$2" label="$3" count
   count=$(az rest --method GET --uri "${GRAPH}/servicePrincipals/${SP_ID}/appRoleAssignedTo" \
-    --query "length(value[?principalId=='${group_id}' && appRoleId=='${role_id}'])" -o tsv)
+    --query "length(value[?principalId=='${user_id}' && appRoleId=='${role_id}'])" -o tsv)
   if (( count > 0 )); then
-    echo "   ${label} already holds its role."
+    echo "   ${ADMIN_UPN} already holds ${label}."
   else
     az rest --method POST --uri "${GRAPH}/servicePrincipals/${SP_ID}/appRoleAssignedTo" \
       --headers 'Content-Type=application/json' \
-      --body "{\"principalId\":\"${group_id}\",\"resourceId\":\"${SP_ID}\",\"appRoleId\":\"${role_id}\"}" \
+      --body "{\"principalId\":\"${user_id}\",\"resourceId\":\"${SP_ID}\",\"appRoleId\":\"${role_id}\"}" \
       --output none
-    echo "   Assigned ${label} its role."
+    echo "   Assigned ${label} to ${ADMIN_UPN}."
   fi
 }
 
-step "5. Assigning each group its app role"
-ensure_assignment "${USERS_GROUP_ID}" "${LANCE_USER_ROLE_ID}" "${USERS_GROUP_NAME} (Lance.User)"
-ensure_assignment "${ADMINS_GROUP_ID}" "${LANCE_ADMIN_ROLE_ID}" "${ADMINS_GROUP_NAME} (Lance.Admin)"
+step "3. Assigning Lance.User and Lance.Admin to ${ADMIN_UPN}"
+ensure_assignment "${ADMIN_OID}" "${LANCE_USER_ROLE_ID}" "Lance.User"
+ensure_assignment "${ADMIN_OID}" "${LANCE_ADMIN_ROLE_ID}" "Lance.Admin"
 
-step "6. Requesting the Graph application permissions for the nightly role check"
+step "4. Requesting the Graph application permission for the nightly role check"
 requested=$(az ad app permission list --id "${CLIENT_ID}" \
   --query "[?resourceAppId=='${GRAPH_APP_ID}'].resourceAccess[] | [?type=='Role'].id" -o tsv)
-for permission in "${GRAPH_APPLICATION_READ_ALL}" "${GRAPH_GROUP_MEMBER_READ_BASIC_ALL}"; do
+for permission in "${GRAPH_APPLICATION_READ_ALL}"; do
   if grep -qx "${permission}" <<< "${requested}"; then
     echo "   ${permission} is already requested."
   else
@@ -200,13 +166,13 @@ for permission in "${GRAPH_APPLICATION_READ_ALL}" "${GRAPH_GROUP_MEMBER_READ_BAS
   fi
 done
 
-step "7. Requiring assignment on the enterprise application"
+step "5. Requiring assignment on the enterprise application"
 required=$(az ad sp show --id "${SP_ID}" --query appRoleAssignmentRequired -o tsv)
 if [[ "${required}" == "true" ]]; then
   echo "   Assignment is already required."
 else
   az ad sp update --id "${SP_ID}" --set appRoleAssignmentRequired=true
-  echo "   Assignment is now required: only members of the two groups can get a token for Lance."
+  echo "   Assignment is now required: only users assigned a Lance role can get a token for Lance."
 fi
 
 cat <<EOF
@@ -222,19 +188,14 @@ Known values for docs/runbooks/entra-setup.md ("Values already known for ${ENVIR
 | Service principal object id | \`${SP_ID}\` |
 | App role Lance.User id | \`${LANCE_USER_ROLE_ID}\` |
 | App role Lance.Admin id | \`${LANCE_ADMIN_ROLE_ID}\` |
-| Group ${USERS_GROUP_NAME} object id | \`${USERS_GROUP_ID}\` |
-| Group ${ADMINS_GROUP_NAME} object id | \`${ADMINS_GROUP_ID}\` |
 | First administrator | \`${ADMIN_UPN}\`, object id \`${ADMIN_OID}\` |
 | Microsoft Graph service principal | \`${GRAPH_SP_ID}\` |
 
-Admin consent for the role check (not run by this script). Each command grants
+Admin consent for the role check (not run by this script). The command grants
 one application permission to Lance's own service principal and nothing else:
 
 az rest --method POST --uri ${GRAPH}/servicePrincipals/${SP_ID}/appRoleAssignments \\
   --headers 'Content-Type=application/json' \\
   --body '{"principalId":"${SP_ID}","resourceId":"${GRAPH_SP_ID}","appRoleId":"${GRAPH_APPLICATION_READ_ALL}"}'
 
-az rest --method POST --uri ${GRAPH}/servicePrincipals/${SP_ID}/appRoleAssignments \\
-  --headers 'Content-Type=application/json' \\
-  --body '{"principalId":"${SP_ID}","resourceId":"${GRAPH_SP_ID}","appRoleId":"${GRAPH_GROUP_MEMBER_READ_BASIC_ALL}"}'
 EOF

@@ -38,6 +38,6 @@ Lance does not yet know which organisations are Valliance's clients. It treats e
 
 ## Leaving
 
-You can stop at any time: ask a Lance admin to offboard you. Lance then deletes your credentials, closes your Slack channel and removes its copies of your mail and transcripts the same day. If you leave Valliance's Lance Users group, this happens automatically after seven days.
+You can stop at any time: ask a Lance admin to offboard you. Lance then deletes your credentials, closes your Slack channel and removes its copies of your mail and transcripts the same day. If your Lance role is removed in Entra, this happens automatically after seven days.
 
 Questions about your data go to Valliance's Data Protection Officer.

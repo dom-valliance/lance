@@ -2,41 +2,34 @@
 
 For Valliance's ISO 27001 owner and auditor. Lance is listed in the periodic access review as one system.
 
-## The evidence: two Entra groups
+## The evidence: the enterprise application's role assignments
 
-Access to Lance is granted only through Microsoft Entra ID (ADR 0020). The enterprise application `Lance (Valliance)` requires assignment, so nobody outside these two groups can sign in:
+Access to Lance is granted only through Microsoft Entra ID (ADR 0020). The enterprise application `Lance (Valliance)` requires assignment, so nobody without one of its two app roles can sign in:
 
-| Group | Grants | Who should be in it |
+| App role | Grants | Who should hold it |
 |---|---|---|
-| `Lance Users` | The app role `Lance.User`: use Lance for your own mail, meetings and tasks | Colleagues who have chosen to use Lance |
-| `Lance Admins` | The app role `Lance.Admin`: the admin page (health, never content), organisation rules, offboarding and the evidence export | Dom Selvon, and anyone the ISO owner approves |
+| `Lance.User` | Use Lance for your own mail, meetings and tasks | Colleagues who have chosen to use Lance |
+| `Lance.Admin` | The admin page (health, never content), organisation rules, offboarding and the evidence export | Dom Selvon, and anyone the ISO owner approves |
 
-The group memberships are the access list. No list is kept inside Lance.
+The roles are assigned to people directly, not through groups, because assigning groups to app roles needs Entra ID P1, which the Valliance tenant does not have (ADR 0020 amendment). The application's list of assignments is the access list. No list is kept inside Lance.
 
-## Listing the members
+## Listing who has access
 
-With the Azure CLI, signed in to the Valliance tenant (`az login`) as anyone who may read groups:
-
-```
-az ad group member list --group "Lance Users" --query "[].{name:displayName, upn:userPrincipalName}" -o table
-az ad group member list --group "Lance Admins" --query "[].{name:displayName, upn:userPrincipalName}" -o table
-```
-
-To confirm the application still requires assignment, and which groups hold its roles:
+With the Azure CLI, signed in to the Valliance tenant (`az login`) as anyone who may read applications:
 
 ```
 SP=$(az ad sp list --display-name "Lance (Valliance)" --query "[0].id" -o tsv)
 echo "$SP"
 az ad sp show --id "$SP" --query appRoleAssignmentRequired -o tsv
 az rest --method get --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP/appRoleAssignedTo" \
-  --query "value[].{group:principalDisplayName, type:principalType}" -o table
+  --query "value[].{who:principalDisplayName, type:principalType, role:appRoleId}" -o table
 ```
 
-The first prints `true`. The second lists `Lance Users` and `Lance Admins` as groups and nothing else.
+The first prints `true`. The second lists each person with a role: `b98fd184-521c-4ebe-9889-bb9d03c8322c` is `Lance.User` and `3f59d957-584d-4fc7-9233-45d4979d06f8` is `Lance.Admin`. Every row's type is `User`.
 
 ## What happens when someone is removed
 
-Removal from both groups stops the person's next sign-in. The nightly role check (02:30 UK time) also pauses them in Lance the first night, raising an alert to the admins, and offboards them seven days later if they are still in neither group: their credentials are deleted and their private Slack channel archived ([offboard-principal.md](../runbooks/offboard-principal.md)). Every step is recorded in Lance's ledger.
+Removing both roles (`scripts/entra/grant-access.sh <env> <UPN> user --remove`) stops the person's next sign-in. The nightly role check (02:30 UK time) also pauses them in Lance the first night, raising an alert to the admins, and offboards them seven days later if they still hold neither role: their credentials are deleted and their private Slack channel archived ([offboard-principal.md](../runbooks/offboard-principal.md)). Every step is recorded in Lance's ledger.
 
 ## Evidence export
 

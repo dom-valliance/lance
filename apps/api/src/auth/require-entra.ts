@@ -45,7 +45,7 @@ export const authenticate = async (
   const identity = await server.auth.verify(bearerToken(request));
   if (!hasLanceAccess(identity.roles)) {
     throw new ForbiddenError(
-      'This account holds neither Lance app role. Ask a Lance admin to add you to the Lance Users group, then sign in again.',
+      'This account holds neither Lance app role. Ask a Lance admin to give you the Lance.User role, then sign in again.',
     );
   }
   const principal = await server.directory.signIn(identity);
