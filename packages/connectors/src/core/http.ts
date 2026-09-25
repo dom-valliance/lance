@@ -8,6 +8,7 @@ import {
 export interface JsonRequest {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   headers?: Record<string, string>;
+  /** Sent as JSON, or form-encoded when it is a `URLSearchParams`. */
   body?: unknown;
   /** Aborts the request after this long. */
   timeoutMs?: number;
@@ -47,12 +48,20 @@ export async function fetchJson<T>(
       method: request.method ?? 'GET',
       headers: {
         accept: 'application/json',
-        ...(request.body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...(request.body === undefined
+          ? {}
+          : {
+              'content-type':
+                request.body instanceof URLSearchParams
+                  ? 'application/x-www-form-urlencoded'
+                  : 'application/json',
+            }),
         ...request.headers,
       },
       signal: controller.signal,
     };
-    if (request.body !== undefined) init.body = JSON.stringify(request.body);
+    if (request.body instanceof URLSearchParams) init.body = request.body.toString();
+    else if (request.body !== undefined) init.body = JSON.stringify(request.body);
     response = await fetchImpl(url, init);
   } catch (error) {
     throw new ConnectorError(
