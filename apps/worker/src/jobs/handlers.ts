@@ -103,8 +103,6 @@ export interface HandlerDeps {
   /** Whether a model is configured; without one triage and chase jobs wait on the queue. */
   modelsAvailable: boolean;
   reconcile: () => Promise<ReconcileResult>;
-  /** The admin's scoped handle, where organisation alerts land (Dom until package 5.1). */
-  adminDb: Db;
   root: Db;
   webUrl: string | null;
   /**
@@ -316,7 +314,7 @@ function organisationHandlers(deps: HandlerDeps): Map<string, (data: unknown) =>
         await runOrganisationBudgetGuard({
           root: deps.root,
           config: deps.config,
-          adminDb: deps.adminDb,
+          fallbackAdminUpn: deps.config.dom.email,
         });
       },
     ],
@@ -367,6 +365,22 @@ async function registerEveryStatus(deps: HandlerDeps): Promise<void> {
   });
 }
 
+/**
+ * Puts a per-principal job back for later while its principal is paused,
+ * in the principal's group like every per-principal send, so the retry
+ * never runs beside another of their jobs on the queue.
+ */
+export async function sendAgainLater(
+  boss: Pick<PgBoss, 'send'>,
+  queue: string,
+  data: { principalId: string } & Record<string, unknown>,
+): Promise<void> {
+  await boss.send(queue, data, {
+    startAfter: RETRY_WHILE_PAUSED_S,
+    ...principalJobOptions(data.principalId),
+  });
+}
+
 async function registerOnDemand(deps: HandlerDeps): Promise<void> {
   const { boss, contexts } = deps;
   await boss.createQueue(OFFBOARD_QUEUE);
@@ -394,10 +408,7 @@ async function registerOnDemand(deps: HandlerDeps): Promise<void> {
     contexts,
     async (context, data) => {
       if (!(await context.gate.check()).runnable) {
-        await boss.send(QUEUES.bulkMail, data, {
-          startAfter: RETRY_WHILE_PAUSED_S,
-          ...principalJobOptions(data.principalId),
-        });
+        await sendAgainLater(boss, QUEUES.bulkMail, data);
         return;
       }
       const { principalId, ...job } = data;
@@ -418,10 +429,7 @@ async function registerOnDemand(deps: HandlerDeps): Promise<void> {
       if (!(await context.gate.check()).runnable) {
         // Paused: the job is put back for later rather than dropped, so a
         // pause during a busy tick loses no triage (non-negotiable 6).
-        await boss.send(QUEUES.triage, data, {
-          startAfter: RETRY_WHILE_PAUSED_S,
-          ...principalJobOptions(data.principalId),
-        });
+        await sendAgainLater(boss, QUEUES.triage, data);
         return;
       }
       if (context.triage === null) return;
@@ -438,7 +446,7 @@ async function registerOnDemand(deps: HandlerDeps): Promise<void> {
     contexts,
     async (context, data) => {
       if (!(await context.gate.check()).runnable) {
-        await boss.send(QUEUES.chase, data, { startAfter: RETRY_WHILE_PAUSED_S });
+        await sendAgainLater(boss, QUEUES.chase, data);
         return;
       }
       if (context.chase === null) return;

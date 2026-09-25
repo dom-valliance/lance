@@ -8,7 +8,6 @@ import {
   cursors,
   grantRetentionMember,
   principalState,
-  principals,
   runMigrations,
   scopedDb,
   type Db,
@@ -162,17 +161,11 @@ beforeAll(async () => {
     DATABASE_URL: url,
     DOM_EMAIL: 'dom@valliance.ai',
   });
-  const [admin] = await fixture
-    .select()
-    .from(principals)
-    .where(eq(principals.id, SEED_PRINCIPAL_ID));
-  if (admin === undefined) throw new Error('The seed did not create the first principal.');
   boss = createBoss(root);
   worker = await bootWorker({
     config,
     root,
     boss,
-    admin,
     modelRunner: new ScriptedRunner(Array.from({ length: 20 }, () => [textMessage('{"ok":true}')])),
     connectorsFor: () => Promise.resolve(null),
     buildWatchers: ({ principal }) => [fakeWatcher(principal.id)],
@@ -535,7 +528,7 @@ describe('budgets', () => {
       await runOrganisationBudgetGuard({
         root,
         config,
-        adminDb: scoped(SEED_PRINCIPAL_ID),
+        fallbackAdminUpn: config.dom.email,
       });
       const raised = await scoped(SEED_PRINCIPAL_ID)
         .select()
@@ -547,6 +540,33 @@ describe('budgets', () => {
       const other = await scoped(OTHER_ID).select().from(alerts);
       expect(other.some((alert) => alert.dedupeKey.startsWith('budget:organisation'))).toBe(false);
     } finally {
+      await setOrganisationCeiling(1000);
+    }
+  });
+
+  it('sends the organisation alert to every recorded Lance.Admin rather than to Dom by UPN', async () => {
+    await setOrganisationCeiling(10);
+    await fixture.$client.query(
+      "UPDATE principals SET lance_roles = ARRAY['Lance.User', 'Lance.Admin'] WHERE id = $1",
+      [OTHER_ID],
+    );
+    const counts = async (principalId: string): Promise<string[]> =>
+      (await scoped(principalId).select().from(alerts))
+        .map((alert) => `${alert.dedupeKey}:${String(alert.count)}`)
+        .sort();
+    const before = await counts(SEED_PRINCIPAL_ID);
+    try {
+      await runOrganisationBudgetGuard({ root, config, fallbackAdminUpn: config.dom.email });
+
+      const other = await scoped(OTHER_ID).select().from(alerts);
+      expect(other.some((alert) => alert.dedupeKey.startsWith('budget:organisation:100:'))).toBe(
+        true,
+      );
+      expect(await counts(SEED_PRINCIPAL_ID)).toEqual(before);
+    } finally {
+      await fixture.$client.query("UPDATE principals SET lance_roles = '{}' WHERE id = $1", [
+        OTHER_ID,
+      ]);
       await setOrganisationCeiling(1000);
     }
   });

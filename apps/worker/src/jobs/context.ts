@@ -53,7 +53,7 @@ import {
 import { watcherQueue, type TriageJob, type WatcherRunnerDeps } from '../watchers/runner.js';
 import type { Watcher } from '../watchers/types.js';
 import type { ConnectorBundle, ConnectorLookup, GraphBundle } from './connectors.js';
-import { threadJobOptions } from './scoped.js';
+import { principalJobOptions, threadJobOptions } from './scoped.js';
 
 /**
  * Everything one principal's jobs run with (ADR 0025): a handle scoped to
@@ -190,6 +190,19 @@ function verifierFor(graph: GraphBundle | null): Watcher {
 }
 
 /** The watchers a principal's connectors allow, each built over their own handle. */
+/**
+ * How a principal's approved proposals reach the execute queue: in the
+ * principal's group, so the executor never runs two of their proposals at
+ * once (ADR 0025).
+ */
+export function executeSender(
+  send: SharedDeps['send'],
+  principalId: string,
+): (proposalId: string) => Promise<void> {
+  return (proposalId) =>
+    send(QUEUES.execute, { principalId, proposalId }, principalJobOptions(principalId));
+}
+
 export function watchersFromConnectors(context: WatcherBuildContext): Watcher[] {
   const { connectors, agent, config, db, principal } = context;
   if (connectors === null) return [];
@@ -338,8 +351,7 @@ export async function buildPrincipalContext(
       });
     },
     slack,
-    enqueueExecute: (proposalId) =>
-      shared.send(QUEUES.execute, { principalId: principal.id, proposalId }),
+    enqueueExecute: executeSender(shared.send, principal.id),
   });
 
   const write = createConnectorWrite({

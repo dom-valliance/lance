@@ -5,6 +5,7 @@ import { hashRecord, nowIso, type Config } from '@lance/shared';
 import { eq } from 'drizzle-orm';
 import { localDate, localDayStart } from '../alerts/detectors/support.js';
 import { raiseAlert } from '../alerts/raise.js';
+import { organisationAdmins } from './admins.js';
 
 /**
  * The organisation budget (docs/plans/multi-user.md M5): today's model
@@ -76,12 +77,12 @@ const gbp = (amount: number): string => `GBP ${amount.toFixed(2)}`;
 
 /**
  * The organisation budget guard: an organisation job that raises P1 at 80
- * per cent and P0 at the ceiling to the admin, whose handle `adminDb` is.
- * The admin is the principal whose UPN matches `config.dom.email` until
- * package 5.1 adds roles.
+ * per cent and P0 at the ceiling to every active `Lance.Admin`, falling
+ * back to the principal whose UPN is `fallbackAdminUpn` when no admin role
+ * is recorded (`organisationAdmins`).
  */
 export async function runOrganisationBudgetGuard(
-  deps: OrganisationBudgetDeps & { adminDb: Db },
+  deps: OrganisationBudgetDeps & { fallbackAdminUpn: string },
 ): Promise<BudgetCheck> {
   const now = (deps.now ?? nowIso)();
   const today = localDate(now, deps.config.timeZone);
@@ -96,25 +97,28 @@ export async function runOrganisationBudgetGuard(
     },
   ];
   const exceeded = check.state === 'exceeded';
-  await raiseAlert(deps.adminDb, {
-    kind: 'cost_spike',
-    severity: exceeded ? 'P0' : 'P1',
-    dedupeKey: `budget:organisation:${exceeded ? '100' : '80'}:${today}`,
-    title: exceeded
-      ? "The organisation's daily model spend has reached its ceiling"
-      : "The organisation's daily model spend is at 80% of its ceiling",
-    body: exceeded
-      ? [
-          `Model-backed agents across every principal have spent ${gbp(check.spentGbp)} against the organisation's ${gbp(check.ceilingGbp)} ceiling and are paused for everyone until midnight.`,
-          'Watchers continue, so nothing stops being observed.',
-          'Suggested action: raise the organisation ceiling on the Admin page, or leave it and the agents start again tomorrow.',
-        ].join(' ')
-      : [
-          `Model-backed agents across every principal have spent ${gbp(check.spentGbp)} of the organisation's ${gbp(check.ceilingGbp)} ceiling today.`,
-          'Suggested action: check the Agents page for the principal driving the spend before the remaining runs are refused for everyone.',
-        ].join(' '),
-    provenance,
-    actor: ORGANISATION_BUDGET_ACTOR,
-  });
+  const recipients = await organisationAdmins(deps.root, deps.fallbackAdminUpn);
+  for (const admin of recipients) {
+    await raiseAlert(scopedDb(deps.root, { principalId: admin.id }), {
+      kind: 'cost_spike',
+      severity: exceeded ? 'P0' : 'P1',
+      dedupeKey: `budget:organisation:${exceeded ? '100' : '80'}:${today}`,
+      title: exceeded
+        ? "The organisation's daily model spend has reached its ceiling"
+        : "The organisation's daily model spend is at 80% of its ceiling",
+      body: exceeded
+        ? [
+            `Model-backed agents across every principal have spent ${gbp(check.spentGbp)} against the organisation's ${gbp(check.ceilingGbp)} ceiling and are paused for everyone until midnight.`,
+            'Watchers continue, so nothing stops being observed.',
+            'Suggested action: raise the organisation ceiling on the Admin page, or leave it and the agents start again tomorrow.',
+          ].join(' ')
+        : [
+            `Model-backed agents across every principal have spent ${gbp(check.spentGbp)} of the organisation's ${gbp(check.ceilingGbp)} ceiling today.`,
+            'Suggested action: check the Agents page for the principal driving the spend before the remaining runs are refused for everyone.',
+          ].join(' '),
+      provenance,
+      actor: ORGANISATION_BUDGET_ACTOR,
+    });
+  }
   return check;
 }

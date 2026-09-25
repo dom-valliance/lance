@@ -885,7 +885,6 @@ async function main(): Promise<void> {
     config,
     root: db.root,
     boss,
-    admin,
     modelRunner: model,
     connectorsFor: fixtures.connectorsFor,
     webUrl: null,

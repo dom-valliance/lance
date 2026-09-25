@@ -1,5 +1,5 @@
 import { FairShareLimiter, type ModelRunner } from '@lance/agents';
-import { principals, scopedDb, type Db, type Principal } from '@lance/db';
+import { principals, type Db } from '@lance/db';
 import type { Config } from '@lance/shared';
 import { eq } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
@@ -25,8 +25,6 @@ export interface BootOptions {
   /** Unscoped handle over the worker's pool; pg-boss runs over it too. */
   root: Db;
   boss: PgBoss;
-  /** Who receives organisation alerts: Dom, by UPN, until package 5.1 adds roles. */
-  admin: Principal;
   modelRunner: ModelRunner | null;
   connectorsFor: ConnectorLookup;
   buildWatchers?: SharedDeps['buildWatchers'];
@@ -91,7 +89,6 @@ export async function bootWorker(options: BootOptions): Promise<BootedWorker> {
     contexts,
     modelsAvailable: options.modelRunner !== null,
     reconcile,
-    adminDb: scopedDb(root, { principalId: options.admin.id }),
     root,
     webUrl: options.webUrl,
     roleCheckCredentials: options.roleCheckCredentials,

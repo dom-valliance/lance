@@ -32,8 +32,8 @@ function roleCheckCredentials(): RoleCheckCredentials | null {
  * The worker's composition root (ADR 0025). It runs every active
  * principal's jobs: each job names its principal, and the job wrapper
  * gives the handler a context scoped to them. Dom's principal, found by
- * UPN, is the admin who receives organisation alerts and seeds the
- * organisation rules until package 5.1 adds roles.
+ * UPN, seeds the organisation rules; organisation alerts go to every
+ * recorded Lance.Admin (jobs/admins.ts).
  */
 async function main(): Promise<void> {
   const config = getConfig();
@@ -67,7 +67,6 @@ async function main(): Promise<void> {
     config,
     root,
     boss,
-    admin,
     modelRunner,
     // Each principal's Graph and Jamie credentials come from their own
     // secrets in the principal vault (ADR 0022); the static vault is read
