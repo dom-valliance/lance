@@ -28,10 +28,10 @@ export type { SlackAgentLogRecord, SlackChannelOptions, SlackHistoryReads } from
 export {
   STEP_SKIPPED_DIMENSION,
   TELEMETRY_PARTITION,
-  TELEMETRY_QUERY,
   TELEMETRY_SOURCE_SYSTEM,
   normaliseTelemetryRow,
   pollTelemetry,
+  telemetryQuery,
   telemetryRecordSchema,
   telemetryRowToRaw,
   telemetryWindowStart,

@@ -1,5 +1,6 @@
 import { principals, type Db, type Principal } from '@lance/db';
 import { UlidSchema } from '@lance/shared';
+import { withPrincipal } from '@lance/telemetry';
 import { eq } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
@@ -8,7 +9,9 @@ import { work, type WorkQueueOptions } from '../scheduler/boss.js';
 /**
  * Per-principal job execution (ADR 0025). Every job payload carries the
  * principal it runs for; this wrapper validates it, checks the principal
- * against `principals`, and hands the handler that principal's context.
+ * against `principals`, and hands the handler that principal's context,
+ * inside a job span carrying `lance.principal` so every span beneath it
+ * is read back into that principal's ledger alone (agent-logs watcher).
  */
 
 /** The part of every per-principal payload the wrapper reads. */
@@ -153,7 +156,12 @@ export function workForPrincipal<TContext, TSchema extends z.ZodType<{ principal
           );
           continue;
         }
-        await handler(resolution.context, parsed.data);
+        await withPrincipal(
+          parsed.data.principalId,
+          `job.${queue}`,
+          { 'lance.queue': queue, 'lance.job_id': job.id },
+          () => handler(resolution.context, parsed.data),
+        );
       }
     },
     options,

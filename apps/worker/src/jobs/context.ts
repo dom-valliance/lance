@@ -189,7 +189,6 @@ function verifierFor(graph: GraphBundle | null): Watcher {
   });
 }
 
-/** The watchers a principal's connectors allow, each built over their own handle. */
 /**
  * How a principal's approved proposals reach the execute queue: in the
  * principal's group, so the executor never runs two of their proposals at
@@ -203,6 +202,7 @@ export function executeSender(
     send(QUEUES.execute, { principalId, proposalId }, principalJobOptions(principalId));
 }
 
+/** The watchers a principal's connectors allow, each built over their own handle. */
 export function watchersFromConnectors(context: WatcherBuildContext): Watcher[] {
   const { connectors, agent, config, db, principal } = context;
   if (connectors === null) return [];
@@ -231,6 +231,7 @@ export function watchersFromConnectors(context: WatcherBuildContext): Watcher[] 
         ownBotUserId: source.ownBotUserId,
         ...(source.ownBotId === null ? {} : { ownBotId: source.ownBotId }),
         appInsights: source.appInsights,
+        principalId: principal.id,
       }),
     );
   }

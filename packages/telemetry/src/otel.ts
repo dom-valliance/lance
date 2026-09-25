@@ -3,8 +3,13 @@ import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { PgInstrumentation } from '@opentelemetry/instrumentation-pg';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { NodeSDK } from '@opentelemetry/sdk-node';
-import { ConsoleSpanExporter, type SpanExporter } from '@opentelemetry/sdk-trace-base';
+import {
+  BatchSpanProcessor,
+  ConsoleSpanExporter,
+  type SpanExporter,
+} from '@opentelemetry/sdk-trace-base';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
+import { PrincipalSpanProcessor } from './span.js';
 
 /**
  * Resource attribute for the deployment environment (dev, staging, live).
@@ -50,7 +55,8 @@ function selectTraceExporter(): SpanExporter | undefined {
 /**
  * Initialises the OpenTelemetry Node SDK for this process, instrumenting
  * HTTP and Postgres calls and tagging every span with `service.name`,
- * `service.version` and `deployment.environment`.
+ * `service.version` and `deployment.environment`, and with
+ * `lance.principal` inside `withPrincipal`.
  *
  * The Node SDK is a process-wide singleton: calling this more than once
  * would either throw or double-register instrumentation, so a second call
@@ -72,7 +78,12 @@ export function initTelemetry(config: TelemetryConfig): TelemetryHandle {
       [ATTR_DEPLOYMENT_ENVIRONMENT]: config.environment,
     }),
     instrumentations: [new HttpInstrumentation(), new PgInstrumentation()],
-    ...(traceExporter ? { traceExporter } : {}),
+    // The principal stamp comes first, so the exporter sends every span,
+    // instrumented or not, with the principal it ran for.
+    spanProcessors: [
+      new PrincipalSpanProcessor(),
+      ...(traceExporter ? [new BatchSpanProcessor(traceExporter)] : []),
+    ],
   });
 
   sdk.start();

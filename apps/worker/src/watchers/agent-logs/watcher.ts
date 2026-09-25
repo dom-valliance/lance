@@ -54,6 +54,8 @@ export interface AgentLogsWatcherOptions {
    * partition an empty poll rather than a failure.
    */
   appInsights?: AppInsightsClient | null;
+  /** The principal whose telemetry the telemetry partition reads (`lance.principal`). */
+  principalId: string;
   now?: () => string;
   schedules?: readonly string[];
 }
@@ -88,7 +90,7 @@ export function createAgentLogsWatcher(options: AgentLogsWatcherOptions): Watche
     poll(partition: string, cursor: string | null): Promise<PollResult> {
       if (partition === SLACK_PARTITION) return pollSlackChannel(options.slack, channel, cursor);
       if (partition === TELEMETRY_PARTITION) {
-        return pollTelemetry(options.appInsights ?? null, cursor, now());
+        return pollTelemetry(options.appInsights ?? null, options.principalId, cursor, now());
       }
       if (partition === WEBHOOK_PARTITION) return pollWebhook(cursor);
       return Promise.reject(unknownPartition(partition));

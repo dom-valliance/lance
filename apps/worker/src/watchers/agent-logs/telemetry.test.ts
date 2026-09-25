@@ -2,15 +2,17 @@ import type { AppInsightsClient, AppInsightsRow } from '@lance/connectors';
 import { hashRecord } from '@lance/shared';
 import { describe, expect, it } from 'vitest';
 import {
-  TELEMETRY_QUERY,
   normaliseTelemetryRow,
   pollTelemetry,
+  telemetryQuery,
   telemetryRowToRaw,
   telemetryWindowStart,
   type TelemetryRecord,
 } from './telemetry.js';
 
 const NOW = '2026-09-22T09:00:00.000Z';
+const PRINCIPAL = '01K5S9V6QW3SWCCPVB0N0E300H';
+const OTHER_PRINCIPAL = '01K5S9V6QW3SWCCPVB0N0E3Q7H';
 
 function row(overrides: Partial<AppInsightsRow> = {}): AppInsightsRow {
   return {
@@ -42,29 +44,49 @@ function fakeClient(rows: AppInsightsRow[]): AppInsightsClient & { calls: QueryC
   };
 }
 
+describe('telemetryQuery', () => {
+  it('reads only the telemetry the principal own jobs produced', () => {
+    const query = telemetryQuery(PRINCIPAL);
+
+    expect(
+      query.match(/tostring\(Properties\['lance\.principal'\]\) == '([0-9A-Z]{26})'/g),
+    ).toEqual([
+      `tostring(Properties['lance.principal']) == '${PRINCIPAL}'`,
+      `tostring(Properties['lance.principal']) == '${PRINCIPAL}'`,
+    ]);
+    expect(query).not.toContain(OTHER_PRINCIPAL);
+    expect(telemetryQuery(OTHER_PRINCIPAL)).not.toBe(query);
+  });
+
+  it('refuses anything that is not a principal id, so nothing can be spliced into the KQL', () => {
+    expect(() => telemetryQuery("x' or 1 == 1 or '")).toThrow('is not a principal id');
+  });
+});
+
 describe('pollTelemetry', () => {
   it('returns nothing and holds the cursor when no workspace is configured', async () => {
-    const result = await pollTelemetry(null, '2026-09-22T08:00:00.000Z', NOW);
+    const result = await pollTelemetry(null, PRINCIPAL, '2026-09-22T08:00:00.000Z', NOW);
     expect(result).toEqual({ records: [], nextCursor: '2026-09-22T08:00:00.000Z' });
   });
 
   it('asks for the window between the cursor and now', async () => {
     const client = fakeClient([]);
-    await pollTelemetry(client, '2026-09-22T08:30:00.000Z', NOW);
+    await pollTelemetry(client, PRINCIPAL, '2026-09-22T08:30:00.000Z', NOW);
     expect(client.calls[0]).toEqual({
-      query: TELEMETRY_QUERY,
+      query: telemetryQuery(PRINCIPAL),
       timespan: `2026-09-22T08:29:00.000Z/${NOW}`,
     });
   });
 
   it('moves the cursor to the end of the window when nothing failed', async () => {
-    const result = await pollTelemetry(fakeClient([]), '2026-09-22T08:30:00.000Z', NOW);
+    const result = await pollTelemetry(fakeClient([]), PRINCIPAL, '2026-09-22T08:30:00.000Z', NOW);
     expect(result.nextCursor).toBe(NOW);
   });
 
   it('advances the cursor to the newest row it read', async () => {
     const result = await pollTelemetry(
       fakeClient([row(), row({ operationId: 'op-2', ts: '2026-09-22T08:58:00Z' })]),
+      PRINCIPAL,
       null,
       NOW,
     );
@@ -73,7 +95,12 @@ describe('pollTelemetry', () => {
   });
 
   it('drops a row that names no operation, since nothing could correlate it', async () => {
-    const result = await pollTelemetry(fakeClient([row({ operationId: '' })]), null, NOW);
+    const result = await pollTelemetry(
+      fakeClient([row({ operationId: '' })]),
+      PRINCIPAL,
+      null,
+      NOW,
+    );
     expect(result.records).toEqual([]);
   });
 });
@@ -113,7 +140,7 @@ describe('telemetryRowToRaw', () => {
 
 describe('normaliseTelemetryRow', () => {
   it('correlates a row on its operation id and labels it a skipped step', async () => {
-    const polled = await pollTelemetry(fakeClient([row()]), null, NOW);
+    const polled = await pollTelemetry(fakeClient([row()]), PRINCIPAL, null, NOW);
     const first = polled.records[0];
     expect(first).toBeDefined();
     if (first === undefined) return;
@@ -125,8 +152,8 @@ describe('normaliseTelemetryRow', () => {
   });
 
   it('gives the same record every time the same row is normalised', async () => {
-    const first = await pollTelemetry(fakeClient([row()]), null, NOW);
-    const second = await pollTelemetry(fakeClient([row()]), null, NOW);
+    const first = await pollTelemetry(fakeClient([row()]), PRINCIPAL, null, NOW);
+    const second = await pollTelemetry(fakeClient([row()]), PRINCIPAL, null, NOW);
     const left = first.records[0];
     const right = second.records[0];
     expect(left).toBeDefined();
@@ -138,7 +165,7 @@ describe('normaliseTelemetryRow', () => {
   });
 
   it('labels a failed span apart from a skipped step', async () => {
-    const polled = await pollTelemetry(fakeClient([row({ step: '' })]), null, NOW);
+    const polled = await pollTelemetry(fakeClient([row({ step: '' })]), PRINCIPAL, null, NOW);
     const first = polled.records[0];
     expect(first).toBeDefined();
     if (first === undefined) return;

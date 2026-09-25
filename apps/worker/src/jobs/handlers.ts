@@ -1,3 +1,4 @@
+import { withPrincipal } from '@lance/telemetry';
 import type { Db } from '@lance/db';
 import { expireProposals } from '@lance/ledger';
 import { UlidSchema, type Config } from '@lance/shared';
@@ -354,12 +355,18 @@ async function registerEveryStatus(deps: HandlerDeps): Promise<void> {
   await work<unknown>(deps.boss, RETENTION_QUEUE, async (jobs) => {
     for (const job of jobs) {
       const { principalId } = PrincipalPayloadSchema.parse(job.data);
-      const result = await runRetention({
-        root: deps.root,
-        config: deps.config,
+      const result = await withPrincipal(
         principalId,
-        trigger: 'nightly',
-      });
+        `job.${RETENTION_QUEUE}`,
+        { 'lance.queue': RETENTION_QUEUE, 'lance.job_id': job.id },
+        () =>
+          runRetention({
+            root: deps.root,
+            config: deps.config,
+            principalId,
+            trigger: 'nightly',
+          }),
+      );
       console.info({ principalId, counts: result.counts }, 'retention applied');
     }
   });

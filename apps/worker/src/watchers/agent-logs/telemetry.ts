@@ -1,4 +1,6 @@
 import type { AppInsightsClient, AppInsightsRow } from '@lance/connectors';
+import { ULID_PATTERN } from '@lance/db';
+import { ATTR_PRINCIPAL } from '@lance/telemetry';
 import { z } from 'zod';
 import type { Observation, PollResult, SourceRecord } from '../types.js';
 
@@ -34,19 +36,32 @@ export const TELEMETRY_MAX_WINDOW_HOURS = 24;
 export const TELEMETRY_MAX_ROWS = 500;
 
 /**
- * The KQL both streams share. A failed span projects no step: only the
+ * The KQL both streams share, for one principal: only spans and traces
+ * carrying their `lance.principal` (set by the job wrapper through
+ * `withPrincipal`), so the organisation's telemetry never reaches another
+ * principal's ledger. A failed span projects no step: only the
  * skipped-step branch fills `step`, which is what lets `skippedSteps` in
  * `detect.ts` tell the two apart inside one record shape.
  */
-export const TELEMETRY_QUERY = `let failedSpans = AppDependencies
+export function telemetryQuery(principalId: string): string {
+  if (!new RegExp(ULID_PATTERN).test(principalId)) {
+    throw new Error(
+      `agent-logs telemetry: "${principalId}" is not a principal id, so it cannot filter the query. The watcher is built with the principal's own id in apps/worker/src/jobs/context.ts.`,
+    );
+  }
+  const own = `| where tostring(Properties['${ATTR_PRINCIPAL}']) == '${principalId}'`;
+  return `let failedSpans = AppDependencies
 | where Success == false
+${own}
 | project ts = TimeGenerated, operationId = OperationId, agent = tostring(Properties['lance.agent']), step = '', success = false, message = strcat(Name, ' failed');
 let skippedSteps = AppTraces
 | where isnotempty(tostring(Properties['${STEP_SKIPPED_DIMENSION}']))
+${own}
 | project ts = TimeGenerated, operationId = OperationId, agent = tostring(Properties['lance.agent']), step = tostring(Properties['${STEP_SKIPPED_DIMENSION}']), success = false, message = Message;
 union failedSpans, skippedSteps
 | order by ts asc
 | take ${String(TELEMETRY_MAX_ROWS)}`;
+}
 
 /** The canonical record for one telemetry row. */
 export const telemetryRecordSchema = z.looseObject({
@@ -120,6 +135,7 @@ export function telemetryRowToRaw(row: AppInsightsRow): TelemetryRawRow | null {
  */
 export async function pollTelemetry(
   client: AppInsightsClient | null,
+  principalId: string,
   cursor: string | null,
   now: string,
 ): Promise<PollResult> {
@@ -127,7 +143,7 @@ export async function pollTelemetry(
 
   const start = telemetryWindowStart(cursor, now);
   const rows = await client.query('agentLogs', {
-    query: TELEMETRY_QUERY,
+    query: telemetryQuery(principalId),
     timespan: `${start}/${now}`,
   });
 
