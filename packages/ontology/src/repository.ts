@@ -249,6 +249,8 @@ export interface BackfillResult {
   meetingJamieIds: number;
   /** Name-only Persons moved from the shared layer to the principal's private layer (ADR 0033). */
   privatePersons: number;
+  /** Shared SAME_AS candidates made private to the principal whose name judgement they are. */
+  privateCandidates: number;
   /** Shared nodes whose source refs lost their record ids and URLs to the principal's own edge (ADR 0033). */
   strippedRefs: number;
   /** Nodes left as they are because another principal's evidence touches them; the next run looks again. */
@@ -310,6 +312,20 @@ function carriesRecord(ref: unknown): boolean {
 function sourceRefsOf(value: unknown): SourceRef[] {
   return Array.isArray(value) ? (value as SourceRef[]) : [];
 }
+
+/** True when a node property holds a value: not absent, null or the empty string. */
+function isSet(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== '';
+}
+
+/** Scalar Person attributes one principal's sighting may fill but never change. */
+const PERSON_ATTRIBUTES = [
+  ['slack_id', 'slackId'],
+  ['notion_user_id', 'notionUserId'],
+  ['org_id', 'orgId'],
+  ['role', 'role'],
+  ['is_internal', 'isInternal'],
+] as const;
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null;
@@ -677,7 +693,8 @@ export class OntologyRepository {
         jamieIds: uniqueStrings(input.jamieParticipantIds ?? []),
         orgId: input.orgId ?? null,
         role: input.role ?? null,
-        isInternal: input.isInternal ?? false,
+        // Unknown until a sighting says; `updatePerson` fills an empty value.
+        isInternal: input.isInternal ?? null,
         confidence: input.confidence ?? 1,
         sourceRefs: layer === 'private' ? [input.sourceRef] : sharedRefs([], input.sourceRef),
         ...this.stamp(layer),
@@ -685,10 +702,25 @@ export class OntologyRepository {
       },
       context,
     );
-    if (layer !== 'private') await this.recordSightings(id, [input.sourceRef], context);
+    if (layer !== 'private') {
+      const filled = PERSON_ATTRIBUTES.filter(([, field]) => isSet(input[field])).map(
+        ([property]) => property,
+      );
+      await this.recordSightings(id, [input.sourceRef], context, filled);
+    }
     return { id, created: true };
   }
 
+  /**
+   * Folds one sighting into an existing Person. Emails and Jamie ids are
+   * unions. A scalar attribute (Slack id, Notion user id, organisation,
+   * role, internal) keeps the value the node holds and takes the input's
+   * only where the node has none, so one principal's reading of a person
+   * never rewrites what another principal's, or the person's own
+   * principal record, set. Which attributes this principal's sighting
+   * filled on a shared Person is recorded on their own `OBSERVED` edge
+   * (`set_fields`), never on the shared node (ADR 0033).
+   */
   private async updatePerson(
     existing: Node,
     input: PersonInput,
@@ -697,20 +729,28 @@ export class OntologyRepository {
   ): Promise<void> {
     const props = existing.properties;
     const isPrivate = layerOf(existing) === 'private';
+    const values: Record<string, unknown> = {};
+    const filled: string[] = [];
+    for (const [property, field] of PERSON_ATTRIBUTES) {
+      const held = props[property];
+      const incoming = input[field] ?? null;
+      if (isSet(held)) {
+        values[field] = held;
+      } else {
+        values[field] = incoming;
+        if (isSet(incoming)) filled.push(property);
+      }
+    }
     await this.apply(
       `MATCH (p:Person {id: $id}) WHERE ${visible('p')} SET p.emails = $emails, p.slack_id = $slackId, p.notion_user_id = $notionUserId, p.jamie_participant_ids = $jamieIds, p.org_id = $orgId, p.role = $role, p.is_internal = $isInternal, p.source_refs = $sourceRefs, p.updated_at = $ts RETURN p.id`,
       {
         id: existing.id,
         emails: uniqueStrings([...stringsOf(props['emails']), ...emails]),
-        slackId: input.slackId ?? props['slack_id'] ?? null,
-        notionUserId: input.notionUserId ?? props['notion_user_id'] ?? null,
+        ...values,
         jamieIds: uniqueStrings([
           ...stringsOf(props['jamie_participant_ids']),
           ...(input.jamieParticipantIds ?? []),
         ]),
-        orgId: input.orgId ?? props['org_id'] ?? null,
-        role: input.role ?? props['role'] ?? null,
-        isInternal: input.isInternal ?? props['is_internal'] ?? false,
         sourceRefs: isPrivate
           ? mergeSourceRefs(props['source_refs'], input.sourceRef)
           : sharedRefs(props['source_refs'], input.sourceRef),
@@ -718,7 +758,7 @@ export class OntologyRepository {
       },
       context,
     );
-    if (!isPrivate) await this.recordSightings(existing.id, [input.sourceRef], context);
+    if (!isPrivate) await this.recordSightings(existing.id, [input.sourceRef], context, filled);
   }
 
   private async findExistingPerson(input: PersonInput, emails: string[]): Promise<Node | null> {
@@ -1253,20 +1293,30 @@ export class OntologyRepository {
     nodeId: string,
     refs: readonly SourceRef[],
     context: MutationContext,
+    setFields: readonly string[] = [],
   ): Promise<void> {
     const person = await this.ensurePrincipalPerson(context);
     if (person === nodeId) return;
     const current = await this.ownEdge(person, 'OBSERVED', nodeId);
     const before = sourceRefsOf(current?.['source_refs']);
     const merged = refs.reduce((all, ref) => mergeSourceRefs(all, ref), before);
-    if (current !== null && merged.length === before.length) return;
+    const fieldsBefore = stringsOf(current?.['set_fields']);
+    const fields = uniqueStrings([...fieldsBefore, ...setFields]);
+    if (
+      current !== null &&
+      merged.length === before.length &&
+      fields.length === fieldsBefore.length
+    ) {
+      return;
+    }
     await this.apply(
-      `MATCH (p:Person {id: $person}), (n {id: $node}) WHERE ${visible('p')} AND ${visible('n')} MERGE (p)-[r:OBSERVED {principal_id: $${SCOPE_PARAM}}]->(n) SET r.layer = $layer, r.source_refs = $sourceRefs, r.updated_at = $ts RETURN r`,
+      `MATCH (p:Person {id: $person}), (n {id: $node}) WHERE ${visible('p')} AND ${visible('n')} MERGE (p)-[r:OBSERVED {principal_id: $${SCOPE_PARAM}}]->(n) SET r.layer = $layer, r.source_refs = $sourceRefs, r.set_fields = $setFields, r.updated_at = $ts RETURN r`,
       {
         person,
         node: nodeId,
         layer: edgeLayer('OBSERVED'),
         sourceRefs: merged,
+        setFields: fields,
         ts: this.now(),
       },
       context,
@@ -1463,7 +1513,10 @@ export class OntologyRepository {
   ): Promise<void> {
     assertLabel(edge, EDGE_LABELS, 'edge');
     const [from, to] = await Promise.all([this.getNode(fromId), this.getNode(toId)]);
-    const layer = edgeLayerBetween(edge, layerOf(from), layerOf(to));
+    // A SAME_AS candidate is one principal's name judgement, so it is
+    // theirs to see and to decide, whatever the layers of its ends.
+    const candidate = edge === 'SAME_AS' && properties.status === 'candidate';
+    const layer: Layer = candidate ? 'private' : edgeLayerBetween(edge, layerOf(from), layerOf(to));
     // An edge to a Meeting waits for any merge of that meeting (`mergeMeeting`).
     const locks = [from, to].flatMap((node) =>
       node !== null && node.label === 'Meeting' ? [node.id] : [],
@@ -1489,7 +1542,12 @@ export class OntologyRepository {
     );
   }
 
-  /** Records a human decision on a SAME_AS candidate (spec 5.3 step 4). Reversible: the prior status is in the ledger. */
+  /**
+   * Records a human decision on a SAME_AS candidate (spec 5.3 step 4).
+   * Reversible: the prior status is in the ledger. Only the principal
+   * whose evidence produced the candidate may decide it: the edge must be
+   * their own, so another principal's decision changes nothing.
+   */
   async setSameAsStatus(
     fromId: string,
     toId: string,
@@ -1497,7 +1555,7 @@ export class OntologyRepository {
     context: MutationContext,
   ): Promise<void> {
     await this.apply(
-      `MATCH (a {id: $from})-[r:SAME_AS]-(b {id: $to}) WHERE ${visible('a')} AND ${visible('b')} AND ${visible('r')} SET r.status = $status, r.decided_at = $ts RETURN r`,
+      `MATCH (a {id: $from})-[r:SAME_AS]-(b {id: $to}) WHERE ${visible('a')} AND ${visible('b')} AND ${own('r')} SET r.status = $status, r.decided_at = $ts RETURN r`,
       { from: fromId, to: toId, status, ts: this.now() },
       context,
     );
@@ -1534,6 +1592,7 @@ export class OntologyRepository {
       meetingMerges: 0,
       meetingJamieIds: 0,
       privatePersons: 0,
+      privateCandidates: 0,
       strippedRefs: 0,
       refused: 0,
       mutations: 0,
@@ -1692,6 +1751,18 @@ export class OntologyRepository {
         );
       }
       result.privatePersons += 1;
+    }
+
+    // A SAME_AS candidate is the legacy owner's name judgement, theirs to decide.
+    const candidates = `MATCH ()-[r:SAME_AS]->() WHERE r.layer <> 'private' AND r.status = 'candidate'`;
+    const openCandidates = Number((await this.read(`${candidates} RETURN count(r)`))[0]?.[0] ?? 0);
+    if (openCandidates > 0) {
+      await this.apply(
+        `${candidates} SET r.layer = $layer, r.principal_id = $owner RETURN count(r)`,
+        this.stamp('private'),
+        context,
+      );
+      result.privateCandidates = openCandidates;
     }
 
     const shared = allNodes(

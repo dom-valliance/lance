@@ -412,6 +412,76 @@ describe('shared meetings and Jamie ids', () => {
   });
 });
 
+describe('shared Person attributes', () => {
+  it("keeps what one principal set when another's sighting says otherwise, and records who filled what", async () => {
+    const ivy = await dom.upsertPerson(
+      {
+        displayName: 'Ivy Lane',
+        emails: ['ivy@contoso.test'],
+        orgId: 'org-contoso',
+        role: 'CTO',
+        isInternal: false,
+        sourceRef: ref('graph', 'msg-dom-ivy'),
+      },
+      context(),
+    );
+    await bea.upsertPerson(
+      {
+        displayName: 'Ivy Lane',
+        emails: ['ivy@contoso.test'],
+        notionUserId: 'notion-ivy',
+        orgId: 'org-other',
+        role: 'Intern',
+        isInternal: true,
+        sourceRef: ref('graph', 'msg-bea-ivy'),
+      },
+      context(),
+    );
+    expect((await dom.getNode(ivy.id))?.properties).toMatchObject({
+      org_id: 'org-contoso',
+      role: 'CTO',
+      is_internal: false,
+      notion_user_id: 'notion-ivy',
+    });
+    const { edges } = await graphSnapshot(dbDom);
+    const observed = (principal: string) =>
+      edges.find(
+        (edge) => edge.label === 'OBSERVED' && edge.to === ivy.id && edge.principalId === principal,
+      )?.properties['set_fields'];
+    expect(observed(DOM)).toEqual(['org_id', 'role', 'is_internal']);
+    expect(observed(BEA)).toEqual(['notion_user_id']);
+  });
+});
+
+describe('SAME_AS candidates', () => {
+  it('are private to the principal whose judgement made them, and only they can decide one', async () => {
+    const a = await dom.upsertPerson(
+      { displayName: 'Jo Marsh', emails: ['jo@contoso.test'], sourceRef: ref('graph', 'msg-jo-1') },
+      context(),
+    );
+    const b = await dom.upsertPerson(
+      {
+        displayName: 'Jo Marsh',
+        emails: ['jo.marsh@contoso.test'],
+        sourceRef: ref('graph', 'msg-jo-2'),
+      },
+      context(),
+    );
+    await dom.link(a.id, 'SAME_AS', b.id, { status: 'candidate', confidence: 0.8 }, context());
+    const candidate = async () =>
+      (await graphSnapshot(dbDom)).edges.find(
+        (edge) => edge.label === 'SAME_AS' && edge.from === a.id && edge.to === b.id,
+      );
+    expect(await candidate()).toMatchObject({ layer: 'private', principalId: DOM });
+    expect((await bea.neighbours(a.id, 'SAME_AS')).map((hit) => hit.node.id)).not.toContain(b.id);
+
+    await bea.setSameAsStatus(a.id, b.id, 'merged', context());
+    expect((await candidate())?.properties['status']).toBe('candidate');
+    await dom.setSameAsStatus(a.id, b.id, 'dismissed', context());
+    expect((await candidate())?.properties['status']).toBe('dismissed');
+  });
+});
+
 describe('merging a meeting', () => {
   it('holds back an edge to a Meeting while a merge of it holds the lock, so none lands between check and delete', async () => {
     const meeting = await bea.upsertMeeting(
@@ -427,7 +497,7 @@ describe('merging a meeting', () => {
     const person = await bea.findPrincipalPerson();
     if (person === null) throw new Error('Bea should have a Person node.');
     let landed = false;
-    let write: Promise<void> | null = null;
+    let write: Promise<void> = Promise.resolve();
     await dbDom.transaction(async (tx) => {
       // What mergeMeeting holds from its edge scan to its delete.
       await tx.execute(

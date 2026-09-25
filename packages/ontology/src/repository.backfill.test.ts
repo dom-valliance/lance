@@ -258,6 +258,7 @@ describe('OntologyRepository.backfillLayers', () => {
       meetingMerges: 0,
       meetingJamieIds: 0,
       privatePersons: 0,
+      privateCandidates: 0,
       strippedRefs: 0,
       refused: 0,
       mutations: 0,
