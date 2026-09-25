@@ -25,6 +25,7 @@ import type {
 } from '@lance/shared';
 import type { PRINCIPAL_STATUS_VALUES } from '@lance/db';
 import type { OnboardingProgress } from './admin/onboarding.js';
+import type { ConsentStateStoreLike } from './auth/graph-state.js';
 import type { SignedEvidence } from './admin/evidence.js';
 import type { AgentsStoreLike } from './agents/store.js';
 import type { AlertStoreLike } from './alerts/store.js';
@@ -120,6 +121,8 @@ export interface VerifiedIdentity {
   upn: string;
   /** The Lance app roles in the token's `roles` claim; empty when it holds neither. */
   roles: LanceRole[];
+  /** The token's tenant, `tid`, when it carries one. */
+  tid?: string;
 }
 
 /** Turns a bearer token into the caller's identity, or throws `UnauthorisedError`. */
@@ -302,6 +305,8 @@ export interface GraphConsentDeps {
   publicApiUrl: string;
   /** The writer for one principal's own refresh token secret. */
   tokenWriterFor: (principalId: string) => GraphTokenWriterLike;
+  /** Open consents, in Postgres so any api replica can finish one (migration 0021). */
+  states: ConsentStateStoreLike;
 }
 
 /**

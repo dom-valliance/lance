@@ -111,7 +111,13 @@ export const createEntraVerifier = (options: EntraVerifierOptions): TokenVerifie
         );
       }
 
-      return { oid, upn, roles: lanceRolesFrom(payload['roles']) };
+      const tid = payload['tid'];
+      return {
+        oid,
+        upn,
+        roles: lanceRolesFrom(payload['roles']),
+        ...(typeof tid === 'string' && tid.length > 0 ? { tid } : {}),
+      };
     },
   };
 };

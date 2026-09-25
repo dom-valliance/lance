@@ -44,6 +44,12 @@ export interface GraphTokens {
   /** Entra rotates this on every refresh; the new value must be stored. */
   refreshToken: string;
   expiresAt: Date;
+  /**
+   * The OpenID Connect id token, when Entra returned one (the `openid`
+   * scope asks for it). The consent callback checks it names the principal
+   * who started the consent before it stores anything.
+   */
+  idToken?: string;
 }
 
 export interface AuthorizeUrlOptions {
@@ -52,6 +58,12 @@ export interface AuthorizeUrlOptions {
   redirectUri: string;
   state: string;
   codeVerifier: string;
+  /**
+   * The UPN of the principal the consent is for. Sent as `login_hint`, and
+   * its domain as `domain_hint`, so Entra offers that account rather than
+   * whichever one the browser last used.
+   */
+  loginHint?: string;
 }
 
 export interface ExchangeCodeOptions {
@@ -137,6 +149,11 @@ export function buildAuthorizeUrl(options: AuthorizeUrlOptions): string {
     code_challenge: codeChallengeFor(options.codeVerifier),
     code_challenge_method: 'S256',
   });
+  if (options.loginHint !== undefined) {
+    query.set('login_hint', options.loginHint);
+    const domain = options.loginHint.split('@')[1];
+    if (domain !== undefined && domain.length > 0) query.set('domain_hint', domain);
+  }
   return `${authorizeEndpoint(options.tenantId)}?${query.toString()}`;
 }
 
@@ -146,6 +163,7 @@ const TokenResponseSchema = z.looseObject({
   expires_in: z.number().positive(),
   token_type: z.string().optional(),
   scope: z.string().optional(),
+  id_token: z.string().min(1).optional(),
 });
 
 const ErrorResponseSchema = z.looseObject({
@@ -243,6 +261,7 @@ async function postToken(
     accessToken: result.data.access_token,
     refreshToken: result.data.refresh_token,
     expiresAt: new Date(Date.now() + result.data.expires_in * 1000),
+    ...(result.data.id_token === undefined ? {} : { idToken: result.data.id_token }),
   };
 }
 

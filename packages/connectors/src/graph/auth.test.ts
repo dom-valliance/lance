@@ -86,6 +86,22 @@ describe('buildAuthorizeUrl', () => {
   it('never sends the verifier itself', () => {
     expect(url.search).not.toContain('a-code-verifier');
   });
+
+  it('names the principal account as the login and domain hint when given one', () => {
+    const hinted = new URL(
+      buildAuthorizeUrl({
+        ...credentials,
+        redirectUri: 'https://api.example.com/auth/graph/callback',
+        state: 'a-state',
+        codeVerifier: 'a-code-verifier',
+        loginHint: 'tarek@valliance.ai',
+      }),
+    );
+
+    expect(hinted.searchParams.get('login_hint')).toBe('tarek@valliance.ai');
+    expect(hinted.searchParams.get('domain_hint')).toBe('valliance.ai');
+    expect(url.searchParams.get('login_hint')).toBeNull();
+  });
 });
 
 describe('generateCodeVerifier and generateState', () => {
@@ -134,6 +150,26 @@ describe('exchangeCode', () => {
     expect(tokens.accessToken).toBe('synthetic-access-token-1');
     expect(tokens.refreshToken).toBe('synthetic-refresh-token-1');
     expect(tokens.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('returns the id token Entra sent alongside the pair', async () => {
+    server.use(
+      http.post(TOKEN_URL, () =>
+        HttpResponse.json({
+          ...graphFixture<Record<string, unknown>>('token-response'),
+          id_token: 'a-synthetic-id-token',
+        }),
+      ),
+    );
+
+    const tokens = await exchangeCode({
+      ...credentials,
+      redirectUri: 'https://api.example.com/auth/graph/callback',
+      code: 'an-auth-code',
+      codeVerifier: 'a-code-verifier',
+    });
+
+    expect(tokens.idToken).toBe('a-synthetic-id-token');
   });
 });
 

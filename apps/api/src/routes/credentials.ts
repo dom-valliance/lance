@@ -76,17 +76,22 @@ export const credentialRoutes =
         );
       }
 
-      await jamie.store(caller.principal.id, apiKey);
-
+      // Ledger first: the intent, the secret, then the connection that
+      // onboarding reads.
       const deps = server.depsFor(caller.principal);
-      await deps.writer.append({
-        ts: (server.now ?? nowIso)(),
-        actor: deps.actor,
-        kind: 'state_changed',
-        sourceSystem: 'jamie',
-        correlationId: newUlid(),
-        payload: { change: 'jamie_connected' },
-      });
+      const correlationId = newUlid();
+      const record = (change: string): Promise<unknown> =>
+        deps.writer.append({
+          ts: (server.now ?? nowIso)(),
+          actor: deps.actor,
+          kind: 'state_changed',
+          sourceSystem: 'jamie',
+          correlationId,
+          payload: { change },
+        });
+      await record('jamie_key_storing');
+      await jamie.store(caller.principal.id, apiKey);
+      await record('jamie_connected');
 
       return reply.code(200).send({ connected: true });
     });

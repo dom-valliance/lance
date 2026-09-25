@@ -62,6 +62,7 @@ import { createExecuteQueue, type ExecuteQueue } from './executeQueue.js';
 import { createPrincipalDirectory } from './principals/directory.js';
 import { applyDecision, type DecideDeps } from './proposals/decide.js';
 import { buildServer } from './server.js';
+import { createConsentStateStore } from './auth/graph-state.js';
 import { createSlackLinks, type ChannelProvisionerLike } from './slack/links.js';
 import { createReplayGuard, type ReplayGuardLike } from './slack/replay.js';
 import { createDbStatusSource } from './status.js';
@@ -412,6 +413,7 @@ export const main = async (): Promise<void> => {
             publicApiUrl: requiredEnv('PUBLIC_API_URL'),
             tokenWriterFor: (principalId: string) =>
               principalTokenWriter(principalSecrets, principalId),
+            states: createConsentStateStore(root),
           },
           jamieKeys: jamieKeyDeps(principalSecrets),
         }),

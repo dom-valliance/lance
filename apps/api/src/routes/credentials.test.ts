@@ -24,6 +24,9 @@ class FakeJamieKeys implements JamieKeyDeps {
   accepts = true;
   readonly checked: string[] = [];
   readonly stored: { principalId: string; apiKey: string }[] = [];
+  /** The ledger changes recorded when each store happened. */
+  readonly ledgerAtStore: string[][] = [];
+  ledger: () => string[] = () => [];
 
   check = (apiKey: string): Promise<void> => {
     this.checked.push(apiKey);
@@ -34,6 +37,7 @@ class FakeJamieKeys implements JamieKeyDeps {
 
   store = (principalId: string, apiKey: string): Promise<void> => {
     this.stored.push({ principalId, apiKey });
+    this.ledgerAtStore.push(this.ledger());
     return Promise.resolve();
   };
 }
@@ -65,6 +69,8 @@ beforeEach(() => {
   }
   harness = fakeDeps();
   jamie = new FakeJamieKeys();
+  jamie.ledger = () =>
+    harness.writer.appended.map((event) => String((event.payload as { change?: unknown }).change));
   server = build({ ...harness.server, jamieKeys: jamie });
 });
 
@@ -98,12 +104,27 @@ describe('POST /credentials/jamie', () => {
     expect(response.json()).toEqual({ connected: true });
     expect(jamie.checked).toEqual([KEY]);
     expect(jamie.stored).toEqual([{ principalId: TEST_PRINCIPAL_ID, apiKey: KEY }]);
-    expect(harness.writer.appended).toHaveLength(1);
-    expect(harness.writer.appended[0]).toMatchObject({
+    expect(harness.writer.appended).toHaveLength(2);
+    expect(harness.writer.appended[1]).toMatchObject({
       kind: 'state_changed',
       sourceSystem: 'jamie',
       payload: { change: 'jamie_connected' },
     });
+  });
+
+  it('records the intent before the key is written and the connection after', async () => {
+    await server.inject({
+      method: 'POST',
+      url: '/credentials/jamie',
+      headers: BEARER,
+      payload: { apiKey: KEY },
+    });
+
+    expect(jamie.ledgerAtStore).toEqual([['jamie_key_storing']]);
+    expect(harness.writer.appended.map((event) => event.payload)).toEqual([
+      { change: 'jamie_key_storing' },
+      { change: 'jamie_connected' },
+    ]);
   });
 
   it('stores nothing and says what to do when Jamie refuses the key', async () => {

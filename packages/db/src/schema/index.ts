@@ -15,3 +15,4 @@ export * from './principals.js';
 export * from './principal-state.js';
 export * from './jobs.js';
 export * from './slack.js';
+export * from './graph-consent.js';

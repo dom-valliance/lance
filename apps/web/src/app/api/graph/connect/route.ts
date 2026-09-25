@@ -6,8 +6,9 @@ import { apiBaseUrl } from '@/lib/api';
  * button lands here. The api's `/auth/graph/connect` sits behind Entra
  * bearer authentication, and the id token lives only in the server-side
  * session, so this handler makes that call on the browser's behalf and
- * forwards the browser to the Microsoft consent URL the api answered
- * with. The token never reaches the browser (spec 4.1, runbook
+ * forwards the browser to where the api answered: its own `begin` leg,
+ * which binds the consent to this browser with a cookie on the api's
+ * hostname before it sends the browser on to Microsoft. The token never reaches the browser (spec 4.1, runbook
  * entra-setup.md section 7).
  */
 

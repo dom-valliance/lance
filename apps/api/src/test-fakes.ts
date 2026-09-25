@@ -73,6 +73,11 @@ import type {
 import type { TaskCountQuery, TaskQuery, TaskStoreLike } from './tasks/store.js';
 import { toTaskView, type ObservationRecord } from './tasks/view.js';
 import { onboardingProgress } from './admin/onboarding.js';
+import type {
+  ClaimedConsent,
+  ConsentPrincipal,
+  ConsentStateStoreLike,
+} from './auth/graph-state.js';
 import { BadRequestError, UnauthorisedError } from './errors.js';
 import { createFeed, type Feed, type FeedEvent } from './events.js';
 import type { JobListing, JobsServiceLike, JobToggleStatus } from './jobs/service.js';
@@ -1298,3 +1303,50 @@ export const fakeContext = (
     upn: principal.upn,
   };
 };
+
+/**
+ * The consent state store without a database, keeping the Postgres
+ * store's rules: bind once, claim once after a bind, nothing after expiry.
+ * `principalFor` answers what the store reads from `principals`.
+ */
+export class FakeConsentStates implements ConsentStateStoreLike {
+  readonly rows = new Map<
+    string,
+    { principalId: string; codeVerifier: string; bound: boolean; used: boolean; expired: boolean }
+  >();
+
+  constructor(readonly principalFor: (principalId: string) => ConsentPrincipal | undefined) {}
+
+  issue(principalId: string, state: string, codeVerifier: string): Promise<void> {
+    this.rows.set(state, { principalId, codeVerifier, bound: false, used: false, expired: false });
+    return Promise.resolve();
+  }
+
+  bind(state: string): Promise<ClaimedConsent | null> {
+    return Promise.resolve(this.advance(state, 'bound'));
+  }
+
+  claim(state: string): Promise<ClaimedConsent | null> {
+    return Promise.resolve(this.advance(state, 'used'));
+  }
+
+  private advance(state: string, step: 'bound' | 'used'): ClaimedConsent | null {
+    const row = this.rows.get(state);
+    if (row === undefined || row.used || row.expired) return null;
+    if (step === 'bound' ? row.bound : !row.bound) return null;
+    row[step] = true;
+    const principal = this.principalFor(row.principalId);
+    return principal === undefined ? null : { codeVerifier: row.codeVerifier, principal };
+  }
+}
+
+/** Consent states whose principals are the directory's, each bound to the oid it is keyed by. */
+export const fakeConsentStates = (directory: FakeDirectory): FakeConsentStates =>
+  new FakeConsentStates((principalId) => {
+    for (const [oid, principal] of directory.principals) {
+      if (principal.id === principalId) {
+        return { id: principal.id, upn: principal.upn, entraOid: oid };
+      }
+    }
+    return undefined;
+  });
