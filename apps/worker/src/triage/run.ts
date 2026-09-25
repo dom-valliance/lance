@@ -9,7 +9,7 @@ import {
 } from '@lance/agents';
 import { observations, proposals, type Db } from '@lance/db';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
-import { nowIso, type Config, type ProvenanceRef } from '@lance/shared';
+import { nowIso, type Config, type PrincipalIdentity, type ProvenanceRef } from '@lance/shared';
 import { and, eq } from 'drizzle-orm';
 import type { OntologyRepository } from '@lance/ontology';
 import { raiseAlert } from '../alerts/raise.js';
@@ -33,7 +33,8 @@ export interface TriageDeps {
   /** Phase 2 collaborators. Absent (tests, a process without them) means the step is skipped. */
   ontology?: OntologyRepository | null;
   extractCommitments?: CommitmentExtractor | null;
-  dom?: { name: string; email: string; notionUserId?: string | null } | null;
+  /** The principal this triage acts for, built once per principal context. */
+  principal?: PrincipalIdentity | null;
   debrief?: Pick<DebriefDeps, 'slack'> | null;
   now?: () => string;
 }
@@ -337,11 +338,10 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   // correlation id is reported as that proposal rather than created again.
   const existing = await existingTaskProposals(deps.db, job.correlationId);
   const taskProposals: string[] = [];
-  // Undefined falls back to config for callers built before ADR 0022; null
-  // means the principal's Notion user is unresolved, and a task nobody can
-  // be assigned is not proposed.
-  const assigneeId =
-    deps.dom?.notionUserId === undefined ? deps.config.notion.domUserId : deps.dom.notionUserId;
+  // No principal falls back to config for callers built before ADR 0022;
+  // a principal with a null Notion user is unresolved, and a task nobody
+  // can be assigned is not proposed.
+  const assigneeId = deps.principal ? deps.principal.notionUserId : deps.config.notion.domUserId;
   if (assigneeId === null && output.taskCandidates.length > 0) {
     console.warn(
       { correlationId: job.correlationId, candidates: output.taskCandidates.length },
@@ -440,7 +440,7 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   let commitmentCandidates: CommitmentCandidate[] = [...output.commitments];
   if (
     deps.extractCommitments &&
-    deps.dom &&
+    deps.principal &&
     newest !== null &&
     newest.transcriptReady &&
     newest.transcript !== null
@@ -449,7 +449,7 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
       {
         id: newest.recordId,
         kind: 'transcript',
-        dom: { name: deps.dom.name, email: deps.dom.email },
+        principal: { name: deps.principal.name, email: deps.principal.email },
         participants: directory,
         occurredAt: newest.startTime,
         text: newest.transcript,
@@ -473,7 +473,7 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   // quoted from (non-negotiable 5), so candidates are grouped by record: a
   // correlation id can carry a meeting and its action items together.
   const recordedCommitments: RecordedCommitment[] = [];
-  if (deps.ontology && deps.dom) {
+  if (deps.ontology && deps.principal) {
     const byRecord = new Map<string, CommitmentCandidate[]>();
     for (const candidate of commitmentCandidates) {
       const group = byRecord.get(candidate.recordId) ?? [];
@@ -482,7 +482,7 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
     }
     for (const [recordId, group] of byRecord) {
       const result = await recordCommitments(
-        { db: deps.db, ontology: deps.ontology, dom: deps.dom, now },
+        { db: deps.db, ontology: deps.ontology, principal: deps.principal, now },
         group,
         {
           correlationId: job.correlationId,
@@ -497,12 +497,18 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   }
 
   let debrief: DebriefResult | null = null;
-  if (deps.debrief && deps.dom && newest !== null && newest.transcriptReady && newest.domAttended) {
+  if (
+    deps.debrief &&
+    deps.principal &&
+    newest !== null &&
+    newest.transcriptReady &&
+    newest.domAttended
+  ) {
     debrief = await runDebrief(
       {
         db: deps.db,
         config: deps.config,
-        dom: deps.dom,
+        principal: deps.principal,
         agent: deps.agent,
         slack: deps.debrief.slack,
         createProposal: deps.createProposal,

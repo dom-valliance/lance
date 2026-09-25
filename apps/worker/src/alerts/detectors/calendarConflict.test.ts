@@ -26,7 +26,13 @@ const config = {
   briefs: { minFreeBlockHours: 2 },
 };
 
-const context = (): DetectorContext => ({ db, config, ontology, now: () => NOW });
+const context = (): DetectorContext => ({
+  db,
+  config,
+  principal: { email: 'dom@valliance.ai' },
+  ontology,
+  now: () => NOW,
+});
 
 const dom = (responseStatus: string) => ({
   name: 'Dom Selvon',

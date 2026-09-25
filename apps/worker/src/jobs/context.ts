@@ -13,7 +13,15 @@ import type { SlackSurface } from '@lance/connectors';
 import { observations, proposals, scopedDb, type Db, type Principal } from '@lance/db';
 import { OntologyRepository } from '@lance/ontology';
 import { LedgerReader, LedgerWriter, SystemControl, toProposal } from '@lance/ledger';
-import { hashRecord, newUlid, nowIso, type Config, type ProvenanceRef } from '@lance/shared';
+import {
+  hashRecord,
+  newUlid,
+  nowIso,
+  principalDisplayName,
+  principalIdentity,
+  type Config,
+  type ProvenanceRef,
+} from '@lance/shared';
 import { and, eq } from 'drizzle-orm';
 import { localDate, localDayStart } from '../alerts/detectors/support.js';
 import type { DetectorContext } from '../alerts/detectors/types.js';
@@ -293,14 +301,7 @@ export async function buildPrincipalContext(
   const ontology = new OntologyRepository(
     db,
     { principalId: principal.id },
-    // Until voice and names per principal arrive (M6), Dom's display name
-    // is used for Dom and the UPN for anyone else.
-    {
-      principalName:
-        principal.upn.toLowerCase() === config.dom.email.toLowerCase()
-          ? config.dom.name
-          : principal.upn,
-    },
+    { principalName: principalDisplayName(principal.upn, config) },
   );
   // Graphs written before ADR 0017 carry no layers; the backfill records
   // itself, so a context built after the first records nothing.
@@ -315,6 +316,8 @@ export async function buildPrincipalContext(
   const notion = connectors?.notion ?? null;
   // Whose rows in the shared All Tasks database are the principal's (ADR 0022).
   const principalNotionUserId = notion?.principalUserId ?? principal.notionUserId ?? null;
+  // The person Lance acts for in this context, everywhere a job names them.
+  const identity = principalIdentity(principal, config, principalNotionUserId);
   const agent = buildAgent(shared, principal, db, control);
   const verifier = verifierFor(graph);
 
@@ -448,10 +451,11 @@ export async function buildPrincipalContext(
       reads: briefReads(db, ontology),
       slack,
       createProposal,
+      principal: identity,
       principalNotionUserId,
     },
     weekly: { db, config, agent, slack },
-    detectors: { db, config, ontology, control, now: nowIso },
+    detectors: { db, config, principal: identity, ontology, control, now: nowIso },
     watchers: new Map(watchers.map((watcher) => [watcherQueue(watcher), watcher])),
     runner: {
       db,
@@ -488,7 +492,7 @@ export async function buildPrincipalContext(
             createProposal,
             ontology,
             extractCommitments,
-            dom: { ...config.dom, notionUserId: principalNotionUserId },
+            principal: identity,
             debrief: { slack },
           },
     bulkMail: { db, config, createProposal },

@@ -92,7 +92,7 @@ export const clientMailUnansweredDetector: Detector = {
       );
     }
 
-    const domDomain = organisationDomain(context.config.dom.email);
+    const homeDomain = organisationDomain(context.principal.email);
     const isClient = new Map<string, boolean>();
 
     const found: DetectedAlert[] = [];
@@ -100,7 +100,7 @@ export const clientMailUnansweredDetector: Detector = {
       if ((lastSentAt.get(conversationId) ?? 0) > message.at) continue;
       if (message.fromAddress === null) continue;
       const domain = organisationDomain(message.fromAddress);
-      if (domain === null || domain === domDomain) continue;
+      if (domain === null || domain === homeDomain) continue;
 
       let client = isClient.get(domain);
       if (client === undefined) {

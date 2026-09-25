@@ -190,6 +190,28 @@ afterAll(async () => {
   await container?.stop();
 });
 
+describe("each principal's context", () => {
+  it('names its own principal to triage, the detectors and the briefs, never Dom for anyone else', async () => {
+    const resolved = await worker.contexts.resolve(OTHER_ID);
+    if (resolved.status !== 'active') throw new Error('The second principal should be active.');
+    const other = resolved.context;
+    const expected = {
+      name: 'Second Principal',
+      email: 'second.principal@example.test',
+      notionUserId: null,
+    };
+    expect(other.triage?.principal).toEqual(expected);
+    expect(other.detectors.principal).toEqual(expected);
+    expect(other.briefs.principal).toEqual(expected);
+    const owner = await worker.contexts.resolve(SEED_PRINCIPAL_ID);
+    if (owner.status !== 'active') throw new Error('The first principal should be active.');
+    expect(owner.context.triage?.principal).toMatchObject({
+      name: config.dom.name,
+      email: 'dom@valliance.ai',
+    });
+  });
+});
+
 describe('the reconciler at boot', () => {
   it('schedules every per-principal job for both principals and each organisation job once', async () => {
     const keys = await scheduleKeys();

@@ -25,6 +25,7 @@ import { OntologyRepository } from '@lance/ontology';
 import {
   deliveryChannelFor,
   getConfig,
+  principalDisplayName,
   principalSecretName,
   readSecret,
   type Config,
@@ -142,7 +143,7 @@ export const createApiDeps = (options: PrincipalRuntimeOptions): ApiDeps => {
     ontology: new OntologyRepository(
       options.db,
       { principalId: options.principal.id },
-      { principalName: options.config.dom.name },
+      { principalName: principalDisplayName(options.principal.upn, options.config) },
     ),
     enqueueChase: (commitmentId) => executeQueue.enqueueChase(options.principal.id, commitmentId),
     enqueueBrief: () => executeQueue.enqueueBrief(options.principal.id),

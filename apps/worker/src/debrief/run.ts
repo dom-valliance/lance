@@ -2,7 +2,13 @@ import { runAgent, type AgentDeps, type ProposalDraft } from '@lance/agents';
 import type { SlackSurface } from '@lance/connectors';
 import { briefs, type Db } from '@lance/db';
 import { LedgerWriter } from '@lance/ledger';
-import { newUlid, nowIso, type Config, type ProvenanceRef } from '@lance/shared';
+import {
+  newUlid,
+  nowIso,
+  type Config,
+  type PrincipalIdentity,
+  type ProvenanceRef,
+} from '@lance/shared';
 import type { RecordedCommitment } from '../commitments/record.js';
 import type { ProposalContext, createProposalHandler } from '../executor/createProposal.js';
 import type { QuotedPoint } from '../triage/schema.js';
@@ -31,7 +37,8 @@ export interface DebriefMeeting {
 export interface DebriefDeps {
   db: Db;
   config: Pick<Config, 'agentDisplayName' | 'timeZone' | 'models'>;
-  dom: { name: string; email: string };
+  /** The principal the debrief is for; their domain is the home one. */
+  principal: Pick<PrincipalIdentity, 'name' | 'email'>;
   agent: AgentDeps;
   slack: Pick<SlackSurface, 'post'> | null;
   createProposal: ReturnType<typeof createProposalHandler>;
@@ -62,9 +69,9 @@ function domainOf(email: string | null): string | null {
   return at < 0 ? null : email.slice(at + 1).toLowerCase();
 }
 
-/** Attendees and participants outside Dom's own domain, de-duplicated by email. */
-export function externalPeople(meeting: DebriefMeeting, domEmail: string): DebriefPerson[] {
-  const home = domainOf(domEmail);
+/** Attendees and participants outside the principal's own domain, de-duplicated by email. */
+export function externalPeople(meeting: DebriefMeeting, principalEmail: string): DebriefPerson[] {
+  const home = domainOf(principalEmail);
   const seen = new Set<string>();
   const out: DebriefPerson[] = [];
   for (const person of [...meeting.attendees, ...meeting.participants]) {
@@ -129,7 +136,7 @@ export function renderDebriefMarkdown(input: DebriefInput, timeZone: string): st
 export async function runDebrief(deps: DebriefDeps, input: DebriefInput): Promise<DebriefResult> {
   const now = deps.now ?? nowIso;
   const markdown = renderDebriefMarkdown(input, deps.config.timeZone);
-  const external = externalPeople(input.meeting, deps.dom.email);
+  const external = externalPeople(input.meeting, deps.principal.email);
 
   let followUpProposalId: string | null = null;
   if (external.length > 0) {

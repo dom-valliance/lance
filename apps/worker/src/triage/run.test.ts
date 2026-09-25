@@ -284,7 +284,7 @@ describe('runTriage', () => {
         },
         createProposal: () => Promise.reject(new Error('no proposals in this test')),
         ontology: new OntologyRepository(db, { principalId: SEED_PRINCIPAL_ID }),
-        dom: { name: 'Dom Selvon', email: 'dom@valliance.ai' },
+        principal: { name: 'Dom Selvon', email: 'dom@valliance.ai', notionUserId: null },
         extractCommitments: (source) => {
           expect(source.text).toBe(record.transcript);
           return Promise.resolve([

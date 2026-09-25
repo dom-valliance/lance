@@ -116,7 +116,7 @@ describe('runDebrief', () => {
           timeZone: 'Europe/London',
           models: { triage: { id: 'claude-sonnet-5', effort: 'medium' } } as never,
         },
-        dom: { name: 'Dom Selvon', email: 'dom@valliance.ai' },
+        principal: { name: 'Dom Selvon', email: 'dom@valliance.ai' },
         agent: {
           runner,
           recorder: new MemoryRunRecorder(),
@@ -169,7 +169,7 @@ describe('runDebrief', () => {
           timeZone: 'Europe/London',
           models: { triage: { id: 'claude-sonnet-5', effort: 'medium' } } as never,
         },
-        dom: { name: 'Dom Selvon', email: 'dom@valliance.ai' },
+        principal: { name: 'Dom Selvon', email: 'dom@valliance.ai' },
         agent: {
           runner,
           recorder: new MemoryRunRecorder(),

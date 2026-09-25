@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 /**
  * A commitment as the model extracts it (spec 7.2, 10.4). `outbound` is
- * something Dom owes; `inbound` is something owed to Dom. The evidence
+ * something the principal owes; `inbound` is something owed to them. The evidence
  * quote is verbatim text from the source; the eval harness checks it.
  */
 export const CommitmentCandidateSchema = z.object({
@@ -30,7 +30,8 @@ export type CommitmentExtraction = z.infer<typeof CommitmentExtractionSchema>;
 export const CommitmentSourceSchema = z.object({
   id: z.string().min(1),
   kind: z.enum(['transcript', 'sent_mail']),
-  dom: z.object({ name: z.string().min(1), email: z.string().min(3) }),
+  /** The principal whose transcript or sent mail this is: the person commitments are made by or to. */
+  principal: z.object({ name: z.string().min(1), email: z.string().min(3) }),
   participants: z.array(z.object({ name: z.string(), email: z.string().nullable() })),
   /** ISO instant the source was written or held, for resolving relative dates. */
   occurredAt: z.string().nullable().default(null),

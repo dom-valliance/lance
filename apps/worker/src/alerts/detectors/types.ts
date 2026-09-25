@@ -1,7 +1,7 @@
 import type { Db } from '@lance/db';
 import type { OntologyRepository } from '@lance/ontology';
 import type { SystemControl } from '@lance/ledger';
-import type { Config } from '@lance/shared';
+import type { Config, PrincipalIdentity } from '@lance/shared';
 import type { RaiseAlertInput } from '../raise.js';
 
 /**
@@ -13,7 +13,9 @@ import type { RaiseAlertInput } from '../raise.js';
  */
 export interface DetectorContext {
   db: Db;
-  config: Pick<Config, 'timeZone' | 'cost' | 'dom' | 'proposals' | 'briefs'>;
+  config: Pick<Config, 'timeZone' | 'cost' | 'proposals' | 'briefs'>;
+  /** The principal the detectors run for: whose calendar and whose organisation. */
+  principal: Pick<PrincipalIdentity, 'email'>;
   ontology: OntologyRepository;
   /** Settings as Dom last saved them (spec 13 ceiling); the config default applies when absent. */
   control?: Pick<SystemControl, 'read'>;

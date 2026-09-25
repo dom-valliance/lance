@@ -17,6 +17,7 @@ import type {
   Config,
   CounterpartyClass,
   MorningBriefContent,
+  PrincipalIdentity,
   ProvenanceRef,
 } from '@lance/shared';
 import { and, desc, eq, gte, inArray, lt, or, sql } from 'drizzle-orm';
@@ -34,7 +35,9 @@ import { addDays, instantOf, localDate, startOfLocalDay } from './local.js';
 export interface BriefDataDeps {
   db: Db;
   ontology: OntologyRepository;
-  config: Pick<Config, 'timeZone' | 'dom' | 'briefs' | 'cost' | 'notion'>;
+  config: Pick<Config, 'timeZone' | 'briefs' | 'cost' | 'notion'>;
+  /** The principal the brief is for: their own attendance is not listed, their domain is home. */
+  principal: Pick<PrincipalIdentity, 'email'>;
   /**
    * The principal's Notion user id, `principals.notion_user_id` (ADR 0022).
    * Null while it is unresolved, and then the brief lists no Notion task
@@ -274,7 +277,7 @@ async function counterpartyPersonIds(
 }
 
 async function meetingOf(deps: BriefDataDeps, event: CalendarEvent): Promise<Meeting> {
-  const home = domainOf(deps.config.dom.email);
+  const home = domainOf(deps.principal.email);
   const attendees: Attendee[] = [];
   const personIds: string[] = [];
   const externalPersonIds: string[] = [];
@@ -290,7 +293,7 @@ async function meetingOf(deps: BriefDataDeps, event: CalendarEvent): Promise<Mee
     const email = person.address?.toLowerCase() ?? null;
     if (email !== null && seen.has(email)) continue;
     if (email !== null) seen.add(email);
-    if (email === deps.config.dom.email.toLowerCase()) continue;
+    if (email === deps.principal.email.toLowerCase()) continue;
     const domain = email === null ? null : domainOf(email);
     const isExternal = domain !== null && domain !== home;
     if (isExternal) external = true;

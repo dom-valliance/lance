@@ -10,6 +10,7 @@ import {
   nowIso,
   type Config,
   type MorningBriefContent,
+  type PrincipalIdentity,
 } from '@lance/shared';
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import type { createProposalHandler } from '../executor/createProposal.js';
@@ -46,10 +47,9 @@ export const QUEUE_PREP = 'brief-meeting-prep';
 
 export interface BriefDeps {
   db: Db;
-  config: Pick<
-    Config,
-    'timeZone' | 'dom' | 'briefs' | 'cost' | 'models' | 'agentDisplayName' | 'notion'
-  >;
+  config: Pick<Config, 'timeZone' | 'briefs' | 'cost' | 'models' | 'agentDisplayName' | 'notion'>;
+  /** The principal the briefs are for. */
+  principal: Pick<PrincipalIdentity, 'email'>;
   ontology: OntologyRepository;
   /** Null means no model: the brief is posted from the assembled facts alone. */
   agent: AgentDeps | null;
@@ -80,6 +80,7 @@ function dataDeps(deps: BriefDeps, now: () => string): BriefDataDeps {
     db: deps.db,
     ontology: deps.ontology,
     config: deps.config,
+    principal: deps.principal,
     ...(deps.principalNotionUserId === undefined
       ? {}
       : { principalNotionUserId: deps.principalNotionUserId }),

@@ -22,7 +22,13 @@ const config = {
   briefs: { minFreeBlockHours: 2 },
 };
 
-const context = (): DetectorContext => ({ db, config, ontology, now: () => NOW });
+const context = (): DetectorContext => ({
+  db,
+  config,
+  principal: { email: 'dom@valliance.ai' },
+  ontology,
+  now: () => NOW,
+});
 
 async function spend(startedAt: string, costUsd: number): Promise<void> {
   await db.insert(agentRuns).values({

@@ -17,7 +17,7 @@ const agentConfig = {
 const source = {
   id: 'mail-1',
   kind: 'sent_mail' as const,
-  dom: { name: 'Dom Selvon', email: 'dom@valliance.ai' },
+  principal: { name: 'Dom Selvon', email: 'dom@valliance.ai' },
   participants: [{ name: 'Ann Example', email: 'ann@client.test' }],
   occurredAt: '2026-09-21T09:00:00.000Z',
   text: 'Thanks Ann. I will send the revised statement of work by Friday. Could you confirm the start date?',

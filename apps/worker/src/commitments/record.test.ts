@@ -19,7 +19,7 @@ const provenance = [
     observedAt: '2026-09-21T10:00:00.000Z',
   },
 ];
-const dom = { name: 'Dom Selvon', email: 'dom@valliance.ai', notionUserId: 'notion-dom' };
+const principal = { name: 'Dom Selvon', email: 'dom@valliance.ai', notionUserId: 'notion-dom' };
 
 const candidates = [
   {
@@ -59,7 +59,7 @@ afterAll(async () => {
 
 describe('recordCommitments', () => {
   it('writes one row per commitment with the right owner, resolves the counterparty once and links the graph', async () => {
-    const result = await recordCommitments({ db, ontology, dom }, candidates, {
+    const result = await recordCommitments({ db, ontology, principal }, candidates, {
       correlationId,
       actor: 'agent:triage@0.1.0',
       provenance,
@@ -89,7 +89,7 @@ describe('recordCommitments', () => {
   });
 
   it('does not record the same open commitment twice', async () => {
-    const again = await recordCommitments({ db, ontology, dom }, candidates, {
+    const again = await recordCommitments({ db, ontology, principal }, candidates, {
       correlationId,
       actor: 'agent:triage@0.1.0',
       provenance,
@@ -102,7 +102,7 @@ describe('recordCommitments', () => {
 
   it('skips a candidate with no counterparty and one that resolves to Dom himself', async () => {
     const result = await recordCommitments(
-      { db, ontology, dom },
+      { db, ontology, principal },
       [
         {
           ...candidates[0]!,

@@ -34,7 +34,7 @@ function toSource(record: CommitmentFixture): Record<string, unknown> {
   return {
     id: record.id,
     kind: record.kind,
-    dom: record.dom,
+    principal: record.dom,
     participants: record.participants,
     occurredAt: null,
     text: record.text,

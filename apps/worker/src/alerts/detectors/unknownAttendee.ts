@@ -24,7 +24,7 @@ export const unknownAttendeeDetector: Detector = {
     const events = await calendarWindow(context);
     if (events.length === 0) return [];
 
-    const domDomain = organisationDomain(context.config.dom.email);
+    const homeDomain = organisationDomain(context.principal.email);
     // One lookup per address and per domain, however many meetings they appear in.
     const knownPerson = new Map<string, boolean>();
     const knownOrganisation = new Map<string, boolean>();
@@ -36,7 +36,7 @@ export const unknownAttendeeDetector: Detector = {
         const address = attendee.address?.trim().toLowerCase();
         if (address === undefined || address === '') continue;
         const domain = organisationDomain(address);
-        if (domain === null || domain === domDomain) continue;
+        if (domain === null || domain === homeDomain) continue;
 
         let person = knownPerson.get(address);
         if (person === undefined) {
