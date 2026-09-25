@@ -415,7 +415,11 @@ What each step consumes comes from the step before it. The order is fixed.
    PKV=$(az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-p-dev-')].name" -o tsv)
    echo "$PKV"
    az keyvault secret list --vault-name $PKV --query "[].name" -o tsv
-   scripts/psql-admin.sh lance -c "SELECT ts, payload FROM ledger_events WHERE payload->>'change' = 'credential_migrated' ORDER BY id"
+   scripts/psql-admin.sh lance \
+     -c "SELECT set_config('app.principal', (SELECT id FROM principals WHERE upn = 'dom@valliance.ai'), false)" \
+     -c "SELECT ts, payload FROM ledger_events WHERE payload->>'change' = 'credential_migrated' ORDER BY id"
+
+   The first command scopes the session to Dom's principal; without it, row-level security returns no rows and the check looks as if nothing was copied (`docs/runbooks/observing.md`, "Reading principal-bearing tables").
    ```
 
    The vault lists two secrets named with Dom's principal id, and the query returns one row for `graph` and one for `jamie`. Then run the checks at the end of step 4 again: the web identity holds four secret-scoped assignments and nothing on either vault.
