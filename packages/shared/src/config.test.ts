@@ -67,7 +67,7 @@ describe('loadConfig defaults', () => {
     expect(config.cost).toEqual({ dailyCeilingGbp: 15, usdToGbp: 0.78 });
     expect(config.scheduler).toEqual({ tickSeconds: 30 });
     expect(config.modelLimiter).toEqual({
-      concurrency: 4,
+      concurrency: 16,
       principalBurst: 6,
       principalRunsPerMinute: 12,
     });
@@ -81,7 +81,7 @@ describe('loadConfig defaults', () => {
     expect(config.watchers).toEqual({ dryRunDaysForNewWatcher: 5 });
     expect(config.inboxAgent).toEqual({ watermarkAlert: false, watermarkMaxAgeHours: 24 });
     expect(config.triage).toEqual({ bulkLabels: ['Newsletters', 'Notifications'] });
-    expect(config.modelQueues).toEqual({ concurrency: 4 });
+    expect(config.modelQueues).toEqual({ concurrency: 16 });
     expect(config.briefs).toEqual({ minFreeBlockHours: 2 });
     expect(config.retention).toEqual({
       mailBodiesDays: 90,

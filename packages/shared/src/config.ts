@@ -445,13 +445,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
   };
 
+  // 16 concurrent model calls: the account's limits read on 2026-09-25 are
+  // 10,000 requests and 10 million input tokens a minute for Haiku and
+  // Sonnet, and the thirty-principal Monday used about 31 requests a
+  // minute at 4 (docs/runbooks/load-test.md). Concurrency changes how fast
+  // the backlog clears, not what it costs.
   const modelLimiter: Config['modelLimiter'] = {
     concurrency: readField(
       errors,
       env,
       'MODEL_CONCURRENCY',
       z.number().int().positive(),
-      4,
+      16,
       'must be a positive integer',
       toNumber,
     ),
@@ -582,17 +587,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
   };
 
-  // Twice the default MODEL_CONCURRENCY across the two queues: each job
-  // holds at most one model slot at a time, so four of each keeps the
-  // limiter's four slots busy while some jobs are between calls
-  // (docs/runbooks/load-test.md).
+  // As many jobs on each queue as the limiter has slots: each job holds at
+  // most one model slot at a time, so sixteen of each keeps the sixteen
+  // slots busy while some jobs are between calls (docs/runbooks/load-test.md).
   const modelQueues: Config['modelQueues'] = {
     concurrency: readField(
       errors,
       env,
       'MODEL_QUEUE_CONCURRENCY',
       z.number().int().positive(),
-      4,
+      16,
       'must be a positive integer',
       toNumber,
     ),
