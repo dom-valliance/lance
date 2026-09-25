@@ -116,6 +116,54 @@ describe('slack_links as lance_app', () => {
     expect(await codeOf(() => link(other, DOM_SLACK, OTHER_ID))).toBe(UNIQUE_VIOLATION);
   });
 
+  it("binds a revoked Slack user to another principal in that principal's own scope", async () => {
+    await link(dom, DOM_SLACK, SEED_PRINCIPAL_ID);
+    await dom.$client.query('UPDATE slack_links SET revoked_at = now() WHERE slack_user_id = $1', [
+      DOM_SLACK,
+    ]);
+
+    await link(other, DOM_SLACK, OTHER_ID);
+
+    expect(await principal(OTHER_ID)).toMatchObject({ slack_user_id: DOM_SLACK });
+    expect(await principal(SEED_PRINCIPAL_ID)).toMatchObject({ slack_user_id: null });
+    const rows = await fixture.$client.query(
+      'SELECT principal_id, revoked_at IS NULL AS active FROM slack_links WHERE slack_user_id = $1 ORDER BY linked_at',
+      [DOM_SLACK],
+    );
+    expect(rows.rows).toEqual([
+      { principal_id: SEED_PRINCIPAL_ID, active: false },
+      { principal_id: OTHER_ID, active: true },
+    ]);
+  });
+
+  it("still refuses a revoked Slack user bound from a scope other than the new principal's", async () => {
+    await link(other, OTHER_SLACK, OTHER_ID);
+    await other.$client.query(
+      'UPDATE slack_links SET revoked_at = now() WHERE slack_user_id = $1',
+      [OTHER_SLACK],
+    );
+
+    expect(await codeOf(() => link(dom, OTHER_SLACK, OTHER_ID))).toBe(PERMISSION_DENIED);
+    expect(await codeOf(() => link(root, OTHER_SLACK, SEED_PRINCIPAL_ID))).toBe(PERMISSION_DENIED);
+  });
+
+  it('refuses to renew a revoked link once the Slack user is bound to someone else', async () => {
+    await link(dom, DOM_SLACK, SEED_PRINCIPAL_ID);
+    await dom.$client.query('UPDATE slack_links SET revoked_at = now() WHERE slack_user_id = $1', [
+      DOM_SLACK,
+    ]);
+    await link(other, DOM_SLACK, OTHER_ID);
+
+    const code = await codeOf(() =>
+      dom.$client.query(
+        'UPDATE slack_links SET revoked_at = NULL WHERE slack_user_id = $1 AND principal_id = $2',
+        [DOM_SLACK, SEED_PRINCIPAL_ID],
+      ),
+    );
+    expect(code).toBe(UNIQUE_VIOLATION);
+    expect(await principal(OTHER_ID)).toMatchObject({ slack_user_id: DOM_SLACK });
+  });
+
   it('refuses a second active link for the same principal', async () => {
     await link(dom, DOM_SLACK, SEED_PRINCIPAL_ID);
     expect(await codeOf(() => link(dom, 'U0SECOND', SEED_PRINCIPAL_ID))).toBe(UNIQUE_VIOLATION);

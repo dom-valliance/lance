@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, index, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import { check, index, pgTable, primaryKey, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import { timestamptz, ulid, ulidCheck } from './columns.js';
 import { principals } from './principals.js';
 
@@ -10,11 +10,15 @@ import { principals } from './principals.js';
  * reads every row, because a Slack request is resolved to a principal
  * before it has a scope; row-level security (migration 0014, enabled and
  * not forced) holds each write to the principal's own scope.
+ *
+ * A row is one binding, kept after it is revoked. A Slack user has at most
+ * one active row, and a revoked row does not stop a new binding of the same
+ * Slack user to any principal (migration 0019).
  */
 export const slackLinks = pgTable(
   'slack_links',
   {
-    slackUserId: text('slack_user_id').primaryKey(),
+    slackUserId: text('slack_user_id').notNull(),
     slackTeamId: text('slack_team_id').notNull(),
     principalId: ulid('principal_id')
       .notNull()
@@ -23,7 +27,11 @@ export const slackLinks = pgTable(
     revokedAt: timestamptz('revoked_at'),
   },
   (table) => [
+    primaryKey({ columns: [table.slackUserId, table.linkedAt] }),
     ulidCheck('slack_links', 'principal_id'),
+    uniqueIndex('slack_links_one_active_per_slack_user_idx')
+      .on(table.slackUserId)
+      .where(sql`${table.revokedAt} IS NULL`),
     uniqueIndex('slack_links_one_active_per_principal_idx')
       .on(table.principalId)
       .where(sql`${table.revokedAt} IS NULL`),
