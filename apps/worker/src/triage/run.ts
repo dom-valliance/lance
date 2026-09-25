@@ -323,7 +323,10 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
       name: 'triage',
       version: TRIAGE_VERSION,
       model: deps.config.models.triage,
-      system: triageSystemPrompt(deps.config.agentDisplayName),
+      system: triageSystemPrompt(
+        deps.config.agentDisplayName,
+        deps.principal?.name ?? 'the principal',
+      ),
       tools,
       outputSchema: TriageOutputSchema,
       maxIterations: 8,

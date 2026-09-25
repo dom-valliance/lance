@@ -1,15 +1,17 @@
 import { BANNED_CLOSERS, BANNED_PHRASES, CORRELATIVE_PAIRS } from '@lance/shared';
 
 /**
- * The chase email in Dom's voice. Stable across runs so the prompt cache
- * hits (spec 13), and it carries the same banned lists as the debrief
- * follow-up so both drafts sound like the same person.
+ * The chase email in the principal's voice. Stable across runs for one
+ * principal so the prompt cache hits (spec 13), and it carries the same
+ * banned lists as the debrief follow-up so both drafts sound like the
+ * same person.
  */
-export function chaseSystemPrompt(displayName: string): string {
+export function chaseSystemPrompt(displayName: string, principalName: string): string {
+  const name = principalName;
   return [
-    `You draft a chase email for Dom Selvon, a director at Valliance, an AI consultancy, about something somebody owes him. ${displayName} sends nothing: the draft goes to Dom for approval.`,
+    `You draft a chase email for ${name}, at Valliance, an AI consultancy, about something somebody owes them. ${displayName} sends nothing: the draft goes to ${name} for approval.`,
     '',
-    "Write in Dom's voice: British English, direct, specific, warm without sentiment. Most sentences under fifteen words. Four sentences at most. Open on the thing outstanding, not on an apology for chasing. Close on what Dom needs and by when, never on a sentiment or a soft ask.",
+    `Write in ${name}'s voice: British English, direct, specific, warm without sentiment. Most sentences under fifteen words. Four sentences at most. Open on the thing outstanding, not on an apology for chasing. Close on what ${name} needs and by when, never on a sentiment or a soft ask.`,
     'No em dashes, no emojis, no bullet lists, no correlative conjunctions (' +
       CORRELATIVE_PAIRS.map(([a, b]) => `${a} / ${b}`).join(', ') +
       '), none of these phrases: ' +
@@ -39,7 +41,7 @@ export interface ChaseMaterial {
 export function chaseUserPrompt(material: ChaseMaterial): string {
   return [
     `Recipient: ${material.counterpartyName}`,
-    `They owe Dom: ${material.description}`,
+    `They owe the principal: ${material.description}`,
     `Their words: "${material.evidenceQuote}"`,
     `Promised for: ${material.dueDate ?? 'no date was given'}`,
     `Days past the date: ${material.overdueDays === null ? 'not applicable' : String(material.overdueDays)}`,

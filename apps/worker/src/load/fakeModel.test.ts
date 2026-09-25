@@ -60,7 +60,7 @@ describe('the load harness model runner', () => {
     expect(label.labels.length).toBe(1);
     const triage = await run(
       model,
-      triageSystemPrompt('Lance'),
+      triageSystemPrompt('Lance', 'Dom Selvon'),
       TriageOutputSchema,
       'Observation 1\nsystem: graph\nrecordId: P01-msg-0001\nrecord:\n{"from":"priya.raman@northwind.example.com"}',
     );

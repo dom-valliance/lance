@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LedgerEventRow } from '@lance/ledger';
+import { chaseSystemPrompt } from '../chase/prompt.js';
+import { followUpSystemPrompt, followUpUserPrompt } from '../debrief/prompt.js';
 import { triageSystemPrompt, triageUserPrompt } from './prompt.js';
 
 function event(overrides: Partial<LedgerEventRow>): LedgerEventRow {
@@ -25,9 +27,32 @@ function event(overrides: Partial<LedgerEventRow>): LedgerEventRow {
 
 describe('triageSystemPrompt', () => {
   it('tells the model an evidence quote must be human-readable, not a JSON fragment', () => {
-    const prompt = triageSystemPrompt('Lance');
+    const prompt = triageSystemPrompt('Lance', 'Dom Selvon');
     expect(prompt).toContain('evidenceQuote is human-readable text from the record');
     expect(prompt).toContain('never a field name, JSON or a key-value fragment');
+  });
+});
+
+describe('agent system prompts for a second principal', () => {
+  it('name the principal they act for and never Dom', () => {
+    for (const prompt of [
+      triageSystemPrompt('Lance', 'Bea Hale'),
+      followUpSystemPrompt('Lance', 'Bea Hale'),
+      chaseSystemPrompt('Lance', 'Bea Hale'),
+      followUpUserPrompt({
+        title: 'Plan',
+        date: '2026-09-25',
+        externalNames: [],
+        summary: null,
+        decisions: [],
+        domOwes: [],
+        theyOwe: [],
+        openQuestions: [],
+      }),
+    ]) {
+      expect(prompt).not.toMatch(/\bDom\b/);
+    }
+    expect(triageSystemPrompt('Lance', 'Bea Hale')).toContain('Bea Hale');
   });
 });
 

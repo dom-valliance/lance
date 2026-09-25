@@ -488,6 +488,7 @@ export async function buildPrincipalContext(
             debrief: { slack },
           },
     bulkMail: { db, config, createProposal },
-    chase: agent === null ? null : { db, config, agent, ontology, createProposal },
+    chase:
+      agent === null ? null : { db, config, principal: identity, agent, ontology, createProposal },
   };
 }

@@ -146,7 +146,7 @@ export async function runDebrief(deps: DebriefDeps, input: DebriefInput): Promis
         name: 'debrief-draft',
         version: DEBRIEF_VERSION,
         model: deps.config.models.triage,
-        system: followUpSystemPrompt(deps.config.agentDisplayName),
+        system: followUpSystemPrompt(deps.config.agentDisplayName, deps.principal.name),
         tools: [],
         outputSchema: FollowUpDraftSchema,
         maxIterations: 1,
