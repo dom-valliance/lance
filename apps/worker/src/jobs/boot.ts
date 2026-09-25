@@ -9,6 +9,7 @@ import { startBoss } from '../scheduler/boss.js';
 import type { ConnectorLookup } from './connectors.js';
 import { buildPrincipalContext, type PrincipalContext, type SharedDeps } from './context.js';
 import { registerJobHandlers } from './handlers.js';
+import { adoptUnscopedJobs } from './adoptUnscoped.js';
 import { backfillLegacyGraph } from './legacyGraph.js';
 import { cachedOrganisationBudget } from './organisationBudget.js';
 import { createReconciler, type ReconcileResult } from './reconcile.js';
@@ -50,6 +51,12 @@ export async function bootWorker(options: BootOptions): Promise<BootedWorker> {
   // Before any handler or context exists: the legacy graph is its owner's,
   // and a context built first for anyone else must find it layered.
   await backfillLegacyGraph(root, config);
+  // Before any handler fetches: jobs a Phase 4 image queued without a
+  // principal are given to their owner, or held and alerted on.
+  const adoption = await adoptUnscopedJobs({ boss, root, fallbackAdminUpn: config.dom.email });
+  if (adoption.adopted.length > 0) {
+    console.info({ adopted: adoption.adopted.length }, 'jobs queued without a principal adopted');
+  }
 
   const shared: SharedDeps = {
     config,

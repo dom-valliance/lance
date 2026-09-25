@@ -15,7 +15,7 @@ Dev runs Phase 4 (migrations 0000 to 0010). The Phase 5 build adds per-request i
 1. **Entra app roles**, before the merge: `scripts/entra/setup-app-roles.sh dev` (`entra-setup.md` section 8). It gives Dom both roles and then requires assignment. Optionally run the admin-consent command it prints, for the nightly role check.
 2. **The deployer identity**, before the merge: redeploy `infra/deployer.bicep` from the branch (`github-deploy-setup.md` step 1, then the two checks in "Moving an environment to per-principal credentials" step 1 below). It creates the custom role `Lance principal secret writer` and lets the deploy identity assign it.
 3. **Pause Lance**: `/lance pause Phase 5 deploy` in Slack, and `/lance status` says paused. This keeps the old image idle for the minute it runs against the new schema; the migrations carry the pause into the new build (the Phase 4 lesson in the notes below).
-4. **Merge.** The Deploy workflow runs the migration job on the new image (0011 to 0018 and the seed), deploys, runs the job again under the new job definition (which grants the retention role, ADR 0032), removes the four vault-wide Key Vault grants, and verifies.
+4. **Merge.** The Deploy workflow runs the migration job on the new image (0011 to 0021 and the seed), deploys, runs the job again under the new job definition (which grants the retention role, ADR 0032), removes the four vault-wide Key Vault grants, and verifies.
 5. **Sign in to the web app once.** The api binds Dom's Entra object id to his principal (`entra-setup.md` section 8, "Check it").
 6. **Check the credentials moved**: the principal vault holds Dom's two secrets and the ledger holds two `credential_migrated` events ("Moving an environment to per-principal credentials" step 3 below).
 7. **Resume**: `/lance resume`. It releases and re-queues everything held.
@@ -26,7 +26,9 @@ Dev runs Phase 4 (migrations 0000 to 0010). The Phase 5 build adds per-request i
 12. **Notion**: rename the integration from "Dom's Lance" to "Lance" in Notion; the token is unchanged.
 13. **Before the pilot**: rehearse offboarding with a test account (`offboard-principal.md`, "Rehearse in dev"), and send `docs/compliance/` to the DPO; the LIA must be signed off.
 
-After step 7, check `pgboss.job` for failed jobs (`observing.md`). A job the old image queued without a principal fails once, loudly, and is not retried; an approved proposal among them stays approved and step 7 re-queued it.
+Jobs the old image queued without a principal are adopted when the new worker starts, before it fetches anything. Each one still waiting (`created` or `retry`) on a per-principal queue (`execute`, `triage`, `bulk-mail`, `chase`, `brief-morning` and every other queue the job registry declares per principal) is sent again with the owner's id and group, and the original is completed with the id of its replacement. The owner is the only principal, or the only principal that existed when the job was queued; in dev before the pilot that is Dom. The worker log says `jobs queued without a principal adopted` with a count, and Dom's ledger holds one `jobs_adopted` event listing each queue, old id and new id. Step 3's pause still matters: it keeps the old watchers idle while the old image runs against the new schema, and the adopted jobs wait behind the pause like any other until step 7.
+
+If more than one principal existed when a job was queued, the worker does not guess. It leaves the job on its queue, logs `jobs queued without a principal were left unrun` with the job ids, and raises a P1 `unscoped_jobs_held` alert to every Lance.Admin (Dom when no admin role is recorded). Such a job fails once when a worker fetches it and is not retried. After step 7, check `pgboss.job` for failed jobs (`observing.md`) and send again, from the principal's own page, anything that still matters.
 
 ## Known values for dev
 

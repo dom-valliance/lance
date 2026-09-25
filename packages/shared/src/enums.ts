@@ -113,6 +113,9 @@ export const ALERT_KINDS = [
   // A Slack user pressed a button on a proposal that is not their
   // principal's (ADR 0023). Raised in the proposal owner's scope.
   'foreign_decision_attempt',
+  // Jobs queued without a principal (by a Phase 4 image) that the worker
+  // could not give to one principal at boot, so it left them unrun.
+  'unscoped_jobs_held',
 ] as const;
 export const AlertKindSchema = z.enum(ALERT_KINDS);
 export type AlertKind = z.infer<typeof AlertKindSchema>;
