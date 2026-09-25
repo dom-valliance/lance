@@ -13,7 +13,7 @@ Known values:
 | Workspace | `valliance-ai.slack.com`, team `T0BHX1JPYN8` (Slack `auth.test` with the bot token) |
 | App | `Lance`, app id `A0C34BSDZA9`, bot id `B0C2TTK8WT1` (`bots.info`). Its settings open directly at `https://api.slack.com/apps/A0C34BSDZA9/oauth`; if api.slack.com loops on "unknown workspace", sign in to `valliance-ai.slack.com` in the same browser first (2026-09-25) |
 | Channel | `dom-claude-agent`, `C0BU7P278N5` |
-| Dom's Slack user id | `U0BN7JN7BAN`, in `infra/params/dev.bicepparam` as `slackAllowedUserId` until section 8 retires it |
+| Dom's Slack user id | `U0BN7JN7BAN`, linked in dev through `/lance login` on 2026-09-25; `slackAllowedUserId` is empty in `infra/params/dev.bicepparam` (section 8.4) |
 | Dev web hostname, where login links land | `ca-lance-web-dev.graygrass-c682ce2c.uksouth.azurecontainerapps.io` (read 2026-09-24 with the command in 8.1) |
 | Dev Key Vault | `kv-lance-dev-j7riq4`, the static vault (`az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-dev-')].name" -o tsv`); the principal vault `kv-lance-p-dev-...` beside it holds no Slack secret |
 
