@@ -117,7 +117,9 @@ az login   # as dom@valliance.ai
 az ad app owner list --id d72a4e64-a707-4387-b7e3-fdfd3e75a64b --query "[].userPrincipalName" -o tsv
 ```
 
-The last command prints `dom@valliance.ai`. Admin consent for the role check (below) still needs the tenant administrator.
+The last command prints `dom@valliance.ai`. The same can be done in the portal: App registrations and Enterprise applications, Lance, Owners, Add. Admin consent for the role check (below) still needs the tenant administrator.
+
+**Step 3 as an owner.** Assigning a role through the Graph API needs `AppRoleAssignment.ReadWrite.All` on the Azure CLI's token, which an owner cannot grant themselves, so as Dom step 3 stops with `Authorization_RequestDenied` (2026-09-25). Assign in the portal instead: Enterprise applications, Lance (Valliance), Users and groups, Add user/group, the person and the role; once for `Lance.User` and once for `Lance.Admin`. Then run the script again: it finds both assignments, skips step 3 and finishes steps 4 and 5. `scripts/entra/grant-access.sh` makes the same call, so it works only for an administrator; an owner gives or removes a colleague's access on the same portal page.
 
 **Run it before merging the build that carries ADR 0020.** The old build admits by UPN and ignores roles, so the script changes nothing Dom sees. The new build refuses a token without a Lance role, so deployed first it would keep Dom out of the web app until the script had run (recoverable, since the script needs only `az`). The full upgrade order is at the top of `deploy.md`.
 

@@ -8,6 +8,11 @@
 # not have. `admin` assigns both Lance.User and Lance.Admin; `--remove` with
 # `user` removes both, with `admin` removes Lance.Admin only.
 #
+# It assigns through the Graph API, which needs AppRoleAssignment.ReadWrite.All
+# on the Azure CLI's token: an Entra administrator has it, an app owner does
+# not. An owner uses the portal instead: Enterprise applications, Lance
+# (Valliance), Users and groups (docs/runbooks/entra-setup.md section 8).
+#
 # What must exist first: scripts/entra/setup-app-roles.sh has run for the
 # environment, so the two roles exist and assignment is required. Removing a
 # role stops the person's next sign-in; the nightly role check pauses their
