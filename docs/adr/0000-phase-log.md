@@ -218,6 +218,25 @@ Found while merging: the executor set a proposal to held and recorded the hold a
 | Criterion | Evidence | Date |
 |---|---|---|
 
+### Phase 5 review, 2026-09-25
+
+Three independent Opus reviews of `790af1a..2eb1079` (the first, and two that covered what it had delegated and not received) found no critical issue and no path by which one principal's rows reached another's session through SQL. They found, and the branch fixes:
+
+| Finding | Fix |
+|---|---|
+| High. Policy read a move's folder name and the executor moved to its folder id, so a triage proposal naming AI-Filed with the id `deleteditems` could be auto-approved and soft-delete a message | A move names its destination one way, at proposal and execution; a move into Deleted Items or the recoverable-items folders is refused whatever the rules say (`5f67569`) |
+| High. Graph consent was tied only to its state, so a forwarded consent link stored another person's token under the sender's principal | The state is bound to an HttpOnly cookie on the api's hostname and kept in Postgres; the callback verifies the id token's `oid` and `tid` against the principal; ledger events precede the secret write (`0b90a71` to `36b00e0`) |
+| High. Every principal's triage, commitments, debrief, detectors and briefs acted as Dom, rewriting Dom's shared Person with another principal's Notion id | Each context builds its own principal's identity and passes it everywhere `config.dom` stood for the principal; the prompts name the principal (`b0d8268`, `60a546e`, ADR 0035) |
+| High. Retention could not act after the first deploy, because the migration job ran its new command only on the next deploy | The Deploy workflow runs the job again after the apps move (`6c35c82`) |
+| Found by the lead: the tenant has no Entra ID P1, so the setup script's group assignment would fail | Roles are assigned to people directly; `grant-access.sh`; ADR 0020 amendment (`a684ce9`) |
+| Medium. A `/lance login` link bound whoever opened it | A link binds only when the Slack profile email equals the signing-in UPN, never replaces an existing link silently, and `/lance unlink` exists (`231bca4`) |
+| Medium. The legacy backfill ran in every principal's context; single-principal Jamie meetings were shared; a Jamie observation could rename a shared meeting; meeting merges were not atomic | Backfill once, for the legacy owner, before any context; single-principal meetings private; the calendar wins; merges in one locked transaction (`c338c07`, `32a80a5`) |
+| Medium. Organisation-wide telemetry and the whole shared Notion database were recorded in every principal's ledger | Spans carry `lance.principal` and the query filters on it; Notion reads filter on the principal as assignee (`2fdf999`, `f3d78df`) |
+| Medium. Jobs the Phase 4 image queued without a principal would fail on deploy; upgrade steps were spread over three runbooks; consent state was in memory under two api replicas; retention after offboarding kept late rows | Adoption at boot; one ordered checklist in `deploy.md`; consent state in Postgres; offboarded principals retained at zero days (`b36b96f`, `a9b4b93`, `3f1cab8`) |
+| Low. The raw id token reached browser JavaScript; the api trusted the client's notice hash; the last admin or Dom could be offboarded without confirmation; organisation rule changes had no ledger writer; the evidence export carried source record hashes; job groups and budget alert recipients | Each fixed (`f3cc484`, `c671957`, `3f1cab8`, `9dfe28e`, `9d85ed2`, `d357ece`), with the Slack re-link, role-check grace and onboarding-principal fixes (`d607701` to `c62d4f3`) |
+
+Every check at `32cffac`: lint, typecheck, format, the full suite uncached, build, the migration guard, the deployer-role check, the Bicep build, and the three images with their smoke tests.
+
 ## Pilot
 
 | Criterion | Evidence | Date |
