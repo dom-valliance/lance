@@ -9,6 +9,7 @@ import { startBoss } from '../scheduler/boss.js';
 import type { ConnectorLookup } from './connectors.js';
 import { buildPrincipalContext, type PrincipalContext, type SharedDeps } from './context.js';
 import { registerJobHandlers } from './handlers.js';
+import { backfillLegacyGraph } from './legacyGraph.js';
 import { cachedOrganisationBudget } from './organisationBudget.js';
 import { createReconciler, type ReconcileResult } from './reconcile.js';
 import { PrincipalContexts } from './scoped.js';
@@ -48,6 +49,9 @@ export interface BootedWorker {
 export async function bootWorker(options: BootOptions): Promise<BootedWorker> {
   const { boss, config, root } = options;
   await startBoss(boss);
+  // Before any handler or context exists: the legacy graph is its owner's,
+  // and a context built first for anyone else must find it layered.
+  await backfillLegacyGraph(root, config);
 
   const shared: SharedDeps = {
     config,
@@ -96,8 +100,8 @@ export async function bootWorker(options: BootOptions): Promise<BootedWorker> {
   });
   const initial = await reconcile();
   // Every active principal's context is built now rather than at their
-  // first job, so the ontology backfill and the connectors' own start-up
-  // checks run at boot, where a failure stops the worker and says why.
+  // first job, so the connectors' own start-up checks run at boot, where a
+  // failure stops the worker and says why.
   const active = await root
     .select({ id: principals.id })
     .from(principals)

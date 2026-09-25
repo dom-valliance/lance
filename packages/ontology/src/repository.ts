@@ -191,6 +191,15 @@ export interface RebuildResult {
 export interface BackfillOptions {
   /** The iCalUId of the scope's own calendar event with this Graph event id, or null. */
   icalUidOf(graphEventId: string): Promise<string | null>;
+  /**
+   * The principal whose data the pre-Phase-4 graph is: the one every
+   * legacy mutation was recorded under (the principal whose UPN is
+   * `config.dom.email`). Every unlayered node, every name-only shared
+   * Person and every record-bearing shared ref is taken to be theirs, so
+   * a backfill in any other principal's scope claims nothing and records
+   * nothing.
+   */
+  legacyOwnerId: string;
 }
 
 export interface BackfillResult {
@@ -1394,9 +1403,13 @@ export class OntologyRepository {
    * each step looks before it writes, so a second run records nothing.
    *
    * Every node and edge without a layer is taken to be this principal's,
-   * which holds while the graph has known only one principal (Phase 4).
-   * It then applies ADR 0033 through `backfillProvenance`, and merges a
-   * Jamie-keyed Meeting into the one that already holds its iCalUId.
+   * which holds only for the legacy owner, the principal every pre-Phase-4
+   * mutation was recorded under. In any other scope the backfill returns
+   * at once and records nothing, so a context built before the owner's
+   * cannot claim the owner's evidence (the caller runs it for the owner
+   * once, before other contexts build). It then applies ADR 0033 through
+   * `backfillProvenance`, and merges a Jamie-keyed Meeting into the one
+   * that already holds its iCalUId.
    */
   async backfillLayers(
     context: MutationContext,
@@ -1415,6 +1428,7 @@ export class OntologyRepository {
       refused: 0,
       mutations: 0,
     };
+    if (options.legacyOwnerId !== this.scope.principalId) return result;
     const before = await this.mutationCount(context);
     const layerWhere = async (
       match: string,

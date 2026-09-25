@@ -1,5 +1,13 @@
-import { SEED_PRINCIPAL_ID, ledgerEvents, runMigrations, type Db } from '@lance/db';
-import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
+import {
+  SEED_PRINCIPAL_ID,
+  ledgerEvents,
+  principalState,
+  principals,
+  runMigrations,
+  scopedDb,
+  type Db,
+} from '@lance/db';
+import { openFixtureDb, openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { LedgerWriter } from '@lance/ledger';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -19,6 +27,9 @@ import { graphSnapshot } from './testing.js';
 let container: StartedPostgreSqlContainer;
 let db: Db;
 let repo: OntologyRepository;
+/** A second principal whose context builds over the legacy graph before the owner's does. */
+let bea: OntologyRepository;
+const BEA = '01K5S9V6QW3SWCCPVB0N0E301B';
 const context = { correlationId: newUlid() };
 const TS = '2026-09-20T09:00:00.000Z';
 const refs = [{ system: 'jamie', id: 'jm-1', observedAt: TS }];
@@ -49,6 +60,16 @@ beforeAll(async () => {
     db,
     { principalId: SEED_PRINCIPAL_ID },
     { now: () => '2026-09-23T09:00:00.000Z' },
+  );
+  const fixtures = openFixtureDb(connectionString);
+  await fixtures.insert(principals).values({ id: BEA, upn: 'bea@valliance.ai' });
+  await fixtures.$client.end();
+  const dbBea = scopedDb(db, { principalId: BEA });
+  await dbBea.insert(principalState).values({});
+  bea = new OntologyRepository(
+    dbBea,
+    { principalId: BEA },
+    { now: () => '2026-09-23T09:00:00.000Z', principalName: 'Bea Example' },
   );
   const person = (id: string, name: string, email: string) =>
     legacy(
@@ -118,8 +139,25 @@ describe('OntologyRepository.backfillLayers', () => {
     expect(await repo.counts()).toEqual({ nodes: 0, edges: 0 });
   });
 
+  it("claims nothing and records nothing when another principal's context runs it first", async () => {
+    const before = await mutations();
+    const claimed = await bea.backfillLayers(
+      { correlationId: newUlid() },
+      { icalUidOf, legacyOwnerId: SEED_PRINCIPAL_ID },
+    );
+    expect(claimed).toMatchObject({ nodes: 0, edges: 0, privatePersons: 0, mutations: 0 });
+    expect(await mutations()).toBe(before);
+    const { nodes, edges } = await graphSnapshot(db);
+    expect(nodes.some((node) => node.principalId === BEA)).toBe(false);
+    expect(edges.some((edge) => edge.principalId === BEA)).toBe(false);
+    expect(await bea.counts()).toEqual({ nodes: 0, edges: 0 });
+  });
+
   it('layers every node and edge, moves meeting context to the edge and keys meetings on iCalUId', async () => {
-    const result = await repo.backfillLayers(context, { icalUidOf });
+    const result = await repo.backfillLayers(context, {
+      icalUidOf,
+      legacyOwnerId: SEED_PRINCIPAL_ID,
+    });
     expect(result).toMatchObject({
       nodes: 11,
       edges: 7,
@@ -207,7 +245,10 @@ describe('OntologyRepository.backfillLayers', () => {
 
   it('records nothing on a second run', async () => {
     const before = await mutations();
-    const again = await repo.backfillLayers(context, { icalUidOf });
+    const again = await repo.backfillLayers(context, {
+      icalUidOf,
+      legacyOwnerId: SEED_PRINCIPAL_ID,
+    });
     expect(again).toEqual({
       nodes: 0,
       edges: 0,
@@ -222,6 +263,18 @@ describe('OntologyRepository.backfillLayers', () => {
       mutations: 0,
     });
     expect(await mutations()).toBe(before);
+  });
+
+  it("leaves the owner's private evidence invisible to the other principal after the owner's backfill", async () => {
+    const { nodes } = await graphSnapshot(db);
+    const privateToOwner = nodes.filter(
+      (node) => node.layer === 'private' && node.principalId === SEED_PRINCIPAL_ID,
+    );
+    expect(privateToOwner.map((node) => node.id)).toEqual(
+      expect.arrayContaining(['P-NAME', 'T-J', 'C-1']),
+    );
+    for (const node of privateToOwner) expect(await bea.getNode(node.id)).toBeNull();
+    expect(nodes.some((node) => node.principalId === BEA)).toBe(false);
   });
 
   it('rebuilds the backfilled graph exactly from the legacy writes and the backfill', async () => {

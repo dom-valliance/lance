@@ -15,7 +15,6 @@ import { OntologyRepository } from '@lance/ontology';
 import { LedgerReader, LedgerWriter, SystemControl, toProposal } from '@lance/ledger';
 import {
   hashRecord,
-  newUlid,
   nowIso,
   principalDisplayName,
   principalIdentity,
@@ -45,7 +44,6 @@ import {
   createGraphMailWatcher,
   createHaikuLabeller,
 } from '../watchers/graph/index.js';
-import { icalUidOfGraphEvent } from '../watchers/graph/icalUid.js';
 import { createJamieWatcher } from '../watchers/jamie/index.js';
 import {
   createNotionWatcher,
@@ -289,7 +287,7 @@ function briefReads(db: Db, ontology: OntologyRepository): ReadToolDeps {
   };
 }
 
-/** Builds one principal's context. The ontology layer backfill runs once here, recorded and idempotent. */
+/** Builds one principal's context. The legacy graph backfill runs once at boot, before any context (`backfillLegacyGraph`). */
 export async function buildPrincipalContext(
   shared: SharedDeps,
   principal: Principal,
@@ -302,12 +300,6 @@ export async function buildPrincipalContext(
     db,
     { principalId: principal.id },
     { principalName: principalDisplayName(principal.upn, config) },
-  );
-  // Graphs written before ADR 0017 carry no layers; the backfill records
-  // itself, so a context built after the first records nothing.
-  await ontology.backfillLayers(
-    { correlationId: newUlid() },
-    { icalUidOf: (graphEventId) => icalUidOfGraphEvent(db, graphEventId) },
   );
 
   const connectors = await shared.connectorsFor(principal, db);
