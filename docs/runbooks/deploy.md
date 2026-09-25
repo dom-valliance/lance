@@ -8,6 +8,26 @@ The order matters. The environment stands up on a public bootstrap image first, 
 
 An environment deployed before ADR 0022 (dev) is upgraded once by the section "Moving an environment to per-principal credentials" at the end, not by repeating these steps.
 
+## Upgrading dev from Phase 4 to Phase 5
+
+Dev runs Phase 4 (migrations 0000 to 0010). The Phase 5 build adds per-request identity from Entra app roles, per-principal credentials in a second vault, Slack linking and the job registry. Do these in this order; each step names where its detail is. Steps 1 and 2 must come before the merge, or the deploy stops or Dom is locked out of the web app.
+
+1. **Entra app roles**, before the merge: `scripts/entra/setup-app-roles.sh dev` (`entra-setup.md` section 8). It gives Dom both roles and then requires assignment. Optionally run the admin-consent command it prints, for the nightly role check.
+2. **The deployer identity**, before the merge: redeploy `infra/deployer.bicep` from the branch (`github-deploy-setup.md` step 1, then the two checks in "Moving an environment to per-principal credentials" step 1 below). It creates the custom role `Lance principal secret writer` and lets the deploy identity assign it.
+3. **Pause Lance**: `/lance pause Phase 5 deploy` in Slack, and `/lance status` says paused. This keeps the old image idle for the minute it runs against the new schema; the migrations carry the pause into the new build (the Phase 4 lesson in the notes below).
+4. **Merge.** The Deploy workflow runs the migration job on the new image (0011 to 0018 and the seed), deploys, runs the job again under the new job definition (which grants the retention role, ADR 0032), removes the four vault-wide Key Vault grants, and verifies.
+5. **Sign in to the web app once.** The api binds Dom's Entra object id to his principal (`entra-setup.md` section 8, "Check it").
+6. **Check the credentials moved**: the principal vault holds Dom's two secrets and the ledger holds two `credential_migrated` events ("Moving an environment to per-principal credentials" step 3 below).
+7. **Resume**: `/lance resume`. It releases and re-queues everything held.
+8. **Slack scopes**: add `groups:write` and `users:read.email` to the Slack app and reinstall it (`slack-app-setup.md` section 8). If the bot token changed, store it in the static vault and restart the apps.
+9. **Link Slack**: `/lance login` in `dom-claude-agent`, follow the link, confirm (`slack-app-setup.md` section 8). Cards keep arriving in `C0BU7P278N5`.
+10. **Retire the Slack fallback**: set `slackAllowedUserId = ''` in `infra/params/dev.bicepparam` and let the next deploy carry it.
+11. **Evidence signing key**: set `evidence-signing-key` with the commands in step 4 below, then restart the api revision.
+12. **Notion**: rename the integration from "Dom's Lance" to "Lance" in Notion; the token is unchanged.
+13. **Before the pilot**: rehearse offboarding with a test account (`offboard-principal.md`, "Rehearse in dev"), and send `docs/compliance/` to the DPO; the LIA must be signed off.
+
+After step 7, check `pgboss.job` for failed jobs (`observing.md`). A job the old image queued without a principal fails once, loudly, and is not retried; an approved proposal among them stays approved and step 7 re-queued it.
+
 ## Known values for dev
 
 Read with the commands beside them; none is a secret.
@@ -362,7 +382,7 @@ scripts/verify-deploy.sh dev "$TAG"
 
 It cannot see failed pg-boss jobs or failed agent runs; after any deploy that changes the worker, read those as `observing.md` describes. Then, from the user's side:
 
-1. Open `https://<web hostname>` and sign in as Dom. Any other UPN is refused.
+1. Open `https://<web hostname>` and sign in as Dom. Anyone without a Lance app role is refused by Microsoft before reaching Lance (ADR 0020).
 2. Run `/lance status` in `dom-claude-agent`. The api answers with an ephemeral message and the ledger records a `state_changed` event.
 3. In the web app, open Settings and press Connect Microsoft 365, then consent as Dom. The api writes `graph-refresh-token--<Dom's principal id>` in the principal vault, and the worker builds Dom's Graph connector from it at its next context build. Check the secret exists (names only):
 

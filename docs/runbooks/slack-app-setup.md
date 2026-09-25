@@ -13,7 +13,7 @@ Known values:
 | Channel | `dom-claude-agent`, `C0BU7P278N5` |
 | Dom's Slack user id | `U0BN7JN7BAN`, in `infra/params/dev.bicepparam` as `slackAllowedUserId` until section 8 retires it |
 | Dev web hostname, where login links land | `ca-lance-web-dev.graygrass-c682ce2c.uksouth.azurecontainerapps.io` (read 2026-09-24 with the command in 8.1) |
-| Dev Key Vault | `kv-lance-dev-j7riq4` (`az keyvault list -g rg-lance-dev --query "[].name" -o tsv`) |
+| Dev Key Vault | `kv-lance-dev-j7riq4`, the static vault (`az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-dev-')].name" -o tsv`); the principal vault `kv-lance-p-dev-...` beside it holds no Slack secret |
 
 ## 1. Get the api hostname
 
@@ -89,7 +89,8 @@ The bot needs `groups:write` to create a private channel and invite the principa
 3. Adding a scope normally keeps the same bot token. If the Bot User OAuth Token shown after reinstalling differs from the one in Key Vault, store it and restart the api and the worker:
 
 ```
-KV=$(az keyvault list -g rg-lance-dev --query "[0].name" -o tsv)
+KV=$(az keyvault list -g rg-lance-dev --query "[?starts_with(name, 'kv-lance-dev-')].name | [0]" -o tsv)
+echo "$KV"
 echo "$KV"
 read -s BOT && az keyvault secret set --vault-name "$KV" --name slack-bot-token --value "$BOT"
 ```
