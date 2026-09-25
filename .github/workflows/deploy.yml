@@ -160,5 +160,13 @@ jobs:
         id: deploy
         run: scripts/deploy.sh "$ENVIRONMENT" "${{ needs.resolve.outputs.tag }}"
 
+      # The deployment has just redefined the job itself (its command and
+      # settings, not only its image), so run it once more under the new
+      # definition. With nothing new it applies no migration and finishes in
+      # under a minute; after a change to the job's command, such as the
+      # retention grant, this is the run that does the new work.
+      - name: Run the migration job under the deployed definition
+        run: scripts/run-migration-job.sh "$ENVIRONMENT"
+
       - name: Verify the deployment
         run: scripts/verify-deploy.sh "$ENVIRONMENT" "${{ needs.resolve.outputs.tag }}"
