@@ -236,14 +236,25 @@ export function watchersFromConnectors(context: WatcherBuildContext): Watcher[] 
     );
   }
   if (connectors.notion !== null) {
-    watchers.push(
-      createNotionWatcher({
-        reads: notionWatcherReads(connectors.notion.connector),
-        tasksDataSourceId: config.notion.tasksDataSourceId,
-        meetingsDataSourceId: config.notion.meetingsDataSourceId,
-        knownOpenTaskIds: () => openNotionTaskIds(db),
-      }),
-    );
+    const assigneeId = connectors.notion.principalUserId ?? principal.notionUserId;
+    if (assigneeId === null) {
+      // Reads filter on the principal's Notion user (ADR 0022); without it
+      // the watcher would read everyone's tasks, so it waits instead.
+      console.warn(
+        { principalId: principal.id, upn: principal.upn },
+        "notion watcher skipped: the principal's Notion user id is unresolved. Set principals.notion_user_id, or give the Notion user the principal's email, then restart the worker",
+      );
+    } else {
+      watchers.push(
+        createNotionWatcher({
+          reads: notionWatcherReads(connectors.notion.connector),
+          tasksDataSourceId: config.notion.tasksDataSourceId,
+          meetingsDataSourceId: config.notion.meetingsDataSourceId,
+          assigneeId,
+          knownOpenTaskIds: () => openNotionTaskIds(db),
+        }),
+      );
+    }
   }
   return watchers;
 }

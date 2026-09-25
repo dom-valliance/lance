@@ -27,7 +27,17 @@ export type NotionTaskRecord = Omit<TaskRecord, 'lastEditedTime'> & { kind: 'tas
  * returns. Live records carry no `removed` field at all, so recording the
  * first removal does not change the hash of every live task.
  */
-export type NotionTaskRemovedRecord = { kind: 'task'; id: string; removed: true };
+export type NotionTaskRemovedRecord = {
+  kind: 'task';
+  id: string;
+  removed: true;
+  /**
+   * Set when the task still exists in Notion but is now someone else's: it
+   * has left this principal's view and nothing was deleted. Absent for a
+   * page that has left the database, so earlier removals keep their hash.
+   */
+  reassigned?: true;
+};
 
 function cap(text: string, limit: number): string {
   return text.length > limit ? text.slice(0, limit) : text;
@@ -55,15 +65,21 @@ export function taskOf(record: SourceRecord): TaskRecord {
 
 /** The removal of one All Tasks row as a ledger observation. */
 export function taskRemovedObservation(record: SourceRecord): Observation {
-  const canonical: NotionTaskRemovedRecord = { kind: 'task', id: record.id, removed: true };
+  const reassigned =
+    typeof record.raw === 'object' &&
+    record.raw !== null &&
+    (record.raw as { reassigned?: unknown }).reassigned === true;
+  const canonical: NotionTaskRemovedRecord = reassigned
+    ? { kind: 'task', id: record.id, removed: true, reassigned: true }
+    : { kind: 'task', id: record.id, removed: true };
   return {
     sourceSystem: 'notion',
     recordId: record.id,
     observedAt: record.observedAt,
     record: canonical,
     correlationKey: record.id,
-    summary: 'Task removed from Notion',
-    labels: ['Notion', 'Task', 'Removed'],
+    summary: reassigned ? 'Task reassigned to someone else in Notion' : 'Task removed from Notion',
+    labels: ['Notion', 'Task', reassigned ? 'Reassigned' : 'Removed'],
   };
 }
 
