@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { auth } from '@/auth';
+import { serverIdToken } from '@/auth/id-token';
 import { ledgerFilterFrom, type SearchParams } from '@/lib/filters';
 import { ledgerCsv, ledgerCsvFilename } from '@/lib/ledger-csv';
 import { apiClient } from '@/lib/trpc';
@@ -27,7 +28,7 @@ const paramsOf = (search: URLSearchParams): SearchParams => {
 
 export async function GET(request: NextRequest): Promise<Response> {
   const session = await auth();
-  if (session === null || session.idToken === undefined) {
+  if (session === null || session.error !== undefined || (await serverIdToken()) === undefined) {
     return Response.json(
       { error: 'No session. Sign in again to export the ledger.' },
       { status: 401 },

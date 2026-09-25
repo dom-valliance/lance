@@ -7,18 +7,18 @@ import {
   type PrincipalStatus,
 } from './auth/principal';
 import { jwtExpiresAt, needsRefresh, refreshEntraTokens } from './auth/refresh';
+import { admitsSignIn, hasLanceAccess, identityFromIdToken, type LanceRole } from './auth/roles';
 import {
-  admitsSignIn,
-  hasLanceAccess,
-  identityFromIdToken,
-  lanceRolesFrom,
-  type LanceRole,
-} from './auth/roles';
+  ID_TOKEN_CLAIM as ID_TOKEN_JWT_CLAIM,
+  REFRESH_ERROR,
+  sessionFromToken,
+} from './auth/session';
 import { apiBaseUrl } from './lib/api';
 
 /**
- * The Entra id token is kept in the Auth.js JWT and exposed on the session
- * for server-side code only (see lib/trpc.ts). `apps/api` verifies the same
+ * The Entra id token is kept in the encrypted Auth.js JWT and never on the
+ * session, which browser JavaScript can fetch; server-side code reads it
+ * from the JWT (auth/id-token.ts, lib/trpc.ts). `apps/api` verifies the same
  * token, so the web app forwards it rather than minting a second credential.
  * Entra issues it for about an hour; the refresh token beside it renews it
  * silently (see auth/refresh.ts), and when renewal fails the session
@@ -37,7 +37,6 @@ import { apiBaseUrl } from './lib/api';
  */
 declare module 'next-auth' {
   interface Session {
-    idToken?: string;
     error?: typeof REFRESH_ERROR;
     roles?: LanceRole[];
     oid?: string;
@@ -47,7 +46,7 @@ declare module 'next-auth' {
 }
 
 /** Where the Entra tokens are kept in the Auth.js JWT. */
-const ID_TOKEN_CLAIM = 'idToken';
+const ID_TOKEN_CLAIM = ID_TOKEN_JWT_CLAIM;
 const REFRESH_TOKEN_CLAIM = 'refreshToken';
 const EXPIRES_AT_CLAIM = 'expiresAt';
 const ERROR_CLAIM = 'error';
@@ -55,7 +54,6 @@ const ROLES_CLAIM = 'roles';
 const OID_CLAIM = 'oid';
 const STATUS_CLAIM = 'principalStatus';
 const STATUS_CHECKED_AT_CLAIM = 'principalStatusCheckedAt';
-const REFRESH_ERROR = 'RefreshTokenError';
 
 /** How long an unknown principal status stands before the api is asked again. */
 const STATUS_RETRY_MS = 60_000;
@@ -192,24 +190,11 @@ export const {
         return { ...token, [ERROR_CLAIM]: REFRESH_ERROR };
       }
     },
-    // Server components read `session.idToken`. Auth.js does not send the
-    // session object to the browser wholesale; the client-side `useSession`
-    // payload is built from the `session` callback too, so nothing here may
-    // be added to it that a page does not already trust the server with.
+    // The session is what `/api/auth/session` hands to browser JavaScript,
+    // so it never carries the id token (auth/session.ts); server-side code
+    // reads the token from the JWT instead (auth/id-token.ts).
     session({ session, token }) {
-      if (token[ERROR_CLAIM] === REFRESH_ERROR) {
-        session.error = REFRESH_ERROR;
-        return session;
-      }
-      const idToken = token[ID_TOKEN_CLAIM];
-      if (typeof idToken === 'string') {
-        session.idToken = idToken;
-      }
-      session.roles = lanceRolesFrom(token[ROLES_CLAIM]);
-      const oid = claimString(token, OID_CLAIM);
-      if (oid !== null) session.oid = oid;
-      session.principalStatus = claimStatus(token);
-      return session;
+      return sessionFromToken(session, token);
     },
     // `profile` holds the id token's claims. Neither Lance role means no
     // session: Auth.js sends the browser to /sign-in?error=AccessDenied.

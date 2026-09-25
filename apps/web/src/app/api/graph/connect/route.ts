@@ -1,4 +1,5 @@
 import { auth } from '@/auth';
+import { serverIdToken } from '@/auth/id-token';
 import { apiBaseUrl } from '@/lib/api';
 
 /**
@@ -52,7 +53,8 @@ export function createConnectProxy(deps: ConnectProxyDeps): () => Promise<Respon
 
 async function sessionIdToken(): Promise<string | undefined> {
   const session = await auth();
-  return session?.idToken;
+  if (session === null || session.error !== undefined) return undefined;
+  return serverIdToken();
 }
 
 export const GET = createConnectProxy({

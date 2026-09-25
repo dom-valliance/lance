@@ -1,4 +1,5 @@
 import { auth } from '@/auth';
+import { serverIdToken } from '@/auth/id-token';
 import { Wordmark } from '@/components/shell/wordmark';
 import { SubmitButton } from '@/components/submit-button';
 import type { SearchParams } from '@/lib/filters';
@@ -54,7 +55,7 @@ export default async function LinkSlackPage({
   }
 
   const session = await auth();
-  if (session === null || session.error !== undefined || session.idToken === undefined) {
+  if (session === null || session.error !== undefined || (await serverIdToken()) === undefined) {
     return (
       <div className={CARD}>
         <Wordmark name={name} className="h-6" />

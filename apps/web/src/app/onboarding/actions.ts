@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { auth, updateSession } from '@/auth';
+import { serverIdToken } from '@/auth/id-token';
 import { apiBaseUrl } from '@/lib/api';
 import { submitJamieKey } from '@/lib/jamie-key';
 import { dataProcessingNotice } from '@/lib/notice';
@@ -49,13 +50,15 @@ export async function saveJamieKeyAction(
 ): Promise<string | null> {
   const value = form.get('apiKey');
   const session = await auth();
-  if (session?.idToken === undefined || session.error !== undefined) {
+  const idToken =
+    session === null || session.error !== undefined ? undefined : await serverIdToken();
+  if (idToken === undefined) {
     return 'Your sign-in has lapsed. Sign in again, then add the key. Nothing was stored.';
   }
   try {
     return await submitJamieKey({
       apiKey: typeof value === 'string' ? value : '',
-      idToken: session.idToken,
+      idToken,
       apiBaseUrl: apiBaseUrl(),
     });
   } finally {
