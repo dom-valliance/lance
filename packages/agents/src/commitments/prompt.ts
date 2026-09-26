@@ -31,6 +31,7 @@ export function commitmentSystemPrompt(displayName: string): string {
 }
 
 export function commitmentUserPrompt(source: CommitmentSource): string {
+  const alreadyRecorded = source.alreadyRecorded ?? [];
   const participants = source.participants
     .map((person) => (person.email === null ? person.name : `${person.name} <${person.email}>`))
     .join('; ');
@@ -44,6 +45,13 @@ export function commitmentUserPrompt(source: CommitmentSource): string {
     `Principal: ${source.principal.name} <${source.principal.email}>`,
     `Participants: ${participants === '' ? 'none listed' : participants}`,
     `Source date: ${source.occurredAt ?? 'unknown'}`,
+    ...(alreadyRecorded.length === 0
+      ? []
+      : [
+          '',
+          'Already recorded from an earlier version of this source. Do not list these again, in these words or any others; list only commitments none of them covers:',
+          ...alreadyRecorded.map((description) => `- ${description}`),
+        ]),
     '',
     'Text:',
     text,
