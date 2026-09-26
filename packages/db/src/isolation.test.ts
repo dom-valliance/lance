@@ -13,7 +13,9 @@ import { startPostgresContainer } from './testing.js';
  * because a superuser bypasses row-level security even when it is forced.
  *
  * Fixture rows are built from the catalogue, so a principal-bearing table
- * added later is covered without editing this file.
+ * added later is covered without editing this file. A foreign key to
+ * another scoped table takes a row the same scope already holds, and
+ * parent tables are filled before the tables that point at them.
  */
 
 const OTHER_PRINCIPAL_ID = '01K5S9V6QW3SWCCPVB0N0E3Q7H';
@@ -55,6 +57,8 @@ let appDb: Db;
 let principalTables: string[];
 let columns: ColumnRow[];
 let enumFirstValue: Map<string, string>;
+/** `table.column` to the scoped table and column it references; principals are left out. */
+let foreignKeys: Map<string, { table: string; column: string }>;
 let counter = 0;
 
 const ULID_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -102,7 +106,19 @@ const insertFixture = async (db: Db, table: string, principalId?: string): Promi
       column.column_default === null,
   );
   const names = required.map((column) => `"${column.column_name}"`);
-  const values: unknown[] = required.map(fixtureValue);
+  const values: unknown[] = [];
+  for (const column of required) {
+    const target = foreignKeys.get(`${table}.${column.column_name}`);
+    if (target === undefined) {
+      values.push(fixtureValue(column));
+      continue;
+    }
+    const parent = await db.$client.query(
+      `SELECT "${target.column}" AS value FROM "${target.table}" LIMIT 1`,
+    );
+    const row = parent.rows[0] as { value: unknown } | undefined;
+    values.push(row === undefined ? fixtureValue(column) : row.value);
+  }
   if (principalId !== undefined) {
     names.push('"principal_id"');
     values.push(principalId);
@@ -153,9 +169,48 @@ beforeAll(async () => {
      WHERE table_schema = 'public' AND column_name = 'principal_id'
      ORDER BY table_name`,
   );
-  principalTables = tables.rows
+  const references = await admin.query<{
+    table_name: string;
+    column_name: string;
+    target_table: string;
+    target_column: string;
+  }>(
+    `SELECT kcu.table_name, kcu.column_name,
+            ccu.table_name AS target_table, ccu.column_name AS target_column
+     FROM information_schema.table_constraints tc
+     JOIN information_schema.key_column_usage kcu
+       ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
+     JOIN information_schema.constraint_column_usage ccu
+       ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+     WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+       AND ccu.table_name <> 'principals'`,
+  );
+  foreignKeys = new Map(
+    references.rows.map((row) => [
+      `${row.table_name}.${row.column_name}`,
+      { table: row.target_table, column: row.target_column },
+    ]),
+  );
+
+  // Parents first: a table waits until every scoped table it references is placed.
+  const scoped = tables.rows
     .map((row) => row.table_name)
     .filter((name) => !UNSCOPED_TABLES.includes(name));
+  const parentsOf = (table: string): string[] =>
+    references.rows
+      .filter((row) => row.table_name === table && row.target_table !== table)
+      .map((row) => row.target_table)
+      .filter((target) => scoped.includes(target));
+  principalTables = [];
+  while (principalTables.length < scoped.length) {
+    const ready = scoped.filter(
+      (table) =>
+        !principalTables.includes(table) &&
+        parentsOf(table).every((parent) => principalTables.includes(parent)),
+    );
+    if (ready.length === 0) throw new Error('The scoped tables reference each other in a cycle.');
+    principalTables.push(...ready);
+  }
 
   const columnRows = await admin.query<ColumnRow>(
     `SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default
@@ -210,7 +265,7 @@ describe('row-level security across principals', () => {
       (row) => !row.relrowsecurity || !row.relforcerowsecurity || row.policies === '0',
     );
     expect(unprotected.map((row) => row.relname)).toEqual(UNSCOPED_TABLES);
-    expect(principalTables).toEqual(
+    expect([...principalTables].sort()).toEqual(
       result.rows.map((row) => row.relname).filter((name) => !UNSCOPED_TABLES.includes(name)),
     );
   });

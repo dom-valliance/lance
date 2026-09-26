@@ -7,6 +7,7 @@ export * from './policy-decisions.js';
 export * from './cursors.js';
 export * from './alerts.js';
 export * from './commitments.js';
+export * from './commitment-notes.js';
 export * from './briefs.js';
 export * from './agent-runs.js';
 export * from './system-state.js';
