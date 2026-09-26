@@ -30,12 +30,22 @@ async function signOutAndRetry(): Promise<void> {
   await signOut({ redirectTo: '/sign-in' });
 }
 
-/** The robot-to-star morph above whichever card the visit calls for. */
+/**
+ * The robot-to-star morph above whichever card the visit calls for, and
+ * the agent's name in large faint type beneath it. The name is decoration;
+ * the card's wordmark already names the agent to a screen reader.
+ */
 function WithMorph({ children }: { children: ReactNode }) {
   return (
     <div className="flex w-full flex-col items-center gap-6">
       <AsciiMorph className="w-full max-w-[336px]" />
       {children}
+      <p
+        aria-hidden
+        className="-mr-[0.2em] select-none text-[clamp(4rem,16vw,9rem)] leading-none font-bold tracking-[0.2em] text-foreground/20"
+      >
+        {agentDisplayName().toUpperCase()}
+      </p>
     </div>
   );
 }
