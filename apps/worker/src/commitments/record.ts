@@ -2,7 +2,13 @@ import type { CommitmentCandidate } from '@lance/agents';
 import { commitments, type Db } from '@lance/db';
 import { LedgerWriter } from '@lance/ledger';
 import { OntologyRepository, normaliseEmail, type SourceRef } from '@lance/ontology';
-import { newUlid, nowIso, type PrincipalIdentity, type ProvenanceRef } from '@lance/shared';
+import {
+  firstChaseAt,
+  newUlid,
+  nowIso,
+  type PrincipalIdentity,
+  type ProvenanceRef,
+} from '@lance/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 /**
@@ -14,9 +20,6 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
  */
 
 export const COMMITMENTS_ACTOR = 'system:commitments';
-
-/** How long after the due date an inbound commitment is first chased. */
-const CHASE_GRACE_DAYS = 2;
 
 export interface KnownPerson {
   name: string;
@@ -149,9 +152,7 @@ export async function recordCommitments(
     const id = newUlid();
     const due = dueDate(candidate);
     const nextChaseAt =
-      candidate.direction === 'inbound' && due !== null
-        ? new Date(due.getTime() + CHASE_GRACE_DAYS * 24 * 3600 * 1000)
-        : null;
+      candidate.direction === 'inbound' && due !== null ? firstChaseAt(due) : null;
     // The owner is who owes: the principal for outbound, the counterparty for inbound.
     const ownerPersonId = candidate.direction === 'outbound' ? principal.id : counterparty.id;
     await deps.db.insert(commitments).values({
