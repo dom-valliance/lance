@@ -36,6 +36,12 @@ export const CommitmentSourceSchema = z.object({
   /** ISO instant the source was written or held, for resolving relative dates. */
   occurredAt: z.string().nullable().default(null),
   text: z.string().min(1),
+  /**
+   * Commitments already recorded from an earlier reading of this source,
+   * by description. The source is read again only when it has changed, and
+   * only what these do not already cover is wanted.
+   */
+  alreadyRecorded: z.array(z.string().min(1)).max(100).default([]),
 });
 
-export type CommitmentSource = z.infer<typeof CommitmentSourceSchema>;
+export type CommitmentSource = z.input<typeof CommitmentSourceSchema>;

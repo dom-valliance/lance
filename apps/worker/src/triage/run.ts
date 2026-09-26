@@ -7,10 +7,10 @@ import {
   type CommitmentExtractor,
   type ProposalDraft,
 } from '@lance/agents';
-import { observations, proposals, type Db } from '@lance/db';
+import { briefs, commitments, observations, proposals, type Db } from '@lance/db';
 import { LedgerReader, LedgerWriter } from '@lance/ledger';
 import { nowIso, type Config, type PrincipalIdentity, type ProvenanceRef } from '@lance/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { OntologyRepository } from '@lance/ontology';
 import { raiseAlert } from '../alerts/raise.js';
 import { recordCommitments, type RecordedCommitment } from '../commitments/record.js';
@@ -20,6 +20,7 @@ import { icalUidOfGraphEvent } from '../watchers/graph/icalUid.js';
 import type { TriageJob } from '../watchers/runner.js';
 import { watcherStartedAt } from '../watchers/runner.js';
 import { triageSystemPrompt, triageUserPrompt } from './prompt.js';
+import { transcriptReading, type TranscriptReading } from './transcripts.js';
 import { TriageOutputSchema, type TaskCandidate, type TriageOutput } from './schema.js';
 
 export const TRIAGE_VERSION = '0.1.0';
@@ -47,6 +48,8 @@ export interface TriageResult {
   commitments: RecordedCommitment[];
   debrief: DebriefResult | null;
   runId: string;
+  /** How this run's meeting transcript relates to earlier runs' readings; null without one. */
+  transcript: TranscriptReading | null;
 }
 
 /** The parts of a `jamie` meeting observation the Phase 2 steps read. */
@@ -182,6 +185,30 @@ async function existingTaskProposals(db: Db, correlationId: string): Promise<Map
 }
 
 /**
+ * The descriptions of every commitment recorded from a record, whatever
+ * its status: one Dom dropped or finished is still one not to record again.
+ */
+async function recordedDescriptions(db: Db, recordId: string): Promise<string[]> {
+  const rows = await db
+    .select({ description: commitments.description })
+    .from(commitments)
+    .where(sql`${commitments.sourceRefs} @> ${JSON.stringify([{ recordId }])}::jsonb`)
+    .orderBy(commitments.id)
+    .limit(100);
+  return rows.map((row) => row.description);
+}
+
+/** Whether a debrief has been written for this correlation id: one per meeting. */
+async function debriefed(db: Db, correlationId: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: briefs.id })
+    .from(briefs)
+    .where(and(eq(briefs.kind, 'debrief'), eq(briefs.correlationId, correlationId)))
+    .limit(1);
+  return rows.length > 0;
+}
+
+/**
  * Deterministic conversion of a task candidate into a Notion create_task
  * draft (ADR 0009). The task is assigned to the principal: `assigneeId` is
  * their `principals.notion_user_id` (ADR 0022).
@@ -267,12 +294,39 @@ export async function proposalContextFor(
 export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<TriageResult> {
   const now = deps.now ?? nowIso;
   const reader = new LedgerReader(deps.db);
-  const events = (await reader.byCorrelation(job.correlationId)).filter(
+  const trail = await reader.byCorrelation(job.correlationId);
+  const events = trail.filter(
     (event) => event.kind === 'observed' && job.observationEventIds.includes(event.id),
   );
   if (events.length === 0) {
     throw new Error(`Triage job for ${job.correlationId} names no observed events that exist.`);
   }
+
+  // The most recently recorded observation, preferring one with a
+  // transcript: ordered by the ledger event id, never by `ts`, which for a
+  // meeting is its end time and the same on every observation of it.
+  const meetings = events
+    .map((event) => meetingObservationOf(event))
+    .filter((meeting): meeting is MeetingObservation => meeting !== null)
+    .sort((a, b) => (a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0));
+  const newest =
+    meetings.filter((meeting) => meeting.transcriptReady).at(-1) ?? meetings.at(-1) ?? null;
+  // A transcript already read by a completed run yields no commitments,
+  // tasks or debrief a second time: the models word the same promise
+  // differently on each reading, so a repeat reading only duplicates.
+  const reading =
+    newest !== null && newest.transcriptReady && newest.transcript !== null
+      ? transcriptReading(trail, newest.recordId, newest.transcript)
+      : null;
+  const repeatRecordId = reading === 'repeat' && newest !== null ? newest.recordId : null;
+
+  // A retried job (pg-boss redelivers after a crash between the proposals
+  // and the resolved event) must not propose the same task twice, so a
+  // candidate whose title already has a create_task proposal on this
+  // correlation id is reported as that proposal rather than created again.
+  // The titles are also put in front of the model, which rewords a task
+  // it proposed on an earlier run.
+  const existing = await existingTaskProposals(deps.db, job.correlationId);
 
   const context = await proposalContextFor(
     { db: deps.db, config: deps.config, now },
@@ -331,15 +385,10 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
       outputSchema: TriageOutputSchema,
       maxIterations: 8,
     },
-    { correlationId: job.correlationId, prompt: triageUserPrompt(events) },
+    { correlationId: job.correlationId, prompt: triageUserPrompt(events, [...existing.keys()]) },
   );
   const output = result.output;
 
-  // A retried job (pg-boss redelivers after a crash between the proposals
-  // and the resolved event) must not propose the same task twice, so a
-  // candidate whose title already has a create_task proposal on this
-  // correlation id is reported as that proposal rather than created again.
-  const existing = await existingTaskProposals(deps.db, job.correlationId);
   const taskProposals: string[] = [];
   // No principal falls back to config for callers built before ADR 0022;
   // a principal with a null Notion user is unresolved, and a task nobody
@@ -353,6 +402,7 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   }
   for (const candidate of output.taskCandidates) {
     if (assigneeId === null) break;
+    if (candidate.recordId === repeatRecordId) continue;
     const provenance = provenanceFor(events, candidate.recordId);
     if (provenance.length === 0) continue;
     const draft = taskDraft(candidate, provenance, deps.config.notion, assigneeId);
@@ -388,14 +438,6 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   // contains, and the debrief when a transcript for a meeting Dom attended
   // has arrived (spec 5.2, 10.4). Each step is deterministic code over
   // what the models returned.
-  const meetings = events
-    .map((event) => meetingObservationOf(event))
-    .filter((meeting): meeting is MeetingObservation => meeting !== null);
-  const newest = meetings.reduce<MeetingObservation | null>(
-    (best, meeting) =>
-      best === null || (meeting.transcriptReady && !best.transcriptReady) ? meeting : best,
-    null,
-  );
 
   let meetingNodeId: string | null = null;
   const directory = newest === null ? [] : [...newest.attendees, ...newest.participants];
@@ -440,13 +482,15 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
     }
   }
 
-  let commitmentCandidates: CommitmentCandidate[] = [...output.commitments];
+  let commitmentCandidates: CommitmentCandidate[] = output.commitments.filter(
+    (candidate) => candidate.recordId !== repeatRecordId,
+  );
   if (
     deps.extractCommitments &&
     deps.principal &&
     newest !== null &&
-    newest.transcriptReady &&
-    newest.transcript !== null
+    newest.transcript !== null &&
+    (reading === 'first' || reading === 'changed')
   ) {
     const extracted = await deps.extractCommitments(
       {
@@ -456,6 +500,10 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
         participants: directory,
         occurredAt: newest.startTime,
         text: newest.transcript,
+        // Empty for a transcript truly read for the first time; not empty
+        // when a run crashed after recording (its triage event was never
+        // written) or retention has since erased the ledger's evidence.
+        alreadyRecorded: await recordedDescriptions(deps.db, newest.recordId),
       },
       job.correlationId,
     );
@@ -504,8 +552,9 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
     deps.debrief &&
     deps.principal &&
     newest !== null &&
-    newest.transcriptReady &&
-    newest.domAttended
+    (reading === 'first' || reading === 'changed') &&
+    newest.domAttended &&
+    !(await debriefed(deps.db, job.correlationId))
   ) {
     debrief = await runDebrief(
       {
@@ -561,6 +610,7 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
       recordedCommitmentIds: recordedCommitments.map((commitment) => commitment.id),
       debriefId: debrief?.briefId ?? null,
       observationEventIds: events.map((event) => event.id),
+      transcript: reading,
       watcherDryRun,
     },
   });
@@ -573,5 +623,6 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
     commitments: recordedCommitments,
     debrief,
     runId: result.runId,
+    transcript: reading,
   };
 }

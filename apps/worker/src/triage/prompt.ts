@@ -92,7 +92,15 @@ function renderCalendarRecord(record: Record<string, unknown>): string {
 }
 
 /** One block per observed event: provenance first, then the record. */
-export function triageUserPrompt(events: LedgerEventRow[]): string {
+/**
+ * `proposedTaskTitles` are the create_task proposals already made on this
+ * correlation id: a meeting observed again or a thread with a new message
+ * is triaged again, and a task reworded is otherwise a second proposal.
+ */
+export function triageUserPrompt(
+  events: LedgerEventRow[],
+  proposedTaskTitles: readonly string[] = [],
+): string {
   const blocks = events.map((event, index) => {
     const payload = (event.payload ?? {}) as Record<string, unknown>;
     const { watcher, summary, labels, url, ...record } = payload;
@@ -111,5 +119,9 @@ export function triageUserPrompt(events: LedgerEventRow[]): string {
       watcher === GRAPH_CALENDAR_WATCHER_NAME ? renderCalendarRecord(record) : clip(record);
     return `${head.join('\n')}\nrecord:\n${rendered}`;
   });
-  return `${blocks.join('\n\n')}\n\nTriage these observations. Correlation id: ${events[0]?.correlationId ?? 'unknown'}.`;
+  const proposed =
+    proposedTaskTitles.length === 0
+      ? ''
+      : `\n\nTasks already proposed from this correlation id. Do not give a task candidate for any of these again, in these words or any others:\n${proposedTaskTitles.map((title) => `- ${title}`).join('\n')}`;
+  return `${blocks.join('\n\n')}${proposed}\n\nTriage these observations. Correlation id: ${events[0]?.correlationId ?? 'unknown'}.`;
 }
