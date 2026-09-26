@@ -1,10 +1,20 @@
-import { commitments, type Commitment, type Db } from '@lance/db';
-import { and, count, desc, eq, inArray, lt, sql, type SQL } from 'drizzle-orm';
+import {
+  commitmentNotes,
+  commitments,
+  newestObservationFirst,
+  observations,
+  type Commitment,
+  type CommitmentNote,
+  type Db,
+} from '@lance/db';
+import { and, asc, count, desc, eq, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
 
 /**
- * The Commitments page's reads and its two writes. Status is the only
- * column the api sets: everything else about a commitment is written by the
- * worker when it records or chases one.
+ * The Commitments page's reads and writes. The api sets the status, the
+ * principal's edits to the description and due date, and the principal's
+ * notes; everything else about a commitment is written by the worker when
+ * it records or chases one. The source records behind a commitment are
+ * read from `observations`, never fetched from the source system.
  */
 
 export interface CommitmentQuery {
@@ -30,6 +40,30 @@ export interface CommitmentSummary {
   outbound: CommitmentTally;
 }
 
+/** The columns the principal may change by hand (ADR 0036). */
+export interface CommitmentEdit {
+  description?: string;
+  dueAt?: Date | null;
+  dueConfidence?: number | null;
+  nextChaseAt?: Date | null;
+}
+
+/** One source record a commitment cites, as its provenance names it. */
+export interface SourceKey {
+  system: string;
+  recordId: string;
+}
+
+/** The newest observation of one cited source record. */
+export interface SourceObservation {
+  sourceSystem: string;
+  sourceRecordId: string;
+  ts: Date;
+  summary: string | null;
+  /** Null once retention has passed over it. */
+  payload: unknown;
+}
+
 export interface CommitmentStoreLike {
   list(query: CommitmentQuery): Promise<Commitment[]>;
   /** Every row `list` would return across all its pages. */
@@ -44,6 +78,29 @@ export interface CommitmentStoreLike {
     to: Commitment['status'];
     at: Date;
   }): Promise<Commitment | null>;
+  /**
+   * Applies the principal's edit to a row not changed since `unchangedSince`,
+   * and returns the row as it now stands, or null when it has moved on.
+   */
+  update(input: {
+    id: string;
+    set: CommitmentEdit;
+    unchangedSince: Date;
+    at: Date;
+  }): Promise<Commitment | null>;
+  /** The commitment's notes, oldest first. */
+  notes(commitmentId: string): Promise<CommitmentNote[]>;
+  addNote(input: {
+    id: string;
+    commitmentId: string;
+    body: string;
+    author: string;
+  }): Promise<CommitmentNote>;
+  /**
+   * The newest observation of each cited record that the source had not
+   * removed. A record never observed in this scope is absent from the result.
+   */
+  sources(keys: readonly SourceKey[]): Promise<SourceObservation[]>;
 }
 
 /** The WHERE clauses `list` and `count` share, so the two cannot drift apart. */
@@ -112,6 +169,66 @@ export function createCommitmentStore(db: Db): CommitmentStoreLike {
         .where(and(eq(commitments.id, input.id), inArray(commitments.status, input.from)))
         .returning();
       return rows[0] ?? null;
+    },
+
+    async update(input): Promise<Commitment | null> {
+      // `updatedAt` in the WHERE clause stops an edit read before a chase
+      // landed from writing back the chase's next date. Postgres keeps
+      // microseconds and a JavaScript Date milliseconds, so the stored value
+      // is compared at the precision the reader saw.
+      const rows = await db
+        .update(commitments)
+        .set({ ...input.set, updatedAt: input.at })
+        .where(
+          and(
+            eq(commitments.id, input.id),
+            sql`date_trunc('milliseconds', ${commitments.updatedAt}) = ${input.unchangedSince.toISOString()}::timestamptz`,
+          ),
+        )
+        .returning();
+      return rows[0] ?? null;
+    },
+
+    async notes(commitmentId: string): Promise<CommitmentNote[]> {
+      return db
+        .select()
+        .from(commitmentNotes)
+        .where(eq(commitmentNotes.commitmentId, commitmentId))
+        .orderBy(asc(commitmentNotes.id));
+    },
+
+    async addNote(input): Promise<CommitmentNote> {
+      const rows = await db.insert(commitmentNotes).values(input).returning();
+      const note = rows[0];
+      if (note === undefined) {
+        throw new Error(
+          `The note on commitment ${input.commitmentId} was not stored. Check the api logs for a database error.`,
+        );
+      }
+      return note;
+    },
+
+    async sources(keys: readonly SourceKey[]): Promise<SourceObservation[]> {
+      if (keys.length === 0) return [];
+      const cited = or(
+        ...keys.map((key) =>
+          and(
+            eq(observations.sourceSystem, key.system),
+            eq(observations.sourceRecordId, key.recordId),
+          ),
+        ),
+      );
+      return db
+        .selectDistinctOn([observations.sourceRecordId], {
+          sourceSystem: observations.sourceSystem,
+          sourceRecordId: observations.sourceRecordId,
+          ts: observations.ts,
+          summary: observations.summary,
+          payload: observations.payload,
+        })
+        .from(observations)
+        .where(and(cited, sql`coalesce(${observations.payload}->>'removed', 'false') <> 'true'`))
+        .orderBy(...newestObservationFirst());
     },
   };
 }

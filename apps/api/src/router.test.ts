@@ -276,6 +276,49 @@ describe('commitments', () => {
     });
     expect(harness.chased).toEqual([TEST_COMMITMENT_ID]);
   });
+
+  it('moves a done commitment back to open as Dom', async () => {
+    await caller.commitments.markDone({ id: TEST_COMMITMENT_ID });
+
+    const view = await caller.commitments.setStatus({ id: TEST_COMMITMENT_ID, to: 'open' });
+
+    expect(view.status).toBe('open');
+    expect(harness.writer.appended[1]?.actor).toBe('user:dom');
+  });
+
+  it('refuses a status change to dropped with no reason', async () => {
+    await expect(
+      caller.commitments.setStatus({ id: TEST_COMMITMENT_ID, to: 'dropped' }),
+    ).rejects.toThrow(/Give a reason/);
+  });
+
+  it('refuses an edit that names neither field', async () => {
+    await expect(caller.commitments.edit({ id: TEST_COMMITMENT_ID })).rejects.toThrow(
+      /description or the due date/,
+    );
+  });
+
+  it('refuses a due date that is not a day', async () => {
+    await expect(
+      caller.commitments.edit({ id: TEST_COMMITMENT_ID, dueDay: '30/09/2026' }),
+    ).rejects.toThrow(/YYYY-MM-DD/);
+  });
+
+  it('adds a note under the signed-in actor', async () => {
+    const note = await caller.commitments.addNote({
+      id: TEST_COMMITMENT_ID,
+      body: 'Ann says Monday.',
+    });
+
+    expect(note.author).toBe('user:dom');
+  });
+
+  it('returns the commitment page with its notes and sources', async () => {
+    const detail = await caller.commitments.detail({ id: TEST_COMMITMENT_ID });
+
+    expect(detail?.commitment.id).toBe(TEST_COMMITMENT_ID);
+    expect(detail?.sources.map((source) => source.recordId)).toEqual(['AAMk2']);
+  });
 });
 
 describe('tasks', () => {

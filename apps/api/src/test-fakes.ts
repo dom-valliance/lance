@@ -1,5 +1,5 @@
 import type { SlackSurface } from '@lance/connectors';
-import type { Alert, Commitment } from '@lance/db';
+import type { Alert, Commitment, CommitmentNote } from '@lance/db';
 import type {
   DecisionResult,
   CostCeiling,
@@ -65,10 +65,13 @@ import type {
 import type { BriefQuery, BriefRecord, BriefStoreLike, LatestBriefQuery } from './briefs/store.js';
 import type {
   CommitmentCountQuery,
+  CommitmentEdit,
   CommitmentQuery,
   CommitmentStoreLike,
   CommitmentSummary,
   CommitmentTally,
+  SourceKey,
+  SourceObservation,
 } from './commitments/store.js';
 import type { TaskCountQuery, TaskQuery, TaskStoreLike } from './tasks/store.js';
 import { toTaskView, type ObservationRecord } from './tasks/view.js';
@@ -511,6 +514,56 @@ export class FakeCommitmentStore implements CommitmentStoreLike {
     const updated = { ...this.rows[index]!, status: input.to, updatedAt: input.at };
     this.rows[index] = updated;
     return Promise.resolve(updated);
+  }
+
+  update(input: {
+    id: string;
+    set: CommitmentEdit;
+    unchangedSince: Date;
+    at: Date;
+  }): Promise<Commitment | null> {
+    const index = this.rows.findIndex(
+      (row) => row.id === input.id && row.updatedAt.getTime() === input.unchangedSince.getTime(),
+    );
+    if (index === -1) return Promise.resolve(null);
+    const updated = { ...this.rows[index]!, ...input.set, updatedAt: input.at };
+    this.rows[index] = updated;
+    return Promise.resolve(updated);
+  }
+
+  noteRows: CommitmentNote[] = [];
+
+  notes(commitmentId: string): Promise<CommitmentNote[]> {
+    return Promise.resolve(
+      this.noteRows
+        .filter((note) => note.commitmentId === commitmentId)
+        .sort((left, right) => (left.id < right.id ? -1 : 1)),
+    );
+  }
+
+  addNote(input: {
+    id: string;
+    commitmentId: string;
+    body: string;
+    author: string;
+  }): Promise<CommitmentNote> {
+    const note: CommitmentNote = {
+      ...input,
+      principalId: '01K5S9V6QW3SWCCPVB0N0E300H',
+      createdAt: new Date('2026-09-21T09:00:00.000Z'),
+    };
+    this.noteRows.push(note);
+    return Promise.resolve(note);
+  }
+
+  observed: SourceObservation[] = [];
+
+  sources(keys: readonly SourceKey[]): Promise<SourceObservation[]> {
+    return Promise.resolve(
+      this.observed.filter((row) =>
+        keys.some((key) => key.system === row.sourceSystem && key.recordId === row.sourceRecordId),
+      ),
+    );
   }
 }
 
