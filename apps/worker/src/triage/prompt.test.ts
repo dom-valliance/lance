@@ -106,4 +106,16 @@ describe('triageUserPrompt', () => {
 
     expect(prompt).toContain('"subject":"Revised SOW"');
   });
+
+  it('lists the tasks already proposed on the correlation id so a rewording is not proposed again', () => {
+    const observation = event({
+      sourceSystem: 'graph',
+      sourceRecordId: 'm1',
+      payload: { watcher: 'graph-mail', subject: 'Revised SOW' },
+    });
+    expect(triageUserPrompt([observation])).not.toContain('already proposed');
+    const prompt = triageUserPrompt([observation], ['Read through the SOW (Brian)']);
+    expect(prompt).toContain('Tasks already proposed from this correlation id');
+    expect(prompt).toContain('- Read through the SOW (Brian)');
+  });
 });

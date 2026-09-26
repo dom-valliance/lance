@@ -389,6 +389,258 @@ describe('runTriage', () => {
     expect(unkeyed?.properties).not.toHaveProperty('ical_uid');
   });
 
+  it('reads a transcript once however often the meeting is observed, and a changed transcript only for what is new', async () => {
+    const meetingCorrelationId = stableUlid('jamie:mt-20');
+    const transcript = 'Brian: Can you read the SOW? Dom: I will read through the SOW by Friday.';
+    const observeMeeting = async (fields: Record<string, unknown>) => {
+      const record = {
+        kind: 'meeting',
+        id: 'mt-20',
+        title: 'Brian / Dom',
+        startTime: '2026-09-24T12:00:00.000Z',
+        endTime: '2026-09-24T12:59:00.000Z',
+        participants: [
+          { name: 'Dom Selvon', email: 'dom@valliance.ai' },
+          { name: 'Brian Vargas-Meinel', email: 'brian@valliance.ai' },
+        ],
+        attendees: [],
+        transcript,
+        transcriptReady: true,
+        domAttended: true,
+        ...fields,
+      };
+      const hash = hashRecord(record);
+      const observed = await new LedgerWriter(db).append({
+        ts: '2026-09-24T12:59:00.000Z',
+        actor: 'agent:watcher-jamie@0.1.0',
+        kind: 'observed',
+        sourceSystem: 'jamie',
+        sourceRecordId: 'mt-20',
+        sourceRecordHash: hash,
+        idempotencyKey: idempotencyKey('jamie', 'mt-20', hash),
+        correlationId: meetingCorrelationId,
+        payload: { ...record, labels: ['Meeting', 'TranscriptReady'], watcher: 'jamie' },
+      });
+      return observed.id;
+    };
+    const commitment = (description: string, evidenceQuote: string) => ({
+      direction: 'outbound' as const,
+      description,
+      counterpartyName: 'Brian Vargas-Meinel',
+      counterpartyEmail: 'brian@valliance.ai',
+      dueAt: null,
+      dueConfidence: 0,
+      evidenceQuote,
+      recordId: 'mt-20',
+    });
+    const modelOutput = (taskTitle: string) => ({
+      importance: 0.4,
+      urgency: 0.2,
+      summary: 'Dom will read the SOW.',
+      entities: [],
+      commitments: [commitment(taskTitle, 'I will read through the SOW')],
+      taskCandidates: [
+        {
+          title: taskTitle,
+          description: null,
+          dueDate: null,
+          assigneeName: null,
+          priority: null,
+          evidenceQuote: 'I will read through the SOW',
+          recordId: 'mt-20',
+        },
+      ],
+      proposalsSubmitted: 0,
+      alertCandidates: [],
+    });
+    let proposals = 0;
+    const triage = async (
+      eventId: string,
+      taskTitle: string,
+      extractCommitments: NonNullable<Parameters<typeof runTriage>[0]['extractCommitments']>,
+    ) => {
+      const runner = new ScriptedRunner([[textMessage(JSON.stringify(modelOutput(taskTitle)))]]);
+      const result = await runTriage(
+        {
+          db,
+          config,
+          agent: {
+            runner,
+            recorder: new MemoryRunRecorder(),
+            ledger: new LedgerWriter(db),
+            config: agentConfig,
+            readSpendUsd: () => Promise.resolve(0),
+          },
+          createProposal: () => {
+            proposals += 1;
+            return Promise.resolve({
+              proposalId: `sow-${proposals}`,
+              decision: 'propose',
+              status: 'pending',
+            });
+          },
+          ontology: new OntologyRepository(db, { principalId: SEED_PRINCIPAL_ID }),
+          principal: { name: 'Dom Selvon', email: 'dom@valliance.ai', notionUserId: 'notion-dom' },
+          extractCommitments,
+          debrief: { slack: null },
+        },
+        { watcher: 'jamie', correlationId: meetingCorrelationId, observationEventIds: [eventId] },
+      );
+      return { result };
+    };
+
+    const first = await triage(await observeMeeting({}), 'Read through the SOW', (source) => {
+      expect(source.alreadyRecorded).toEqual([]);
+      return Promise.resolve([
+        commitment('Read through the SOW', 'I will read through the SOW by Friday'),
+      ]);
+    });
+    expect(first.result.transcript).toBe('first');
+    expect(first.result.commitments.map((c) => c.description)).toEqual(['Read through the SOW']);
+    expect(first.result.taskProposals).toHaveLength(1);
+    expect(first.result.debrief).not.toBeNull();
+
+    // Jamie's summary lands after the transcript: a new hash, the same transcript.
+    const repeat = await triage(
+      await observeMeeting({ summaryShort: 'SOW review' }),
+      'Read through the SOW that Brian sent back for review',
+      () => Promise.reject(new Error('a transcript already read is not extracted again')),
+    );
+    expect(repeat.result.transcript).toBe('repeat');
+    expect(repeat.result.commitments).toEqual([]);
+    expect(repeat.result.taskProposals).toEqual([]);
+    expect(repeat.result.debrief).toBeNull();
+    expect(proposals).toBe(1);
+
+    const changed = await triage(
+      await observeMeeting({
+        transcript: `${transcript} Brian: I will send the resourcing plan.`,
+        summaryShort: 'SOW review',
+      }),
+      'Read through the SOW',
+      (source) => {
+        expect(source.alreadyRecorded).toEqual(['Read through the SOW']);
+        return Promise.resolve([
+          {
+            ...commitment('Send the resourcing plan', 'I will send the resourcing plan'),
+            direction: 'inbound' as const,
+          },
+        ]);
+      },
+    );
+    expect(changed.result.transcript).toBe('changed');
+    expect(changed.result.commitments.map((c) => c.description)).toEqual([
+      'Send the resourcing plan',
+    ]);
+    expect(changed.result.debrief).toBeNull();
+  });
+
+  it('gives a retried run what the crashed run recorded and does not debrief the meeting twice', async () => {
+    const meetingCorrelationId = stableUlid('jamie:mt-21');
+    const record = {
+      kind: 'meeting',
+      id: 'mt-21',
+      title: 'Anita / Dom',
+      startTime: '2026-09-24T14:00:00.000Z',
+      endTime: '2026-09-24T14:30:00.000Z',
+      participants: [
+        { name: 'Dom Selvon', email: 'dom@valliance.ai' },
+        { name: 'Anita Shah', email: 'anita@valliance.ai' },
+      ],
+      attendees: [],
+      transcript: 'Anita: Can finance support it? Dom: I will talk to you about the contractor.',
+      transcriptReady: true,
+      domAttended: true,
+    };
+    const hash = hashRecord(record);
+    const observed = await new LedgerWriter(db).append({
+      ts: '2026-09-24T14:30:00.000Z',
+      actor: 'agent:watcher-jamie@0.1.0',
+      kind: 'observed',
+      sourceSystem: 'jamie',
+      sourceRecordId: 'mt-21',
+      sourceRecordHash: hash,
+      idempotencyKey: idempotencyKey('jamie', 'mt-21', hash),
+      correlationId: meetingCorrelationId,
+      payload: { ...record, labels: ['Meeting', 'TranscriptReady'], watcher: 'jamie' },
+    });
+    const modelOutput = {
+      importance: 0.4,
+      urgency: 0.2,
+      summary: 'Dom will talk to Anita.',
+      entities: [],
+      commitments: [],
+      taskCandidates: [],
+      proposalsSubmitted: 0,
+      alertCandidates: [],
+    };
+    const commitment = (description: string) => ({
+      direction: 'outbound' as const,
+      description,
+      counterpartyName: 'Anita Shah',
+      counterpartyEmail: 'anita@valliance.ai',
+      dueAt: null,
+      dueConfidence: 0,
+      evidenceQuote: 'I will talk to you about the contractor',
+      recordId: 'mt-21',
+    });
+    const slackPosts: string[] = [];
+    const triage = (
+      extractCommitments: NonNullable<Parameters<typeof runTriage>[0]['extractCommitments']>,
+      post: () => Promise<{ channel: string; ts: string }>,
+    ) =>
+      runTriage(
+        {
+          db,
+          config,
+          agent: {
+            runner: new ScriptedRunner([[textMessage(JSON.stringify(modelOutput))]]),
+            recorder: new MemoryRunRecorder(),
+            ledger: new LedgerWriter(db),
+            config: agentConfig,
+            readSpendUsd: () => Promise.resolve(0),
+          },
+          createProposal: () => Promise.reject(new Error('no proposals in this test')),
+          ontology: new OntologyRepository(db, { principalId: SEED_PRINCIPAL_ID }),
+          principal: { name: 'Dom Selvon', email: 'dom@valliance.ai', notionUserId: 'notion-dom' },
+          extractCommitments,
+          debrief: {
+            slack: {
+              post: (message) => {
+                slackPosts.push(message.text);
+                return post();
+              },
+            },
+          },
+        },
+        {
+          watcher: 'jamie',
+          correlationId: meetingCorrelationId,
+          observationEventIds: [observed.id],
+        },
+      );
+
+    // The first run records its commitment, then Slack fails and the job throws.
+    await expect(
+      triage(
+        () => Promise.resolve([commitment('Talk to Anita about the contractor arrangement')]),
+        () => Promise.reject(new Error('Slack is down')),
+      ),
+    ).rejects.toThrow('Slack is down');
+
+    const retried = await triage(
+      (source) => {
+        expect(source.alreadyRecorded).toEqual(['Talk to Anita about the contractor arrangement']);
+        return Promise.resolve([]);
+      },
+      () => Promise.resolve({ channel: 'C1', ts: '1.2' }),
+    );
+    expect(retried.transcript).toBe('first');
+    expect(retried.commitments).toEqual([]);
+    expect(retried.debrief).toBeNull();
+    expect(slackPosts).toHaveLength(1);
+  });
+
   it('refuses a job whose observations do not exist', async () => {
     const runner = new ScriptedRunner([]);
     await expect(
