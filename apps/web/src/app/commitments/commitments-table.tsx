@@ -5,6 +5,7 @@ import { Ageing } from '@/components/ageing';
 import { Table, TableCard, Td, Th, Tr } from '@/components/data-table';
 import { ProvenanceLink } from '@/components/provenance';
 import { SubmitButton } from '@/components/submit-button';
+import { TextLink } from '@/components/text-link';
 import { Badge } from '@/components/ui/badge';
 import { ageingEmphasis } from '@/lib/ageing';
 import {
@@ -12,6 +13,7 @@ import {
   chaseLabel,
   chasePhrase,
   commitmentBadgeFor,
+  commitmentHref,
   evidenceLine,
   firstName,
   isCommitmentOpenForAction,
@@ -83,7 +85,9 @@ function RowCells({ commitment, now }: { commitment: CommitmentView; now: Date }
     <>
       <Td>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">{commitment.description}</span>
+          <TextLink href={commitmentHref(commitment.id)} tone="foreground" className="font-medium">
+            {commitment.description}
+          </TextLink>
           <StatusBadge commitment={commitment} />
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{evidenceLine(commitment)}</p>
@@ -149,8 +153,16 @@ function OpenActions({
   );
 }
 
-const closedSentence = (commitment: CommitmentView): string =>
-  `No actions: this commitment is ${commitment.status}.`;
+/** A closed row's actions cell: where to reopen it, edit it or add a note. */
+function ClosedActions({ commitment }: { commitment: CommitmentView }) {
+  return (
+    <span className="text-xs text-muted-foreground">
+      This commitment is {commitment.status}.{' '}
+      <TextLink href={commitmentHref(commitment.id)}>Open it</TextLink> to reopen, edit or add a
+      note.
+    </span>
+  );
+}
 
 export function CommitmentsTable({
   commitments,
@@ -195,9 +207,7 @@ export function CommitmentsTable({
                 <Tr key={commitment.id} muted>
                   <RowCells commitment={commitment} now={now} />
                   <Td>
-                    <span className="text-xs text-muted-foreground">
-                      {closedSentence(commitment)}
-                    </span>
+                    <ClosedActions commitment={commitment} />
                   </Td>
                 </Tr>
               ),
@@ -215,7 +225,13 @@ export function CommitmentsTable({
           const body = (
             <>
               <div className="flex items-start justify-between gap-3">
-                <p className="font-medium">{commitment.description}</p>
+                <TextLink
+                  href={commitmentHref(commitment.id)}
+                  tone="foreground"
+                  className="font-medium"
+                >
+                  {commitment.description}
+                </TextLink>
                 <StatusBadge commitment={commitment} />
               </div>
               <p className="text-xs text-muted-foreground">{evidenceLine(commitment)}</p>
@@ -255,7 +271,9 @@ export function CommitmentsTable({
               className="flex flex-col gap-3 rounded-xl bg-card p-4 text-muted-foreground"
             >
               {body}
-              <p className="text-xs text-muted-foreground">{closedSentence(commitment)}</p>
+              <p className="m-0">
+                <ClosedActions commitment={commitment} />
+              </p>
             </li>
           );
         })}

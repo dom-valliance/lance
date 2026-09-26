@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   ageingLabel,
+  authorLabel,
+  dueDayOf,
+  sourceStateSentence,
+  statusChoices,
   chaseLabel,
   chasePhrase,
   commitmentBadgeFor,
@@ -248,5 +252,49 @@ describe('firstName', () => {
 
   it('keeps a single-word name as it is', () => {
     expect(firstName('Marcus')).toBe('Marcus');
+  });
+});
+
+describe('statusChoices', () => {
+  it('offers every other status for a done commitment that was chased', () => {
+    expect(statusChoices({ status: 'done', chaseCount: 1 })).toEqual(['open', 'chased', 'dropped']);
+  });
+
+  it('leaves out chased for a commitment never chased', () => {
+    expect(statusChoices({ status: 'done', chaseCount: 0 })).toEqual(['open', 'dropped']);
+  });
+
+  it('offers done and dropped for an open commitment', () => {
+    expect(statusChoices({ status: 'open', chaseCount: 0 })).toEqual(['done', 'dropped']);
+  });
+});
+
+describe('dueDayOf', () => {
+  it('reads a BST instant as its London day', () => {
+    expect(dueDayOf('2026-09-30T23:30:00.000Z')).toBe('2026-10-01');
+  });
+
+  it('gives an empty value for no date', () => {
+    expect(dueDayOf(null)).toBe('');
+  });
+});
+
+describe('authorLabel', () => {
+  it('names a user actor', () => {
+    expect(authorLabel('user:dom')).toBe('Dom');
+  });
+
+  it('shows any other actor as it is', () => {
+    expect(authorLabel('system:commitments')).toBe('system:commitments');
+  });
+});
+
+describe('sourceStateSentence', () => {
+  it('says nothing for a source whose text is held', () => {
+    expect(sourceStateSentence({ state: 'found', kind: 'email' })).toBeNull();
+  });
+
+  it('points to the source once the text has expired', () => {
+    expect(sourceStateSentence({ state: 'expired', kind: 'meeting' })).toMatch(/retention window/);
   });
 });
