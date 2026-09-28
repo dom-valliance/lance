@@ -200,4 +200,22 @@ describe('createCommitmentStore', () => {
   it('reads no sources when none are cited', async () => {
     expect(await store.sources([])).toEqual([]);
   });
+
+  it('leaves unconfirmed commitments out unless they are asked for by name', async () => {
+    const waiting = await insert({ status: 'unconfirmed', description: 'Circulate the timeline' });
+
+    const unnamed = await store.list({ limit: 1000, direction: 'inbound' });
+    const named = await store.list({ limit: 1000, status: 'unconfirmed' });
+
+    expect(unnamed.map((row) => row.id)).not.toContain(waiting);
+    expect(named.map((row) => row.id)).toContain(waiting);
+    expect(await store.count({ direction: 'inbound' })).toBe(unnamed.length);
+  });
+
+  it('counts the unconfirmed commitments in the summary', async () => {
+    const before = (await store.summary(new Date())).unconfirmed;
+    await insert({ status: 'unconfirmed', description: 'Share the deck with everyone' });
+
+    expect((await store.summary(new Date())).unconfirmed).toBe(before + 1);
+  });
 });

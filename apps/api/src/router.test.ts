@@ -234,6 +234,7 @@ describe('commitments', () => {
     expect(await caller.commitments.summary()).toEqual({
       inbound: { open: 1, overdue: 1 },
       outbound: { open: 0, overdue: 0 },
+      unconfirmed: 0,
     });
   });
 

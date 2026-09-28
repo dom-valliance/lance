@@ -196,8 +196,9 @@ export interface ChangeCommitmentStatusInput {
  * Moves a commitment to any other status, including back from done or
  * dropped (ADR 0036). A commitment already in that status is left alone
  * and no second event is written, so a double click cannot double-write
- * the ledger. Dropping needs a reason, and `chased` is only for a
- * commitment that has been chased at least once.
+ * the ledger. Dropping needs a reason, `chased` is only for a commitment
+ * that has been chased at least once, and only an inbound commitment can go
+ * back to `unconfirmed`, the triage bucket (ADR 0037).
  */
 export async function changeCommitmentStatus(
   deps: CommitmentDeps,
@@ -213,6 +214,12 @@ export async function changeCommitmentStatus(
     throw new TRPCError({
       code: 'BAD_REQUEST',
       message: `Give a reason to drop commitment ${input.id}; it is kept in the ledger.`,
+    });
+  }
+  if (input.to === 'unconfirmed' && existing.direction === 'outbound') {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: `Commitment ${input.id} is one you owe, so there is no doubt it is yours. Only a commitment owed to you can go back to triage.`,
     });
   }
   if (input.to === 'chased' && existing.chaseCount === 0) {

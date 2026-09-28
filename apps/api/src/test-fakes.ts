@@ -472,7 +472,9 @@ export class FakeCommitmentStore implements CommitmentStoreLike {
   private matching(query: CommitmentCountQuery): Commitment[] {
     return this.rows
       .filter((row) => query.direction === undefined || row.direction === query.direction)
-      .filter((row) => query.status === undefined || row.status === query.status);
+      .filter((row) =>
+        query.status === undefined ? row.status !== 'unconfirmed' : row.status === query.status,
+      );
   }
 
   list(query: CommitmentQuery): Promise<Commitment[]> {
@@ -494,7 +496,11 @@ export class FakeCommitmentStore implements CommitmentStoreLike {
       const overdue = open.filter((row) => row.dueAt !== null && row.dueAt < now);
       return { open: open.length, overdue: overdue.length };
     };
-    return Promise.resolve({ inbound: tally('inbound'), outbound: tally('outbound') });
+    return Promise.resolve({
+      inbound: tally('inbound'),
+      outbound: tally('outbound'),
+      unconfirmed: this.rows.filter((row) => row.status === 'unconfirmed').length,
+    });
   }
 
   get(id: string): Promise<Commitment | null> {

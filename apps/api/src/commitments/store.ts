@@ -7,7 +7,7 @@ import {
   type CommitmentNote,
   type Db,
 } from '@lance/db';
-import { and, asc, count, desc, eq, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, lt, ne, or, sql, type SQL } from 'drizzle-orm';
 
 /**
  * The Commitments page's reads and writes. The api sets the status, the
@@ -38,6 +38,8 @@ export interface CommitmentTally {
 export interface CommitmentSummary {
   inbound: CommitmentTally;
   outbound: CommitmentTally;
+  /** Inbound commitments waiting in triage, possibly owed to the principal (ADR 0037). */
+  unconfirmed: number;
 }
 
 /** The columns the principal may change by hand (ADR 0036). */
@@ -103,11 +105,19 @@ export interface CommitmentStoreLike {
   sources(keys: readonly SourceKey[]): Promise<SourceObservation[]>;
 }
 
-/** The WHERE clauses `list` and `count` share, so the two cannot drift apart. */
+/**
+ * The WHERE clauses `list` and `count` share, so the two cannot drift apart.
+ * With no status named, an unconfirmed commitment is left out: it lives on
+ * the triage tab and appears only when asked for by name (ADR 0037).
+ */
 function filtersFor(query: CommitmentCountQuery): SQL[] {
   const filters: SQL[] = [];
   if (query.direction !== undefined) filters.push(eq(commitments.direction, query.direction));
-  if (query.status !== undefined) filters.push(eq(commitments.status, query.status));
+  filters.push(
+    query.status === undefined
+      ? ne(commitments.status, 'unconfirmed')
+      : eq(commitments.status, query.status),
+  );
   return filters;
 }
 
@@ -135,24 +145,34 @@ export function createCommitmentStore(db: Db): CommitmentStoreLike {
     },
 
     async summary(now: Date): Promise<CommitmentSummary> {
-      const rows = await db
-        .select({
-          direction: commitments.direction,
-          open: count(),
-          overdue:
-            sql<number>`count(*) filter (where ${commitments.dueAt} < ${now.toISOString()}::timestamptz)`.mapWith(
-              Number,
-            ),
-        })
-        .from(commitments)
-        .where(eq(commitments.status, 'open'))
-        .groupBy(commitments.direction);
+      const [rows, waiting] = await Promise.all([
+        db
+          .select({
+            direction: commitments.direction,
+            open: count(),
+            overdue:
+              sql<number>`count(*) filter (where ${commitments.dueAt} < ${now.toISOString()}::timestamptz)`.mapWith(
+                Number,
+              ),
+          })
+          .from(commitments)
+          .where(eq(commitments.status, 'open'))
+          .groupBy(commitments.direction),
+        db
+          .select({ total: count() })
+          .from(commitments)
+          .where(eq(commitments.status, 'unconfirmed')),
+      ]);
 
       const tally = (direction: Commitment['direction']): CommitmentTally => {
         const row = rows.find((candidate) => candidate.direction === direction);
         return { open: row?.open ?? 0, overdue: row?.overdue ?? 0 };
       };
-      return { inbound: tally('inbound'), outbound: tally('outbound') };
+      return {
+        inbound: tally('inbound'),
+        outbound: tally('outbound'),
+        unconfirmed: waiting[0]?.total ?? 0,
+      };
     },
 
     async get(id: string): Promise<Commitment | null> {

@@ -95,6 +95,7 @@ describe('commitmentSummary', () => {
     expect(await commitmentSummary(harness.deps)).toEqual({
       inbound: { open: 2, overdue: 1 },
       outbound: { open: 1, overdue: 0 },
+      unconfirmed: 0,
     });
   });
 });
@@ -211,6 +212,59 @@ describe('changeCommitmentStatus', () => {
 
     expect(view.status).toBe('chased');
     expect(harness.writer.appended[0]?.payload).not.toHaveProperty('reason');
+  });
+});
+
+describe('triage of commitments possibly owed to Dom', () => {
+  it('opens an unconfirmed commitment and records the move out of triage', async () => {
+    harness.commitments.rows = [fakeCommitment({ status: 'unconfirmed' })];
+
+    const view = await changeCommitmentStatus(harness.deps, { id: TEST_COMMITMENT_ID, to: 'open' });
+
+    expect(view.status).toBe('open');
+    expect(harness.writer.appended[0]?.payload).toMatchObject({ from: 'unconfirmed', to: 'open' });
+  });
+
+  it('sends an inbound commitment back to triage', async () => {
+    const view = await changeCommitmentStatus(harness.deps, {
+      id: TEST_COMMITMENT_ID,
+      to: 'unconfirmed',
+    });
+
+    expect(view.status).toBe('unconfirmed');
+  });
+
+  it('refuses to send a commitment Dom owes to triage', async () => {
+    harness.commitments.rows = [fakeCommitment({ direction: 'outbound' })];
+
+    await expect(
+      changeCommitmentStatus(harness.deps, { id: TEST_COMMITMENT_ID, to: 'unconfirmed' }),
+    ).rejects.toThrow(/Only a commitment owed to you/);
+  });
+
+  it('leaves unconfirmed commitments out of a list that names no status', async () => {
+    harness.commitments.rows = [
+      fakeCommitment(),
+      fakeCommitment({ id: SECOND_ID, status: 'unconfirmed' }),
+    ];
+
+    const everything = await listCommitments(harness.deps, { direction: 'inbound' });
+    const triage = await listCommitments(harness.deps, { status: 'unconfirmed' });
+
+    expect(everything.items.map((item) => item.id)).toEqual([TEST_COMMITMENT_ID]);
+    expect(triage.items.map((item) => item.id)).toEqual([SECOND_ID]);
+  });
+
+  it('counts the unconfirmed commitments apart from the open ones', async () => {
+    harness.commitments.rows = [
+      fakeCommitment(),
+      fakeCommitment({ id: SECOND_ID, status: 'unconfirmed' }),
+    ];
+
+    expect(await commitmentSummary(harness.deps)).toMatchObject({
+      inbound: { open: 1 },
+      unconfirmed: 1,
+    });
   });
 });
 
