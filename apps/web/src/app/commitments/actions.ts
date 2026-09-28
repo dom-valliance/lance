@@ -1,7 +1,12 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { COMMITMENT_STATUSES, commitmentHref, type CommitmentStatus } from '@/lib/commitment-view';
+import {
+  COMMITMENT_STATUSES,
+  commitmentHref,
+  NOT_MINE_REASON,
+  type CommitmentStatus,
+} from '@/lib/commitment-view';
 import { apiClient } from '@/lib/trpc';
 
 /**
@@ -117,4 +122,26 @@ export async function addCommitmentNote(
   if (body === undefined) return 'Write the note before adding it.';
   const client = await apiClient();
   return run(id, () => client.commitments.addNote.mutate({ id, body }));
+}
+
+/** Triage: the principal says the promise was made to them, so it opens (ADR 0037). */
+export async function confirmCommitment(
+  _previous: string | null,
+  form: FormData,
+): Promise<string | null> {
+  const id = requiredField(form, 'commitmentId');
+  const client = await apiClient();
+  return run(id, () => client.commitments.setStatus.mutate({ id, to: 'open' }));
+}
+
+/** Triage: the promise was made to someone else, so it is dropped with that reason. */
+export async function dismissCommitment(
+  _previous: string | null,
+  form: FormData,
+): Promise<string | null> {
+  const id = requiredField(form, 'commitmentId');
+  const client = await apiClient();
+  return run(id, () =>
+    client.commitments.setStatus.mutate({ id, to: 'dropped', reason: NOT_MINE_REASON }),
+  );
 }

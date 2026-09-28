@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  commitmentTabFrom,
+  isCommitmentUnconfirmed,
   ageingLabel,
   authorLabel,
   dueDayOf,
@@ -257,15 +259,32 @@ describe('firstName', () => {
 
 describe('statusChoices', () => {
   it('offers every other status for a done commitment that was chased', () => {
-    expect(statusChoices({ status: 'done', chaseCount: 1 })).toEqual(['open', 'chased', 'dropped']);
+    expect(statusChoices({ status: 'done', chaseCount: 1, direction: 'inbound' })).toEqual([
+      'open',
+      'chased',
+      'dropped',
+      'unconfirmed',
+    ]);
   });
 
   it('leaves out chased for a commitment never chased', () => {
-    expect(statusChoices({ status: 'done', chaseCount: 0 })).toEqual(['open', 'dropped']);
+    expect(statusChoices({ status: 'done', chaseCount: 0, direction: 'outbound' })).toEqual([
+      'open',
+      'dropped',
+    ]);
   });
 
   it('offers done and dropped for an open commitment', () => {
-    expect(statusChoices({ status: 'open', chaseCount: 0 })).toEqual(['done', 'dropped']);
+    expect(statusChoices({ status: 'open', chaseCount: 0, direction: 'outbound' })).toEqual([
+      'done',
+      'dropped',
+    ]);
+  });
+
+  it('offers triage only for a commitment owed to Dom', () => {
+    expect(statusChoices({ status: 'open', chaseCount: 0, direction: 'inbound' })).toContain(
+      'unconfirmed',
+    );
   });
 });
 
@@ -296,5 +315,31 @@ describe('sourceStateSentence', () => {
 
   it('points to the source once the text has expired', () => {
     expect(sourceStateSentence({ state: 'expired', kind: 'meeting' })).toMatch(/retention window/);
+  });
+});
+
+describe('commitmentTabFrom', () => {
+  it('shows the triage tab when asked for it', () => {
+    expect(commitmentTabFrom({ tab: 'triage', direction: 'outbound' })).toBe('triage');
+  });
+
+  it('falls back to the direction otherwise', () => {
+    expect(commitmentTabFrom({ direction: 'inbound' })).toBe('inbound');
+    expect(commitmentTabFrom({ tab: 'nonsense' })).toBe('outbound');
+  });
+});
+
+describe('the triage status', () => {
+  it('is neither open for action nor closed', () => {
+    expect(isCommitmentOpenForAction({ status: 'unconfirmed' })).toBe(false);
+    expect(isCommitmentUnconfirmed({ status: 'unconfirmed' })).toBe(true);
+  });
+
+  it('carries its own badge', () => {
+    expect(commitmentBadgeFor({ status: 'unconfirmed', overdueDays: null })).toBe('unconfirmed');
+  });
+
+  it('is not a status filter, because it has its own tab', () => {
+    expect(commitmentStatusSelected({ status: 'unconfirmed' })).toBe('open');
   });
 });

@@ -15,11 +15,14 @@ import { oneOf, selected, type SearchParams, type SourceSystem } from '@/lib/fil
 export const COMMITMENT_DIRECTIONS = ['outbound', 'inbound'] as const;
 export type CommitmentDirection = (typeof COMMITMENT_DIRECTIONS)[number];
 
-export const COMMITMENT_STATUSES = ['open', 'chased', 'done', 'dropped'] as const;
+export const COMMITMENT_STATUSES = ['open', 'chased', 'done', 'dropped', 'unconfirmed'] as const;
 export type CommitmentStatus = (typeof COMMITMENT_STATUSES)[number];
 
-/** The status filter options the page offers, in display order. */
-export const COMMITMENT_STATUS_FILTERS = [...COMMITMENT_STATUSES, 'all'] as const;
+/**
+ * The status filter options the page offers, in display order. Unconfirmed
+ * is not among them: those commitments have their own tab (ADR 0037).
+ */
+export const COMMITMENT_STATUS_FILTERS = ['open', 'chased', 'done', 'dropped', 'all'] as const;
 export type CommitmentStatusFilter = (typeof COMMITMENT_STATUS_FILTERS)[number];
 
 export interface CommitmentPerson {
@@ -87,6 +90,15 @@ export interface SourceContextView {
 /** The tab the page shows: `?direction=inbound`, otherwise the default. */
 export function commitmentDirectionFrom(params: SearchParams): CommitmentDirection {
   return oneOf(COMMITMENT_DIRECTIONS, params['direction']) ?? 'outbound';
+}
+
+/** The three tabs: the two directions and the triage bucket of possibly owed commitments. */
+export const COMMITMENT_TABS = ['outbound', 'inbound', 'triage'] as const;
+export type CommitmentTab = (typeof COMMITMENT_TABS)[number];
+
+/** `?tab=triage` shows the triage bucket; otherwise the direction names the tab. */
+export function commitmentTabFrom(params: SearchParams): CommitmentTab {
+  return selected(params, 'tab') === 'triage' ? 'triage' : commitmentDirectionFrom(params);
 }
 
 /** The status filter selected in the query string, `open` when absent. */
@@ -168,10 +180,18 @@ export function sortCommitments<T extends SortableCommitment>(views: readonly T[
   return [...views].sort(commitmentSort);
 }
 
-/** Whether the row still accepts "mark done" or "drop". */
+/** Whether the row still accepts "mark done" or "drop": open or chased. */
 export function isCommitmentOpenForAction(view: Pick<CommitmentView, 'status'>): boolean {
-  return view.status !== 'done' && view.status !== 'dropped';
+  return view.status === 'open' || view.status === 'chased';
 }
+
+/** Whether the row waits in triage for the principal to say it is theirs. */
+export function isCommitmentUnconfirmed(view: Pick<CommitmentView, 'status'>): boolean {
+  return view.status === 'unconfirmed';
+}
+
+/** The reason "Not mine" drops a triaged commitment with, kept in the ledger. */
+export const NOT_MINE_REASON = 'Not owed to me: the promise was made to someone else.';
 
 /** Whether the row is past its due date and still running. */
 export function isCommitmentOverdue(view: Pick<CommitmentView, 'overdueDays'>): boolean {
@@ -191,6 +211,7 @@ export function commitmentBadgeFor(
   if (isCommitmentOverdue(view)) return 'overdue';
   if (view.status === 'chased') return 'chased';
   if (view.status === 'done') return 'done';
+  if (view.status === 'unconfirmed') return 'unconfirmed';
   return null;
 }
 
@@ -233,14 +254,18 @@ export const COMMITMENT_DESCRIPTION_MAX_CHARS = 500;
 
 /**
  * The statuses the status control offers: every status but the current
- * one, and `chased` only for a commitment that has been chased, since the
- * api refuses it otherwise.
+ * one, `chased` only for a commitment that has been chased, and
+ * `unconfirmed` only for one owed to the principal, since the api refuses
+ * the others.
  */
 export function statusChoices(
-  view: Pick<CommitmentView, 'status' | 'chaseCount'>,
+  view: Pick<CommitmentView, 'status' | 'chaseCount' | 'direction'>,
 ): CommitmentStatus[] {
   return COMMITMENT_STATUSES.filter(
-    (status) => status !== view.status && (status !== 'chased' || view.chaseCount > 0),
+    (status) =>
+      status !== view.status &&
+      (status !== 'chased' || view.chaseCount > 0) &&
+      (status !== 'unconfirmed' || view.direction === 'inbound'),
   );
 }
 

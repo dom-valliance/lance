@@ -18,6 +18,7 @@ import {
   firstName,
   isCommitmentOpenForAction,
   isCommitmentOverdue,
+  isCommitmentUnconfirmed,
   type CommitmentDirection,
   type CommitmentStatus,
   type CommitmentView,
@@ -26,7 +27,13 @@ import { COMMITMENT_STATUS_LABELS } from '@/lib/humanise';
 import { formatInstant } from '@/lib/proposal-view';
 import { formatDate } from '@/lib/time';
 import { COMMITMENT_STATUS_TONES } from '@/lib/tones';
-import { chaseCommitment, dropCommitment, markCommitmentDone } from './actions';
+import {
+  chaseCommitment,
+  confirmCommitment,
+  dismissCommitment,
+  dropCommitment,
+  markCommitmentDone,
+} from './actions';
 import { CommitmentCard, CommitmentRowPair } from './drop-disclosure';
 
 /**
@@ -153,6 +160,26 @@ function OpenActions({
   );
 }
 
+/** A triage row's two answers: the promise was made to Dom, or to someone else. */
+function TriageActions({ commitment, size }: { commitment: CommitmentView; size: 'sm' | 'lg' }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <ActionForm action={confirmCommitment} className={cn(size === 'lg' && 'flex-1')}>
+        <input type="hidden" name="commitmentId" value={commitment.id} />
+        <SubmitButton size={size} pendingLabel="Moving" className={cn(size === 'lg' && 'w-full')}>
+          Owed to me
+        </SubmitButton>
+      </ActionForm>
+      <ActionForm action={dismissCommitment}>
+        <input type="hidden" name="commitmentId" value={commitment.id} />
+        <SubmitButton variant="ghost" size={size} pendingLabel="Dropping">
+          Not mine
+        </SubmitButton>
+      </ActionForm>
+    </div>
+  );
+}
+
 /** A closed row's actions cell: where to reopen it, edit it or add a note. */
 function ClosedActions({ commitment }: { commitment: CommitmentView }) {
   return (
@@ -167,12 +194,15 @@ function ClosedActions({ commitment }: { commitment: CommitmentView }) {
 export function CommitmentsTable({
   commitments,
   direction,
+  triage,
   now,
   footer,
 }: {
   commitments: readonly CommitmentView[];
   /** The tab being shown; Chase is offered only where someone else owes the answer. */
   direction: CommitmentDirection;
+  /** The triage tab: commitments possibly owed to Dom, waiting for him to say (ADR 0037). */
+  triage: boolean;
   now: Date;
   /** The paging footer, rendered under the table and under the cards. */
   footer: ReactNode;
@@ -181,7 +211,11 @@ export function CommitmentsTable({
     <>
       <TableCard className="hidden lg:block">
         <Table
-          caption={`Commitments ${direction === 'outbound' ? 'Dom owes' : 'owed to Dom'}, overdue first`}
+          caption={
+            triage
+              ? 'Commitments that may be owed to Dom, to confirm'
+              : `Commitments ${direction === 'outbound' ? 'Dom owes' : 'owed to Dom'}, overdue first`
+          }
         >
           <thead>
             <tr>
@@ -203,6 +237,13 @@ export function CommitmentsTable({
                 >
                   <RowCells commitment={commitment} now={now} />
                 </CommitmentRowPair>
+              ) : isCommitmentUnconfirmed(commitment) ? (
+                <Tr key={commitment.id}>
+                  <RowCells commitment={commitment} now={now} />
+                  <Td>
+                    <TriageActions commitment={commitment} size="sm" />
+                  </Td>
+                </Tr>
               ) : (
                 <Tr key={commitment.id} muted>
                   <RowCells commitment={commitment} now={now} />
@@ -265,6 +306,11 @@ export function CommitmentsTable({
             >
               {body}
             </CommitmentCard>
+          ) : isCommitmentUnconfirmed(commitment) ? (
+            <li key={commitment.id} className="flex flex-col gap-3 rounded-xl bg-card p-4">
+              {body}
+              <TriageActions commitment={commitment} size="lg" />
+            </li>
           ) : (
             <li
               key={commitment.id}

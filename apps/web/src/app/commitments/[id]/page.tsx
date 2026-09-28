@@ -23,6 +23,7 @@ import {
   dueDayOf,
   isCommitmentOpenForAction,
   isCommitmentOverdue,
+  isCommitmentUnconfirmed,
   sourceStateSentence,
   statusChoices,
   type CommitmentNoteView,
@@ -37,6 +38,8 @@ import { apiClient } from '@/lib/trpc';
 import {
   addCommitmentNote,
   chaseCommitment,
+  confirmCommitment,
+  dismissCommitment,
   editCommitment,
   setCommitmentStatus,
 } from '../actions';
@@ -89,7 +92,8 @@ function StatusBadge({ commitment }: { commitment: CommitmentView }) {
 
 function Facts({ commitment, now }: { commitment: CommitmentView; now: Date }) {
   const ageing = ageingLabel(commitment, now);
-  const inferred = commitment.dueConfidence !== null && commitment.dueConfidence < 1;
+  const inferred =
+    commitment.dueAt !== null && commitment.dueConfidence !== null && commitment.dueConfidence < 1;
   return (
     <KeyValueGrid className="border-t border-border pt-4">
       <KeyValue label="Counterparty">
@@ -238,11 +242,38 @@ function Notes({ commitmentId, notes }: { commitmentId: string; notes: Commitmen
   );
 }
 
+/** The question an unconfirmed commitment waits on (ADR 0037). */
+function TriageQuestion({ commitment }: { commitment: CommitmentView }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg bg-background p-4">
+      <p className="m-0 text-sm">
+        Lance could not tell whether {commitment.counterparty.name} promised this to you or to
+        someone else. Nothing chases it until you say it is yours.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <ActionForm action={confirmCommitment} className="flex-1">
+          <input type="hidden" name="commitmentId" value={commitment.id} />
+          <SubmitButton pendingLabel="Moving" className="w-full">
+            Owed to me
+          </SubmitButton>
+        </ActionForm>
+        <ActionForm action={dismissCommitment}>
+          <input type="hidden" name="commitmentId" value={commitment.id} />
+          <SubmitButton pendingLabel="Dropping" variant="outline">
+            Not mine
+          </SubmitButton>
+        </ActionForm>
+      </div>
+    </div>
+  );
+}
+
 function StatusControl({ commitment }: { commitment: CommitmentView }) {
   const choices = statusChoices(commitment);
   const chaseable = commitment.direction === 'inbound' && isCommitmentOpenForAction(commitment);
   return (
     <>
+      {isCommitmentUnconfirmed(commitment) ? <TriageQuestion commitment={commitment} /> : null}
       {chaseable ? (
         <ActionForm action={chaseCommitment}>
           <input type="hidden" name="commitmentId" value={commitment.id} />
@@ -318,11 +349,17 @@ export default async function CommitmentPage({ params }: { params: Promise<{ id:
     <div className="flex flex-col gap-6">
       <PageHeader
         back={{
-          href: `/commitments?direction=${commitment.direction}`,
+          href: isCommitmentUnconfirmed(commitment)
+            ? '/commitments?tab=triage'
+            : `/commitments?direction=${commitment.direction}`,
           label: 'Back to commitments',
         }}
         title={commitment.description}
-        summary={`${DIRECTION_LABELS[commitment.direction]}, with ${commitment.counterparty.name}`}
+        summary={
+          isCommitmentUnconfirmed(commitment)
+            ? `Might be owed to you, from ${commitment.counterparty.name}`
+            : `${DIRECTION_LABELS[commitment.direction]}, with ${commitment.counterparty.name}`
+        }
       />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start">
@@ -330,7 +367,11 @@ export default async function CommitmentPage({ params }: { params: Promise<{ id:
           <Card>
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge commitment={commitment} />
-              <Badge tone="neutral-strong">{DIRECTION_LABELS[commitment.direction]}</Badge>
+              <Badge tone="neutral-strong">
+                {isCommitmentUnconfirmed(commitment)
+                  ? 'Might be owed to you'
+                  : DIRECTION_LABELS[commitment.direction]}
+              </Badge>
             </div>
             <blockquote className="m-0 border-l-2 border-brand pl-3 text-[15px] leading-relaxed break-words">
               &quot;{commitment.evidenceQuote}&quot;
