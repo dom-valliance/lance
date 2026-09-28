@@ -124,7 +124,7 @@ export const COMMITMENT_DIRECTIONS = ['outbound', 'inbound'] as const;
 export const CommitmentDirectionSchema = z.enum(COMMITMENT_DIRECTIONS);
 export type CommitmentDirection = z.infer<typeof CommitmentDirectionSchema>;
 
-export const COMMITMENT_STATUSES = ['open', 'chased', 'done', 'dropped'] as const;
+export const COMMITMENT_STATUSES = ['open', 'chased', 'done', 'dropped', 'unconfirmed'] as const;
 export const CommitmentStatusSchema = z.enum(COMMITMENT_STATUSES);
 export type CommitmentStatus = z.infer<typeof CommitmentStatusSchema>;
 
