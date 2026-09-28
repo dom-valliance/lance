@@ -1,11 +1,11 @@
-import { commitments, runMigrations, type Db, type NewCommitment } from '@lance/db';
+import { commitments, observations, runMigrations, type Db, type NewCommitment } from '@lance/db';
 import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createCommitmentStore, type CommitmentStoreLike } from './store.js';
 
-/** The Commitments reads and the one status write, over a real database. */
+/** The Commitments reads and writes, over a real database. */
 
 let container: StartedPostgreSqlContainer;
 let db: Db;
@@ -115,5 +115,107 @@ describe('createCommitmentStore', () => {
       }),
     ).toBeNull();
     expect((await store.get(id))?.status).toBe('dropped');
+  });
+
+  it('applies an edit to a row unchanged since it was read', async () => {
+    const id = await insert();
+    const read = await store.get(id);
+    const at = new Date('2026-09-22T09:00:00.000Z');
+
+    const updated = await store.update({
+      id,
+      set: { description: 'Send the countersigned order form', dueAt: null, dueConfidence: null },
+      unchangedSince: read?.updatedAt ?? new Date(0),
+      at,
+    });
+
+    expect(updated?.description).toBe('Send the countersigned order form');
+    expect(updated?.dueAt).toBeNull();
+    expect(updated?.updatedAt.toISOString()).toBe(at.toISOString());
+  });
+
+  it('refuses an edit to a row that changed after it was read', async () => {
+    const id = await insert();
+    const read = await store.get(id);
+    await store.setStatus({
+      id,
+      from: ['open'],
+      to: 'chased',
+      at: new Date('2026-09-22T10:00:00Z'),
+    });
+
+    const updated = await store.update({
+      id,
+      set: { description: 'Overwritten' },
+      unchangedSince: read?.updatedAt ?? new Date(0),
+      at: new Date('2026-09-22T11:00:00.000Z'),
+    });
+
+    expect(updated).toBeNull();
+    expect((await store.get(id))?.description).toBe('Send the signed order form');
+  });
+
+  it('adds notes and reads them back oldest first', async () => {
+    const id = await insert();
+    const first = newUlid();
+    await store.addNote({ id: first, commitmentId: id, body: 'Asked Ann', author: 'user:dom' });
+    const second = newUlid();
+    await store.addNote({ id: second, commitmentId: id, body: 'Ann replied', author: 'user:dom' });
+
+    const notes = await store.notes(id);
+
+    expect(notes.map((note) => note.body)).toEqual(['Asked Ann', 'Ann replied']);
+    expect(notes[0]?.author).toBe('user:dom');
+  });
+
+  it('reads the newest observation of each cited record, skipping a removal', async () => {
+    const observe = async (recordId: string, payload: unknown): Promise<void> => {
+      const id = newUlid();
+      await db.insert(observations).values({
+        id,
+        ts: new Date('2026-09-14T09:00:00.000Z'),
+        sourceSystem: 'graph',
+        sourceRecordId: recordId,
+        sourceRecordHash: `hash-${id}`,
+        idempotencyKey: `graph:${recordId}:${id}`,
+        correlationId: newUlid(),
+        summary: 'Dom: The order form',
+        payload,
+      });
+    };
+    await observe('AAMk-ctx', { subject: 'first read', bodyText: 'short' });
+    await observe('AAMk-ctx', { subject: 'fuller read', bodyText: 'longer body' });
+    await observe('AAMk-ctx', { id: 'AAMk-ctx', removed: true });
+    await observe('AAMk-other', { subject: 'not cited' });
+
+    const sources = await store.sources([
+      { system: 'graph', recordId: 'AAMk-ctx' },
+      { system: 'jamie', recordId: 'never-seen' },
+    ]);
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.payload).toEqual({ subject: 'fuller read', bodyText: 'longer body' });
+  });
+
+  it('reads no sources when none are cited', async () => {
+    expect(await store.sources([])).toEqual([]);
+  });
+
+  it('leaves unconfirmed commitments out unless they are asked for by name', async () => {
+    const waiting = await insert({ status: 'unconfirmed', description: 'Circulate the timeline' });
+
+    const unnamed = await store.list({ limit: 1000, direction: 'inbound' });
+    const named = await store.list({ limit: 1000, status: 'unconfirmed' });
+
+    expect(unnamed.map((row) => row.id)).not.toContain(waiting);
+    expect(named.map((row) => row.id)).toContain(waiting);
+    expect(await store.count({ direction: 'inbound' })).toBe(unnamed.length);
+  });
+
+  it('counts the unconfirmed commitments in the summary', async () => {
+    const before = (await store.summary(new Date())).unconfirmed;
+    await insert({ status: 'unconfirmed', description: 'Share the deck with everyone' });
+
+    expect((await store.summary(new Date())).unconfirmed).toBe(before + 1);
   });
 });

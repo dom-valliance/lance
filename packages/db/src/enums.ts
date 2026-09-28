@@ -77,7 +77,13 @@ export const ALERT_STATUS_VALUES = ['open', 'acked', 'resolved', 'suppressed'] a
 
 export const COMMITMENT_DIRECTION_VALUES = ['outbound', 'inbound'] as const;
 
-export const COMMITMENT_STATUS_VALUES = ['open', 'chased', 'done', 'dropped'] as const;
+export const COMMITMENT_STATUS_VALUES = [
+  'open',
+  'chased',
+  'done',
+  'dropped',
+  'unconfirmed',
+] as const;
 
 export const SYSTEM_MODE_VALUES = ['live', 'dry_run'] as const;
 

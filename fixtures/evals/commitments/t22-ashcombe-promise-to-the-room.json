@@ -1,0 +1,32 @@
+{
+  "id": "t22-ashcombe-promise-to-the-room",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Hana Okafor",
+      "email": "hana.okafor@ashcombelogistics.example.test"
+    },
+    {
+      "name": "Lewis Grant",
+      "email": "lewis.grant@ashcombelogistics.example.test"
+    }
+  ],
+  "text": "# Ashcombe Logistics: steering group\n\n**Date:** Thursday 8 October 2026\n\n###### 00:00 - 00:30\n**Lewis Grant**\n\nThe pilot numbers look right to me. The open point is the revised timeline once the depot move is confirmed.\n\n###### 00:30 - 00:58\n**Hana Okafor**\n\nThe move date lands next Wednesday. We will circulate the revised timeline to everyone once it is confirmed.\n\n###### 00:58 - 01:20\n**Dom Selvon**\n\nThat would help. We can adjust the rollout plan around it.\n\n###### 01:20 - 01:35\n**Lewis Grant**\n\nGood, let us pick it up then.\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Circulate the revised timeline once the depot move is confirmed",
+      "counterpartyName": "Hana Okafor",
+      "counterpartyEmail": "hana.okafor@ashcombelogistics.example.test",
+      "dueAt": null,
+      "dueConfidence": 0,
+      "evidenceQuote": "We will circulate the revised timeline to everyone once it is confirmed.",
+      "owedToPrincipal": "possible"
+    }
+  ],
+  "notes": "A promise made to the whole steering group, principal included. It may be owed to the principal, so it is possible rather than definite (ADR 0037)."
+}

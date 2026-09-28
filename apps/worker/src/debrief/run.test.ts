@@ -6,7 +6,13 @@ import { LedgerReader, LedgerWriter } from '@lance/ledger';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { externalPeople, renderDebriefMarkdown, runDebrief, type DebriefInput } from './run.js';
+import {
+  commitmentLabel,
+  externalPeople,
+  renderDebriefMarkdown,
+  runDebrief,
+  type DebriefInput,
+} from './run.js';
 
 let container: StartedPostgreSqlContainer;
 let db: Db;
@@ -56,6 +62,7 @@ const input = (overrides: Partial<DebriefInput> = {}): DebriefInput => ({
     {
       id: '01COMMITMENT00000000000001',
       direction: 'outbound',
+      status: 'open',
       description: 'Send the SOW',
       counterpartyPersonId: 'p1',
     },
@@ -193,5 +200,18 @@ describe('runDebrief', () => {
     expect(result.followUpProposalId).toBeNull();
     expect(result.slackTs).toBeNull();
     expect(runner.calls).toHaveLength(0);
+  });
+});
+
+describe('commitmentLabel', () => {
+  it('says plainly who owes a confirmed commitment', () => {
+    expect(commitmentLabel({ direction: 'outbound', status: 'open' })).toBe('Dom owes');
+    expect(commitmentLabel({ direction: 'inbound', status: 'open' })).toBe('Owed to Dom');
+  });
+
+  it('marks an unconfirmed commitment as one to confirm', () => {
+    expect(commitmentLabel({ direction: 'inbound', status: 'unconfirmed' })).toBe(
+      'Might be owed to Dom, to confirm',
+    );
   });
 });

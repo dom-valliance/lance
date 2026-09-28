@@ -65,6 +65,7 @@ export const COMMITMENT_STATUS_TONES: Record<CommitmentStatus | 'overdue', Tone>
   chased: 'peach',
   done: 'green',
   dropped: 'neutral',
+  unconfirmed: 'neutral-strong',
   overdue: 'red',
 };
 

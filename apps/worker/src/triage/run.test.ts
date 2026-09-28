@@ -127,6 +127,8 @@ describe('runTriage', () => {
         {
           direction: 'outbound',
           description: 'Send revised SOW',
+          promisedTo: 'Client Person',
+          owedToPrincipal: null,
           counterpartyName: 'Client Person',
           counterpartyEmail: 'client@example.com',
           dueAt: '2026-09-25',
@@ -250,6 +252,8 @@ describe('runTriage', () => {
     const candidate = (description: string, evidenceQuote: string) => ({
       direction: 'inbound' as const,
       description,
+      promisedTo: 'Dom Selvon',
+      owedToPrincipal: 'definite' as const,
       counterpartyName: 'Ronan Forker',
       counterpartyEmail: 'ronan@valliance.ai',
       dueAt: null,

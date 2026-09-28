@@ -46,6 +46,8 @@ describe('createCommitmentExtractor', () => {
         {
           direction: 'outbound',
           description: 'Send the revised statement of work',
+          promisedTo: 'Ann Example',
+          owedToPrincipal: null,
           counterpartyName: 'Ann Example',
           counterpartyEmail: 'ann@client.test',
           dueAt: '2026-09-25',
@@ -56,6 +58,8 @@ describe('createCommitmentExtractor', () => {
         {
           direction: 'inbound',
           description: 'Confirm the start date',
+          promisedTo: 'Dom Selvon',
+          owedToPrincipal: 'definite',
           counterpartyName: 'Ann Example',
           counterpartyEmail: 'ann@client.test',
           dueAt: null,
@@ -72,6 +76,61 @@ describe('createCommitmentExtractor', () => {
     expect(commitments[0]).toMatchObject({ direction: 'outbound', recordId: 'mail-1' });
     expect(runner.calls[0]?.tools).toEqual([]);
     expect(JSON.stringify(runner.calls[0]?.messages)).toContain('Source id: mail-1');
+  });
+
+  it('holds inbound promises to the floor: named principal definite, another person possible, someone else gone', async () => {
+    const meeting = {
+      ...source,
+      id: 'mtg-1',
+      kind: 'transcript' as const,
+      text: 'Ann: I will send you the volumes, Dom. Ann: I will get Priya the logo files. Ann: We will share the deck with everyone.',
+    };
+    const candidate = (
+      description: string,
+      evidenceQuote: string,
+      promisedTo: string | null,
+      owedToPrincipal: 'definite' | 'possible' | 'not_principal',
+    ) => ({
+      direction: 'inbound',
+      description,
+      promisedTo,
+      owedToPrincipal,
+      counterpartyName: 'Ann Example',
+      counterpartyEmail: 'ann@client.test',
+      dueAt: null,
+      dueConfidence: 0,
+      evidenceQuote,
+      recordId: 'mtg-1',
+    });
+    const { extract } = extractorWith({
+      commitments: [
+        candidate(
+          'Send the volumes',
+          'I will send you the volumes, Dom.',
+          'Dom Selvon',
+          'definite',
+        ),
+        candidate(
+          'Send the logo files',
+          'I will get Priya the logo files.',
+          'Priya Nandra',
+          'not_principal',
+        ),
+        candidate(
+          'Share the deck',
+          'We will share the deck with everyone.',
+          'Priya Nandra',
+          'definite',
+        ),
+      ],
+    });
+
+    const commitments = await extract(meeting, '01ARZ3NDEKTSV4RRFFQ69G5FAV');
+
+    expect(commitments.map((item) => [item.description, item.owedToPrincipal])).toEqual([
+      ['Send the volumes', 'definite'],
+      ['Share the deck', 'possible'],
+    ]);
   });
 
   it('rejects a source that is not a transcript or a sent email before calling the model', async () => {

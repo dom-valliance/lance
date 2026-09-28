@@ -39,10 +39,15 @@ export {
   CommitmentCandidateSchema,
   CommitmentExtractionSchema,
   CommitmentSourceSchema,
+  OWED_TO_PRINCIPAL,
+  OwedToPrincipalSchema,
 } from './commitments/schema.js';
 export type {
   CommitmentCandidate,
   CommitmentExtraction,
   CommitmentSource,
+  OwedToPrincipal,
 } from './commitments/schema.js';
+export { namesPrincipal, settleOwedToPrincipal } from './commitments/settle.js';
+export type { PrincipalName, SettleableCandidate } from './commitments/settle.js';
 export { supportsAdaptiveThinking } from './models.js';

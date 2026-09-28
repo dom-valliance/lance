@@ -2,6 +2,7 @@ import {
   createProposalTool,
   readTools,
   runAgent,
+  settleOwedToPrincipal,
   type AgentDeps,
   type CommitmentCandidate,
   type CommitmentExtractor,
@@ -471,6 +472,11 @@ export async function runTriage(deps: TriageDeps, job: TriageJob): Promise<Triag
   commitmentCandidates = commitmentCandidates.filter(
     (candidate) => provenanceFor(events, candidate.recordId).length > 0,
   );
+  // The extractor's list already stands on the floor of ADR 0037; triage's
+  // own candidates are held to it here, so both paths record the same way.
+  if (deps.principal) {
+    commitmentCandidates = settleOwedToPrincipal(commitmentCandidates, deps.principal);
+  }
 
   // Each commitment is recorded with the provenance of the record it was
   // quoted from (non-negotiable 5), so candidates are grouped by record: a

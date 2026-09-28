@@ -33,8 +33,9 @@
       "counterpartyEmail": "ravi.khatri@calderhealth.example.test",
       "dueAt": null,
       "dueConfidence": 0,
-      "evidenceQuote": "I will put the third ward question on the November agenda and let you know the date once it is fixed."
+      "evidenceQuote": "I will put the third ward question on the November agenda and let you know the date once it is fixed.",
+      "owedToPrincipal": "possible"
     }
   ],
-  "notes": "Long meeting with two commitments buried in status discussion, one of them undated."
+  "notes": "Long meeting with two commitments buried in status discussion, one of them undated. Ravi answers Stefan with \"let you know\" on a three-way call, so the promise is to the room: possible, not definite (ADR 0037)."
 }

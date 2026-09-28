@@ -28,6 +28,8 @@ describe('evidenceQuote on the candidate schemas', () => {
   const commitment = {
     direction: 'outbound',
     description: 'Send revised SOW',
+    promisedTo: null,
+    owedToPrincipal: null,
     counterpartyName: null,
     counterpartyEmail: null,
     dueAt: null,
