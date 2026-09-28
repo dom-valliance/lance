@@ -33,3 +33,4 @@ One file per decision, numbered, never edited after acceptance except to add a `
 | 0034 | Bulk mail skips model triage | Accepted |
 | 0035 | Principal identity per context, and who may change shared facts | Accepted |
 | 0036 | Commitments are edited, reopened and annotated by hand | Accepted |
+| 0037 | Inbound commitments need a definite recipient | Accepted |
