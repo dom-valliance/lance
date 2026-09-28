@@ -18,6 +18,17 @@ export interface ScorableCommitment {
   counterpartyName: string | null;
   counterpartyEmail: string | null;
   dueAt: string | null;
+  /**
+   * How sure the item is that an inbound promise is owed to the principal
+   * (ADR 0037). Absent on an expected inbound item means definite.
+   */
+  owedToPrincipal?: 'definite' | 'possible' | 'not_principal' | null | undefined;
+}
+
+/** The certainty an item is matched on: definite unless it says otherwise; none for outbound. */
+function certaintyOf(item: ScorableCommitment): string | null {
+  if (item.direction === 'outbound') return null;
+  return item.owedToPrincipal ?? 'definite';
 }
 
 export interface CommitmentMatch {
@@ -249,7 +260,8 @@ function ratio(numerator: number, denominator: number, emptyIsPerfect: boolean):
  * Greedy one-to-one matching by highest description similarity, then precision,
  * recall and F1 over the result.
  *
- * A pair is eligible when the direction is identical, the counterparty is the
+ * A pair is eligible when the direction and, for inbound, the certainty
+ * that it is owed to the principal are identical, the counterparty is the
  * same by the rule above, and the description similarity is above the
  * threshold. Ties are broken by expected index, then actual index, so the score
  * does not depend on iteration order.
@@ -267,6 +279,9 @@ export function scoreCommitments(
   for (const [expectedIndex, expectedItem] of expected.entries()) {
     for (const [actualIndex, actualItem] of actual.entries()) {
       if (expectedItem.direction !== actualItem.direction) {
+        continue;
+      }
+      if (certaintyOf(expectedItem) !== certaintyOf(actualItem)) {
         continue;
       }
       if (!sameCounterparty(expectedItem, actualItem)) {

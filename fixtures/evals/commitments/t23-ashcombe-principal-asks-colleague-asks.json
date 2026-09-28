@@ -1,0 +1,36 @@
+{
+  "id": "t23-ashcombe-principal-asks-colleague-asks",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Tom Ashby",
+      "email": "tom.ashby@valliance.ai"
+    },
+    {
+      "name": "Hana Okafor",
+      "email": "hana.okafor@ashcombelogistics.example.test"
+    },
+    {
+      "name": "Lewis Grant",
+      "email": "lewis.grant@ashcombelogistics.example.test"
+    }
+  ],
+  "text": "# Ashcombe Logistics: pilot review\n\n**Date:** Friday 9 October 2026\n\n###### 00:00 - 00:26\n**Dom Selvon**\n\nLewis, before I write the recommendation I need last month's failed delivery counts by depot. Can you send those to me?\n\n###### 00:26 - 00:49\n**Lewis Grant**\n\nYes, I will send you the failed delivery counts by depot on Monday, Dom.\n\n###### 00:49 - 01:18\n**Tom Ashby**\n\nHana, could I have the schema for the returns table as well?\n\n###### 01:18 - 01:37\n**Hana Okafor**\n\nSure, I will send that over to you this afternoon, Tom.\n\n###### 01:37 - 01:50\n**Dom Selvon**\n\nThanks all.\n",
+  "expected": [
+    {
+      "direction": "inbound",
+      "description": "Send the failed delivery counts by depot for last month",
+      "counterpartyName": "Lewis Grant",
+      "counterpartyEmail": "lewis.grant@ashcombelogistics.example.test",
+      "dueAt": "2026-10-12",
+      "dueConfidence": 0.7,
+      "evidenceQuote": "Yes, I will send you the failed delivery counts by depot on Monday, Dom.",
+      "owedToPrincipal": "definite"
+    }
+  ],
+  "notes": "Two client promises on one call: one answers the principal's own request and names him, so it is definite; the other answers his colleague and is left out (ADR 0037)."
+}

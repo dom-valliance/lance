@@ -144,6 +144,20 @@ describe('sameCalendarDay', () => {
 });
 
 describe('scoreCommitments', () => {
+  it('does not match an inbound item whose certainty differs', () => {
+    const expected = [commitment({ direction: 'inbound', owedToPrincipal: 'possible' })];
+    const actual = [commitment({ direction: 'inbound', owedToPrincipal: 'definite' })];
+
+    expect(scoreCommitments(expected, actual).truePositives).toBe(0);
+  });
+
+  it('reads an expected inbound item without a certainty as definite', () => {
+    const expected = [commitment({ direction: 'inbound' })];
+    const actual = [commitment({ direction: 'inbound', owedToPrincipal: 'definite' })];
+
+    expect(scoreCommitments(expected, actual).truePositives).toBe(1);
+  });
+
   it('scores an empty expected set against an empty extraction as perfect', () => {
     const score = scoreCommitments([], []);
     expect(score).toMatchObject({

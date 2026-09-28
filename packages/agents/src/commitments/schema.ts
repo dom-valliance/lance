@@ -2,6 +2,14 @@ import { CommitmentDirectionSchema } from '@lance/shared';
 import { z } from 'zod';
 
 /**
+ * How sure the extractor is that an inbound promise was made to the
+ * principal (ADR 0037). Null for outbound, which the principal makes.
+ */
+export const OWED_TO_PRINCIPAL = ['definite', 'possible', 'not_principal'] as const;
+export const OwedToPrincipalSchema = z.enum(OWED_TO_PRINCIPAL);
+export type OwedToPrincipal = z.infer<typeof OwedToPrincipalSchema>;
+
+/**
  * A commitment as the model extracts it (spec 7.2, 10.4). `outbound` is
  * something the principal owes; `inbound` is something owed to them. The evidence
  * quote is verbatim text from the source; the eval harness checks it.
@@ -9,6 +17,9 @@ import { z } from 'zod';
 export const CommitmentCandidateSchema = z.object({
   direction: CommitmentDirectionSchema,
   description: z.string().min(1).max(500),
+  /** The person the promise was said or written to, as the text shows it; null when nobody is. */
+  promisedTo: z.string().max(200).nullable(),
+  owedToPrincipal: OwedToPrincipalSchema.nullable(),
   counterpartyName: z.string().max(200).nullable(),
   counterpartyEmail: z.string().max(320).nullable(),
   /** ISO date or date-time when the text gives one; null when it does not. */

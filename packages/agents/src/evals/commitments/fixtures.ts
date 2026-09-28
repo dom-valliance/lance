@@ -24,6 +24,8 @@ export const ExpectedCommitmentSchema = z.object({
     .nullable(),
   dueConfidence: z.number().min(0).max(1),
   evidenceQuote: z.string().min(1).max(500),
+  /** Inbound only: absent means definite (ADR 0037). */
+  owedToPrincipal: z.enum(['definite', 'possible']).optional(),
 });
 
 const ParticipantSchema = z.object({
