@@ -1,5 +1,5 @@
 import type { CommitmentCandidate } from '@lance/agents';
-import { commitments, type Db } from '@lance/db';
+import { commitments, type Commitment, type Db } from '@lance/db';
 import { LedgerWriter } from '@lance/ledger';
 import { OntologyRepository, normaliseEmail, type SourceRef } from '@lance/ontology';
 import {
@@ -17,6 +17,11 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
  * through the ontology, the row is written once, and the ledger records
  * it. A commitment already open with the same direction, counterparty and
  * description is not recorded again.
+ *
+ * An inbound commitment only possibly owed to the principal is recorded
+ * `unconfirmed` (ADR 0037), where nothing chases or alerts on it. When a
+ * later source makes the same promise definitely, the waiting row is
+ * opened rather than a second one recorded.
  */
 
 export const COMMITMENTS_ACTOR = 'system:commitments';
@@ -48,14 +53,36 @@ export interface RecordCommitmentsContext {
 export interface RecordedCommitment {
   id: string;
   direction: CommitmentCandidate['direction'];
+  /** `open`, or `unconfirmed` for an inbound promise the principal may not be owed. */
+  status: RecordedStatus;
   description: string;
   counterpartyPersonId: string;
 }
 
 export interface RecordCommitmentsResult {
   recorded: RecordedCommitment[];
+  /** Unconfirmed rows a definite repeat of the same promise opened. */
+  confirmed: string[];
   skipped: number;
 }
+
+export type RecordedStatus = Extract<Commitment['status'], 'open' | 'unconfirmed'>;
+
+/**
+ * The status a candidate is recorded with: open for anything the principal
+ * owes and anything definitely owed to them, unconfirmed otherwise. A
+ * candidate that reached here without a certainty is treated as possible.
+ */
+export function recordedStatusOf(
+  candidate: Pick<CommitmentCandidate, 'direction' | 'owedToPrincipal'>,
+): RecordedStatus {
+  if (candidate.direction === 'outbound') return 'open';
+  return candidate.owedToPrincipal === 'definite' ? 'open' : 'unconfirmed';
+}
+
+/** Why the recorder opened an unconfirmed commitment, in its ledger event. */
+export const CONFIRMED_BY_REPEAT_REASON =
+  'A later source made the same promise to the principal directly.';
 
 function sourceRefOf(ref: ProvenanceRef): SourceRef {
   return {
@@ -114,6 +141,7 @@ export async function recordCommitments(
   );
 
   const recorded: RecordedCommitment[] = [];
+  const confirmed: string[] = [];
   let skipped = 0;
 
   for (const candidate of candidates) {
@@ -132,20 +160,30 @@ export async function recordCommitments(
       continue;
     }
 
-    const duplicate = await deps.db
-      .select({ id: commitments.id })
+    const status = recordedStatusOf(candidate);
+    const duplicates = await deps.db
+      .select({ id: commitments.id, status: commitments.status })
       .from(commitments)
       .where(
         and(
           eq(commitments.direction, candidate.direction),
           eq(commitments.counterpartyPersonId, counterparty.id),
-          inArray(commitments.status, ['open', 'chased']),
+          inArray(commitments.status, ['open', 'chased', 'unconfirmed']),
           sql`lower(${commitments.description}) = lower(${candidate.description})`,
         ),
       )
       .limit(1);
-    if (duplicate.length > 0) {
-      skipped += 1;
+    const duplicate = duplicates[0];
+    if (duplicate !== undefined) {
+      if (duplicate.status === 'unconfirmed' && status === 'open') {
+        await confirmByRepeat(deps.db, ledger, duplicate.id, now(), {
+          ...mutation,
+          provenance: context.provenance,
+        });
+        confirmed.push(duplicate.id);
+      } else {
+        skipped += 1;
+      }
       continue;
     }
 
@@ -165,7 +203,7 @@ export async function recordCommitments(
       dueConfidence: candidate.dueConfidence,
       evidenceQuote: candidate.evidenceQuote,
       sourceRefs: context.provenance,
-      status: 'open',
+      status,
       nextChaseAt,
     });
 
@@ -193,6 +231,9 @@ export async function recordCommitments(
         kind: 'commitment_recorded',
         commitmentId: id,
         direction: candidate.direction,
+        status,
+        promisedTo: candidate.promisedTo,
+        owedToPrincipal: candidate.owedToPrincipal,
         description: candidate.description,
         counterpartyPersonId: counterparty.id,
         counterpartyResolution: counterparty.decision,
@@ -203,10 +244,48 @@ export async function recordCommitments(
     recorded.push({
       id,
       direction: candidate.direction,
+      status,
       description: candidate.description,
       counterpartyPersonId: counterparty.id,
     });
   }
 
-  return { recorded, skipped };
+  return { recorded, confirmed, skipped };
+}
+
+/**
+ * Opens an unconfirmed commitment a definite repeat has confirmed. The
+ * status is part of the WHERE clause, so a principal who dropped it in the
+ * meantime keeps their decision and no event is written.
+ */
+async function confirmByRepeat(
+  db: Db,
+  ledger: LedgerWriter,
+  id: string,
+  ts: string,
+  context: { correlationId: string; actor: string; provenance: ProvenanceRef[] },
+): Promise<void> {
+  const rows = await db
+    .update(commitments)
+    .set({ status: 'open', updatedAt: new Date(ts) })
+    .where(and(eq(commitments.id, id), eq(commitments.status, 'unconfirmed')))
+    .returning({ id: commitments.id });
+  if (rows.length === 0) return;
+  const first = context.provenance[0];
+  await ledger.append({
+    ts,
+    actor: context.actor,
+    kind: 'resolved',
+    sourceSystem: first?.system ?? 'lance',
+    sourceRecordId: first?.recordId ?? id,
+    correlationId: context.correlationId,
+    payload: {
+      kind: 'commitment_status',
+      commitmentId: id,
+      from: 'unconfirmed',
+      to: 'open',
+      reason: CONFIRMED_BY_REPEAT_REASON,
+      provenance: context.provenance,
+    },
+  });
 }

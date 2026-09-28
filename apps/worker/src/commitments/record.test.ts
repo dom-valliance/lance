@@ -4,7 +4,7 @@ import { LedgerReader } from '@lance/ledger';
 import { OntologyRepository } from '@lance/ontology';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { recordCommitments } from './record.js';
+import { CONFIRMED_BY_REPEAT_REASON, recordCommitments, recordedStatusOf } from './record.js';
 
 let container: StartedPostgreSqlContainer;
 let db: Db;
@@ -25,6 +25,8 @@ const candidates = [
   {
     direction: 'outbound' as const,
     description: 'Send the revised statement of work',
+    promisedTo: 'Ann Example',
+    owedToPrincipal: null,
     counterpartyName: 'Ann Example',
     counterpartyEmail: 'ann@client.test',
     dueAt: '2026-09-25',
@@ -35,6 +37,8 @@ const candidates = [
   {
     direction: 'inbound' as const,
     description: 'Confirm the start date',
+    promisedTo: 'Dom Selvon',
+    owedToPrincipal: 'definite' as const,
     counterpartyName: 'Ann Example',
     counterpartyEmail: null,
     dueAt: '2026-09-23',
@@ -121,5 +125,73 @@ describe('recordCommitments', () => {
     );
     expect(result.recorded).toHaveLength(0);
     expect(result.skipped).toBe(2);
+  });
+
+  const possible = {
+    ...candidates[1]!,
+    description: 'Circulate the revised timeline',
+    promisedTo: null,
+    owedToPrincipal: 'possible' as const,
+    evidenceQuote: 'We will circulate the revised timeline to everyone',
+  };
+  const context = {
+    correlationId,
+    actor: 'agent:triage@0.1.0',
+    provenance,
+    directory: [{ name: 'Ann Example', email: 'ann@client.test' }],
+  };
+  const rowFor = async (description: string) =>
+    (await db.select().from(commitments)).find((row) => row.description === description);
+
+  it('records a promise only possibly owed to Dom as unconfirmed', async () => {
+    const result = await recordCommitments({ db, ontology, principal }, [possible], context);
+
+    expect(result.recorded.map((item) => item.status)).toEqual(['unconfirmed']);
+    expect((await rowFor('Circulate the revised timeline'))?.status).toBe('unconfirmed');
+  });
+
+  it('does not record a possible repeat of an unconfirmed commitment', async () => {
+    const result = await recordCommitments({ db, ontology, principal }, [possible], context);
+
+    expect(result.recorded).toHaveLength(0);
+    expect(result.confirmed).toHaveLength(0);
+    expect(result.skipped).toBe(1);
+  });
+
+  it('opens the unconfirmed commitment when a later source makes the promise definitely', async () => {
+    const waiting = await rowFor('Circulate the revised timeline');
+    const result = await recordCommitments(
+      { db, ontology, principal },
+      [{ ...possible, promisedTo: 'Dom Selvon', owedToPrincipal: 'definite' as const }],
+      context,
+    );
+
+    expect(result.recorded).toHaveLength(0);
+    expect(result.confirmed).toEqual([waiting?.id]);
+    expect((await rowFor('Circulate the revised timeline'))?.status).toBe('open');
+    const trail = await new LedgerReader(db).byCorrelation(correlationId);
+    expect(trail.map((event) => event.payload)).toContainEqual(
+      expect.objectContaining({
+        kind: 'commitment_status',
+        commitmentId: waiting?.id,
+        from: 'unconfirmed',
+        to: 'open',
+        reason: CONFIRMED_BY_REPEAT_REASON,
+      }),
+    );
+  });
+});
+
+describe('recordedStatusOf', () => {
+  it('opens what Dom owes and what is definitely owed to him', () => {
+    expect(recordedStatusOf({ direction: 'outbound', owedToPrincipal: null })).toBe('open');
+    expect(recordedStatusOf({ direction: 'inbound', owedToPrincipal: 'definite' })).toBe('open');
+  });
+
+  it('holds back an inbound promise that is possible or says nothing', () => {
+    expect(recordedStatusOf({ direction: 'inbound', owedToPrincipal: 'possible' })).toBe(
+      'unconfirmed',
+    );
+    expect(recordedStatusOf({ direction: 'inbound', owedToPrincipal: null })).toBe('unconfirmed');
   });
 });
