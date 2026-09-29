@@ -430,6 +430,8 @@ describe('runTriage', () => {
     const commitment = (description: string, evidenceQuote: string) => ({
       direction: 'outbound' as const,
       description,
+      promisedTo: 'Brian Vargas-Meinel',
+      owedToPrincipal: null,
       counterpartyName: 'Brian Vargas-Meinel',
       counterpartyEmail: 'brian@valliance.ai',
       dueAt: null,
@@ -528,6 +530,8 @@ describe('runTriage', () => {
           {
             ...commitment('Send the resourcing plan', 'I will send the resourcing plan'),
             direction: 'inbound' as const,
+            promisedTo: 'Dom Selvon',
+            owedToPrincipal: 'definite' as const,
           },
         ]);
       },
@@ -581,6 +585,8 @@ describe('runTriage', () => {
     const commitment = (description: string) => ({
       direction: 'outbound' as const,
       description,
+      promisedTo: 'Anita Shah',
+      owedToPrincipal: null,
       counterpartyName: 'Anita Shah',
       counterpartyEmail: 'anita@valliance.ai',
       dueAt: null,
