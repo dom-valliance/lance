@@ -63,3 +63,10 @@ Lesson: use plain git for branches and commits. Do not install or use the `gh` C
 **Correction**: Dom ran it and pasted each failure; he chose the portal over signing in as the tenant admin.
 **Rule**: Before handing over a script that changes Entra, read with the operator's own account: owners of every object it edits (`az ad app owner list`, `/servicePrincipals/{id}/owners`), the operator's directory roles (`/me/memberOf`), and the tenant's licences (`/subscribedSkus`). Give the portal route beside any step the operator's CLI token may not be allowed to do.
 **Applies to**: global, Entra and tenant changes
+
+### [2026-09-30] Order a rehearsal so each step leaves evidence for the next check
+
+**Context**: I wrote the test-account rehearsal to offboard first and remove the Entra role last, then noticed on review that the nightly role check then had nothing to catch, so the "access is controlled from Entra" acceptance criterion had no evidence.
+**Correction**: Self-found while mapping the rehearsal to the Phase 5 criteria; reordered to remove the role first, wait a night for the role check's pause, then offboard.
+**Rule**: Before handing over a rehearsal or drill, map every step to the acceptance criteria it is meant to evidence and check that no earlier step pre-empts a later check (a pause, a revocation, a deletion done before the mechanism under test can act). Say how long it spans when a scheduled job must run between steps.
+**Applies to**: runbooks, rehearsals and acceptance evidence
