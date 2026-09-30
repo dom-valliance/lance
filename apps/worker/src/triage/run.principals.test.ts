@@ -156,6 +156,8 @@ describe("triage in a second principal's context", () => {
             {
               direction: 'outbound' as const,
               description: 'Send the resource plan',
+              promisedTo: 'Ronan Forker',
+              owedToPrincipal: null,
               counterpartyName: 'Ronan Forker',
               counterpartyEmail: 'ronan@valliance.ai',
               dueAt: null,

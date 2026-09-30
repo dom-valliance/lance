@@ -15,11 +15,14 @@ import { oneOf, selected, type SearchParams, type SourceSystem } from '@/lib/fil
 export const COMMITMENT_DIRECTIONS = ['outbound', 'inbound'] as const;
 export type CommitmentDirection = (typeof COMMITMENT_DIRECTIONS)[number];
 
-export const COMMITMENT_STATUSES = ['open', 'chased', 'done', 'dropped'] as const;
+export const COMMITMENT_STATUSES = ['open', 'chased', 'done', 'dropped', 'unconfirmed'] as const;
 export type CommitmentStatus = (typeof COMMITMENT_STATUSES)[number];
 
-/** The status filter options the page offers, in display order. */
-export const COMMITMENT_STATUS_FILTERS = [...COMMITMENT_STATUSES, 'all'] as const;
+/**
+ * The status filter options the page offers, in display order. Unconfirmed
+ * is not among them: those commitments have their own tab (ADR 0037).
+ */
+export const COMMITMENT_STATUS_FILTERS = ['open', 'chased', 'done', 'dropped', 'all'] as const;
 export type CommitmentStatusFilter = (typeof COMMITMENT_STATUS_FILTERS)[number];
 
 export interface CommitmentPerson {
@@ -55,9 +58,47 @@ export interface CommitmentView {
   updatedAt: string;
 }
 
+export interface CommitmentNoteView {
+  id: string;
+  body: string;
+  author: string;
+  createdAt: string;
+}
+
+export interface CommitmentExcerpt {
+  before: string;
+  quote: string;
+  after: string;
+}
+
+/** One cited source record as the commitment page shows it (api `SourceContextView`). */
+export interface SourceContextView {
+  system: SourceSystem;
+  recordId: string;
+  url: string | null;
+  observedAt: string;
+  state: 'found' | 'expired' | 'missing';
+  kind: 'email' | 'meeting' | 'record';
+  title: string | null;
+  occurredAt: string | null;
+  from: string | null;
+  people: string[];
+  excerpt: CommitmentExcerpt | null;
+  fallback: string | null;
+}
+
 /** The tab the page shows: `?direction=inbound`, otherwise the default. */
 export function commitmentDirectionFrom(params: SearchParams): CommitmentDirection {
   return oneOf(COMMITMENT_DIRECTIONS, params['direction']) ?? 'outbound';
+}
+
+/** The three tabs: the two directions and the triage bucket of possibly owed commitments. */
+export const COMMITMENT_TABS = ['outbound', 'inbound', 'triage'] as const;
+export type CommitmentTab = (typeof COMMITMENT_TABS)[number];
+
+/** `?tab=triage` shows the triage bucket; otherwise the direction names the tab. */
+export function commitmentTabFrom(params: SearchParams): CommitmentTab {
+  return selected(params, 'tab') === 'triage' ? 'triage' : commitmentDirectionFrom(params);
 }
 
 /** The status filter selected in the query string, `open` when absent. */
@@ -139,10 +180,18 @@ export function sortCommitments<T extends SortableCommitment>(views: readonly T[
   return [...views].sort(commitmentSort);
 }
 
-/** Whether the row still accepts "mark done" or "drop". */
+/** Whether the row still accepts "mark done" or "drop": open or chased. */
 export function isCommitmentOpenForAction(view: Pick<CommitmentView, 'status'>): boolean {
-  return view.status !== 'done' && view.status !== 'dropped';
+  return view.status === 'open' || view.status === 'chased';
 }
+
+/** Whether the row waits in triage for the principal to say it is theirs. */
+export function isCommitmentUnconfirmed(view: Pick<CommitmentView, 'status'>): boolean {
+  return view.status === 'unconfirmed';
+}
+
+/** The reason "Not mine" drops a triaged commitment with, kept in the ledger. */
+export const NOT_MINE_REASON = 'Not owed to me: the promise was made to someone else.';
 
 /** Whether the row is past its due date and still running. */
 export function isCommitmentOverdue(view: Pick<CommitmentView, 'overdueDays'>): boolean {
@@ -162,6 +211,7 @@ export function commitmentBadgeFor(
   if (isCommitmentOverdue(view)) return 'overdue';
   if (view.status === 'chased') return 'chased';
   if (view.status === 'done') return 'done';
+  if (view.status === 'unconfirmed') return 'unconfirmed';
   return null;
 }
 
@@ -195,3 +245,63 @@ export function evidenceLine(
 export function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? name;
 }
+
+/** The longest note the api accepts; the database holds the same limit. */
+export const COMMITMENT_NOTE_MAX_CHARS = 4000;
+
+/** The longest description the api accepts. */
+export const COMMITMENT_DESCRIPTION_MAX_CHARS = 500;
+
+/**
+ * The statuses the status control offers: every status but the current
+ * one, `chased` only for a commitment that has been chased, and
+ * `unconfirmed` only for one owed to the principal, since the api refuses
+ * the others.
+ */
+export function statusChoices(
+  view: Pick<CommitmentView, 'status' | 'chaseCount' | 'direction'>,
+): CommitmentStatus[] {
+  return COMMITMENT_STATUSES.filter(
+    (status) =>
+      status !== view.status &&
+      (status !== 'chased' || view.chaseCount > 0) &&
+      (status !== 'unconfirmed' || view.direction === 'inbound'),
+  );
+}
+
+/** The due date as a date input holds it, `YYYY-MM-DD` in Europe/London; empty for none. */
+export function dueDayOf(dueAt: string | null): string {
+  if (dueAt === null) return '';
+  const date = new Date(dueAt);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+/** "Dom" from the ledger actor `user:dom`; anything else is shown as it is. */
+export function authorLabel(actor: string): string {
+  const match = /^user:(.+)$/.exec(actor);
+  const name = match?.[1];
+  if (name === undefined) return actor;
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+}
+
+/** What the context panel says about a source it has no text for. */
+export function sourceStateSentence(
+  source: Pick<SourceContextView, 'state' | 'kind'>,
+): string | null {
+  if (source.state === 'missing') {
+    return 'Lance has no observation of this record, so there is no text to show. Open it at the source.';
+  }
+  if (source.state === 'expired') {
+    return 'The text has passed its retention window and is no longer held. Open it at the source.';
+  }
+  return null;
+}
+
+/** The detail page's link for a commitment. */
+export const commitmentHref = (id: string): string => `/commitments/${id}`;

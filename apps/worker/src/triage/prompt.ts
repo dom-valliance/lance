@@ -20,7 +20,7 @@ export function triageSystemPrompt(displayName: string, principalName: string): 
     '1. Cite provenance. Every commitment, task candidate and alert candidate carries the recordId of the observation it came from and a verbatim quote from that record. Never paraphrase inside evidenceQuote. evidenceQuote is human-readable text from the record: a sentence from a body, a subject line, or for a calendar event the subject with the organiser and the time. It is never a field name, JSON or a key-value fragment such as "responseStatus":"notResponded".',
     '2. Actions are proposals. To act on something (apply a category, move a message, draft a reply, hold time in the calendar) call the create_proposal tool once per action, with the observation record ids as provenance. Never propose sending email or deleting anything; those are refused. Prefer no proposal over a weak one. Count what you submitted in proposalsSubmitted.',
     `3. Tasks are candidates, not proposals. Put any action item for ${name} or a colleague in taskCandidates; deterministic code turns them into Notion task proposals. Use assigneeName only when the source names someone other than ${name}.`,
-    `4. Commitments run both ways: outbound is something ${name} owes, inbound is something owed to ${name}.`,
+    `4. Commitments run both ways: outbound is something ${name} owes, inbound is something owed to ${name}. promisedTo is the one named person the promise was made to, null when it is made to a group or nobody in particular. For inbound, owedToPrincipal is definite only when the promise answers ${name}'s own request, names or addresses ${name}, or is in mail sent to ${name} alone; possible when ${name} is one of several recipients or copied, or it is made to a group; not_principal when it is made to someone else. When unsure, choose possible. owedToPrincipal is null for outbound.`,
     `5. Mail labels are one of: ${MAIL_LABELS.join(', ')}.`,
     '6. Risk language in mail from a client (complaint, escalation, contract, legal) is an alertCandidate of kind risk_language_in_client_mail with severity P0.',
     `7. Drafts you propose are in ${name}'s voice: British English, direct, specific, no em dashes, no emojis, no correlative conjunctions (` +
@@ -92,7 +92,15 @@ function renderCalendarRecord(record: Record<string, unknown>): string {
 }
 
 /** One block per observed event: provenance first, then the record. */
-export function triageUserPrompt(events: LedgerEventRow[]): string {
+/**
+ * `proposedTaskTitles` are the create_task proposals already made on this
+ * correlation id: a meeting observed again or a thread with a new message
+ * is triaged again, and a task reworded is otherwise a second proposal.
+ */
+export function triageUserPrompt(
+  events: LedgerEventRow[],
+  proposedTaskTitles: readonly string[] = [],
+): string {
   const blocks = events.map((event, index) => {
     const payload = (event.payload ?? {}) as Record<string, unknown>;
     const { watcher, summary, labels, url, ...record } = payload;
@@ -111,5 +119,9 @@ export function triageUserPrompt(events: LedgerEventRow[]): string {
       watcher === GRAPH_CALENDAR_WATCHER_NAME ? renderCalendarRecord(record) : clip(record);
     return `${head.join('\n')}\nrecord:\n${rendered}`;
   });
-  return `${blocks.join('\n\n')}\n\nTriage these observations. Correlation id: ${events[0]?.correlationId ?? 'unknown'}.`;
+  const proposed =
+    proposedTaskTitles.length === 0
+      ? ''
+      : `\n\nTasks already proposed from this correlation id. Do not give a task candidate for any of these again, in these words or any others:\n${proposedTaskTitles.map((title) => `- ${title}`).join('\n')}`;
+  return `${blocks.join('\n\n')}${proposed}\n\nTriage these observations. Correlation id: ${events[0]?.correlationId ?? 'unknown'}.`;
 }

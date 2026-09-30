@@ -10,7 +10,17 @@ import { slackWrites } from './writes.js';
 interface Captured {
   url: string;
   auth: string | null;
+  contentType: string | null;
   body: Record<string, unknown>;
+}
+
+/** The body as Slack reads it: form fields, or a JSON object. */
+function parsedBody(init: RequestInit): Record<string, unknown> {
+  const contentType = new Headers(init.headers).get('content-type') ?? '';
+  const raw = init.body as string;
+  return contentType.startsWith('application/x-www-form-urlencoded')
+    ? Object.fromEntries(new URLSearchParams(raw))
+    : (JSON.parse(raw) as Record<string, unknown>);
 }
 
 function stubFetch(
@@ -22,7 +32,8 @@ function stubFetch(
     captured.push({
       url,
       auth: new Headers(init.headers).get('authorization'),
-      body: JSON.parse(init.body as string) as Record<string, unknown>,
+      contentType: new Headers(init.headers).get('content-type'),
+      body: parsedBody(init),
     });
     const next = queue.shift() ?? { status: 200, body: { ok: true } };
     const status = next.status ?? 200;
@@ -302,5 +313,18 @@ describe('Slack channel provisioning', () => {
     expect(await slackReads(client).userProfile('U0TAREK')).toMatchObject({
       email: 'Tarek@Valliance.ai',
     });
+  });
+
+  it('sends a read form-encoded, because users.info ignores a JSON body', async () => {
+    // Slack answers user_not_found to users.info with the user in a JSON
+    // body (seen in dev on 2026-09-25), so a read must send form fields.
+    const { fetchImpl, captured } = stubFetch([
+      { body: { ok: true, user: { id: 'U0TAREK', profile: {} } } },
+      { body: { ok: true, channel: 'C1', ts: '1.2' } },
+    ]);
+    const client = createSlackClient({ token: 't', fetchImpl, clock: new FakeClock() });
+    await slackReads(client).userProfile('U0TAREK');
+    expect(captured[0]?.contentType).toBe('application/x-www-form-urlencoded');
+    expect(captured[0]?.body).toEqual({ user: 'U0TAREK' });
   });
 });

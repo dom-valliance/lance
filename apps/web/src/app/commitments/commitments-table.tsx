@@ -5,6 +5,7 @@ import { Ageing } from '@/components/ageing';
 import { Table, TableCard, Td, Th, Tr } from '@/components/data-table';
 import { ProvenanceLink } from '@/components/provenance';
 import { SubmitButton } from '@/components/submit-button';
+import { TextLink } from '@/components/text-link';
 import { Badge } from '@/components/ui/badge';
 import { ageingEmphasis } from '@/lib/ageing';
 import {
@@ -12,10 +13,12 @@ import {
   chaseLabel,
   chasePhrase,
   commitmentBadgeFor,
+  commitmentHref,
   evidenceLine,
   firstName,
   isCommitmentOpenForAction,
   isCommitmentOverdue,
+  isCommitmentUnconfirmed,
   type CommitmentDirection,
   type CommitmentStatus,
   type CommitmentView,
@@ -24,7 +27,13 @@ import { COMMITMENT_STATUS_LABELS } from '@/lib/humanise';
 import { formatInstant } from '@/lib/proposal-view';
 import { formatDate } from '@/lib/time';
 import { COMMITMENT_STATUS_TONES } from '@/lib/tones';
-import { chaseCommitment, dropCommitment, markCommitmentDone } from './actions';
+import {
+  chaseCommitment,
+  confirmCommitment,
+  dismissCommitment,
+  dropCommitment,
+  markCommitmentDone,
+} from './actions';
 import { CommitmentCard, CommitmentRowPair } from './drop-disclosure';
 
 /**
@@ -83,7 +92,9 @@ function RowCells({ commitment, now }: { commitment: CommitmentView; now: Date }
     <>
       <Td>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">{commitment.description}</span>
+          <TextLink href={commitmentHref(commitment.id)} tone="foreground" className="font-medium">
+            {commitment.description}
+          </TextLink>
           <StatusBadge commitment={commitment} />
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{evidenceLine(commitment)}</p>
@@ -149,18 +160,49 @@ function OpenActions({
   );
 }
 
-const closedSentence = (commitment: CommitmentView): string =>
-  `No actions: this commitment is ${commitment.status}.`;
+/** A triage row's two answers: the promise was made to Dom, or to someone else. */
+function TriageActions({ commitment, size }: { commitment: CommitmentView; size: 'sm' | 'lg' }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <ActionForm action={confirmCommitment} className={cn(size === 'lg' && 'flex-1')}>
+        <input type="hidden" name="commitmentId" value={commitment.id} />
+        <SubmitButton size={size} pendingLabel="Moving" className={cn(size === 'lg' && 'w-full')}>
+          Owed to me
+        </SubmitButton>
+      </ActionForm>
+      <ActionForm action={dismissCommitment}>
+        <input type="hidden" name="commitmentId" value={commitment.id} />
+        <SubmitButton variant="ghost" size={size} pendingLabel="Dropping">
+          Not mine
+        </SubmitButton>
+      </ActionForm>
+    </div>
+  );
+}
+
+/** A closed row's actions cell: where to reopen it, edit it or add a note. */
+function ClosedActions({ commitment }: { commitment: CommitmentView }) {
+  return (
+    <span className="text-xs text-muted-foreground">
+      This commitment is {commitment.status}.{' '}
+      <TextLink href={commitmentHref(commitment.id)}>Open it</TextLink> to reopen, edit or add a
+      note.
+    </span>
+  );
+}
 
 export function CommitmentsTable({
   commitments,
   direction,
+  triage,
   now,
   footer,
 }: {
   commitments: readonly CommitmentView[];
   /** The tab being shown; Chase is offered only where someone else owes the answer. */
   direction: CommitmentDirection;
+  /** The triage tab: commitments possibly owed to Dom, waiting for him to say (ADR 0037). */
+  triage: boolean;
   now: Date;
   /** The paging footer, rendered under the table and under the cards. */
   footer: ReactNode;
@@ -169,7 +211,11 @@ export function CommitmentsTable({
     <>
       <TableCard className="hidden lg:block">
         <Table
-          caption={`Commitments ${direction === 'outbound' ? 'Dom owes' : 'owed to Dom'}, overdue first`}
+          caption={
+            triage
+              ? 'Commitments that may be owed to Dom, to confirm'
+              : `Commitments ${direction === 'outbound' ? 'Dom owes' : 'owed to Dom'}, overdue first`
+          }
         >
           <thead>
             <tr>
@@ -191,13 +237,18 @@ export function CommitmentsTable({
                 >
                   <RowCells commitment={commitment} now={now} />
                 </CommitmentRowPair>
+              ) : isCommitmentUnconfirmed(commitment) ? (
+                <Tr key={commitment.id}>
+                  <RowCells commitment={commitment} now={now} />
+                  <Td>
+                    <TriageActions commitment={commitment} size="sm" />
+                  </Td>
+                </Tr>
               ) : (
                 <Tr key={commitment.id} muted>
                   <RowCells commitment={commitment} now={now} />
                   <Td>
-                    <span className="text-xs text-muted-foreground">
-                      {closedSentence(commitment)}
-                    </span>
+                    <ClosedActions commitment={commitment} />
                   </Td>
                 </Tr>
               ),
@@ -215,7 +266,13 @@ export function CommitmentsTable({
           const body = (
             <>
               <div className="flex items-start justify-between gap-3">
-                <p className="font-medium">{commitment.description}</p>
+                <TextLink
+                  href={commitmentHref(commitment.id)}
+                  tone="foreground"
+                  className="font-medium"
+                >
+                  {commitment.description}
+                </TextLink>
                 <StatusBadge commitment={commitment} />
               </div>
               <p className="text-xs text-muted-foreground">{evidenceLine(commitment)}</p>
@@ -249,13 +306,20 @@ export function CommitmentsTable({
             >
               {body}
             </CommitmentCard>
+          ) : isCommitmentUnconfirmed(commitment) ? (
+            <li key={commitment.id} className="flex flex-col gap-3 rounded-xl bg-card p-4">
+              {body}
+              <TriageActions commitment={commitment} size="lg" />
+            </li>
           ) : (
             <li
               key={commitment.id}
               className="flex flex-col gap-3 rounded-xl bg-card p-4 text-muted-foreground"
             >
               {body}
-              <p className="text-xs text-muted-foreground">{closedSentence(commitment)}</p>
+              <p className="m-0">
+                <ClosedActions commitment={commitment} />
+              </p>
             </li>
           );
         })}

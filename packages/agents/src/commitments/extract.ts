@@ -1,6 +1,7 @@
 import type { ModelConfig } from '@lance/shared';
 import { runAgent, type AgentDeps } from '../defineAgent.js';
 import { commitmentSystemPrompt, commitmentUserPrompt } from './prompt.js';
+import { settleOwedToPrincipal } from './settle.js';
 import {
   CommitmentExtractionSchema,
   CommitmentSourceSchema,
@@ -8,7 +9,7 @@ import {
   type CommitmentSource,
 } from './schema.js';
 
-export const COMMITMENT_EXTRACTOR_VERSION = '0.1.0';
+export const COMMITMENT_EXTRACTOR_VERSION = '0.2.0';
 
 export interface CommitmentExtractorOptions {
   agent: AgentDeps;
@@ -25,7 +26,9 @@ export type CommitmentExtractor = (
  * One structured model call, no tools, so the extractor can only report
  * (non-negotiable 2). Quotes that are not verbatim in the text are dropped
  * here rather than trusted: provenance is a hard requirement (non-negotiable
- * 5) and the eval harness scores what survives this filter.
+ * 5). An inbound promise is then held to the floor of ADR 0037: definite
+ * only when it names the principal, gone when it was made to someone else.
+ * The eval harness scores what survives both.
  */
 export function createCommitmentExtractor(
   options: CommitmentExtractorOptions,
@@ -45,8 +48,9 @@ export function createCommitmentExtractor(
       },
       { correlationId, prompt: commitmentUserPrompt(parsed) },
     );
-    return result.output.commitments
+    const quoted = result.output.commitments
       .filter((candidate) => parsed.text.includes(candidate.evidenceQuote))
       .map((candidate) => ({ ...candidate, recordId: parsed.id }));
+    return settleOwedToPrincipal(quoted, parsed.principal);
   };
 }

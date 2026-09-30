@@ -1,0 +1,21 @@
+{
+  "id": "t21-ashcombe-promise-to-colleague",
+  "kind": "transcript",
+  "dom": {
+    "name": "Dom Selvon",
+    "email": "dom@valliance.ai"
+  },
+  "participants": [
+    {
+      "name": "Tom Ashby",
+      "email": "tom.ashby@valliance.ai"
+    },
+    {
+      "name": "Hana Okafor",
+      "email": "hana.okafor@ashcombelogistics.example.test"
+    }
+  ],
+  "text": "# Ashcombe Logistics: data access check-in\n\n**Date:** Tuesday 6 October 2026\n\n###### 00:00 - 00:21\n**Dom Selvon**\n\nThanks both. Tom is leading the data work, so I will mostly listen today.\n\n###### 00:21 - 00:52\n**Tom Ashby**\n\nHana, the one thing blocking me is read access to the dispatch warehouse. Could you get that set up for me?\n\n###### 00:52 - 01:15\n**Hana Okafor**\n\nYes, I will raise the access request for you today, Tom, and send you the credentials by Thursday.\n\n###### 01:15 - 01:40\n**Tom Ashby**\n\nPerfect. I will run the first extract as soon as I am in.\n\n###### 01:40 - 01:52\n**Dom Selvon**\n\nGood. Nothing else from me.\n",
+  "expected": [],
+  "notes": "A client promises the principal's colleague, who asked for it, on a call the principal attends. Nothing is owed to the principal and the colleague's own plan is not a promise to anyone waiting (ADR 0037)."
+}

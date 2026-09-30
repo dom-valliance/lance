@@ -1,3 +1,4 @@
+import { COMMITMENT_NOTE_MAX_CHARS } from '@lance/db';
 import {
   ModeChangeRefusedError,
   type LedgerQuery,
@@ -42,9 +43,14 @@ import {
 } from './briefs/service.js';
 import { resumeAndRequeue } from './deps.js';
 import {
+  addCommitmentNote,
+  changeCommitmentStatus,
   chaseCommitment,
   commitmentSummary,
+  COMMITMENT_DESCRIPTION_MAX_CHARS,
+  editCommitment,
   getCommitment,
+  getCommitmentDetail,
   listCommitments,
   resolveCommitment,
   MAX_PAGE_SIZE,
@@ -178,6 +184,33 @@ export const CommitmentListInputSchema = z
   })
   .default({});
 export type CommitmentListInput = z.infer<typeof CommitmentListInputSchema>;
+
+/** A principal's edit: either field may be left out; a null due day clears the date. */
+export const CommitmentEditInputSchema = z
+  .object({
+    id: UlidSchema,
+    description: z.string().trim().min(1).max(COMMITMENT_DESCRIPTION_MAX_CHARS).optional(),
+    dueDay: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'A due date must be a day written YYYY-MM-DD.')
+      .nullable()
+      .optional(),
+  })
+  .refine((input) => input.description !== undefined || input.dueDay !== undefined, {
+    message: 'An edit must change the description or the due date.',
+  });
+
+/** Any status, from any other; dropping needs a reason (ADR 0036). */
+export const CommitmentStatusInputSchema = z
+  .object({
+    id: UlidSchema,
+    to: CommitmentStatusSchema,
+    reason: z.string().trim().min(1).max(COMMITMENT_NOTE_MAX_CHARS).optional(),
+  })
+  .refine((input) => input.to !== 'dropped' || input.reason !== undefined, {
+    message: 'Give a reason to drop a commitment; it is kept in the ledger.',
+    path: ['reason'],
+  });
 
 /** The Tasks page's source badges and its open or done filter (spec 12). */
 export const TaskListInputSchema = z
@@ -550,6 +583,38 @@ export const appRouter = router({
     get: procedure
       .input(z.object({ id: UlidSchema }))
       .query(({ ctx, input }) => getCommitment(ctx.deps, input.id)),
+    /** The commitment page: the row, its notes and the source records it cites. */
+    detail: procedure
+      .input(z.object({ id: UlidSchema }))
+      .query(({ ctx, input }) => getCommitmentDetail(ctx.deps, input.id)),
+    edit: procedure.input(CommitmentEditInputSchema).mutation(({ ctx, input }) =>
+      editCommitment(ctx.deps, {
+        id: input.id,
+        actor: actorFromUpn(ctx.upn),
+        ...(input.description === undefined ? {} : { description: input.description }),
+        ...(input.dueDay === undefined ? {} : { dueDay: input.dueDay }),
+      }),
+    ),
+    /** Moves a commitment to any status, including back from done or dropped. */
+    setStatus: procedure.input(CommitmentStatusInputSchema).mutation(({ ctx, input }) =>
+      changeCommitmentStatus(ctx.deps, {
+        id: input.id,
+        to: input.to,
+        actor: actorFromUpn(ctx.upn),
+        ...(input.reason === undefined ? {} : { reason: input.reason }),
+      }),
+    ),
+    addNote: procedure
+      .input(
+        z.object({ id: UlidSchema, body: z.string().trim().min(1).max(COMMITMENT_NOTE_MAX_CHARS) }),
+      )
+      .mutation(({ ctx, input }) =>
+        addCommitmentNote(ctx.deps, {
+          id: input.id,
+          body: input.body,
+          actor: actorFromUpn(ctx.upn),
+        }),
+      ),
     markDone: procedure
       .input(z.object({ id: UlidSchema }))
       .mutation(({ ctx, input }) =>

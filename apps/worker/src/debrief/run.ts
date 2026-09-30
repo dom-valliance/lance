@@ -116,14 +116,21 @@ export function renderDebriefMarkdown(input: DebriefInput, timeZone: string): st
     '## Commitments',
     list(
       input.commitments.map(
-        (commitment) =>
-          `${commitment.direction === 'outbound' ? 'Dom owes' : 'Owed to Dom'}: ${commitment.description}`,
+        (commitment) => `${commitmentLabel(commitment)}: ${commitment.description}`,
       ),
     ),
     '',
     '## Open questions',
     list(input.openQuestions.map((point) => point.text)),
   ].join('\n');
+}
+
+/** How the debrief names a commitment's side, and whether Dom is sure to be waiting on it. */
+export function commitmentLabel(
+  commitment: Pick<RecordedCommitment, 'direction' | 'status'>,
+): string {
+  if (commitment.direction === 'outbound') return 'Dom owes';
+  return commitment.status === 'unconfirmed' ? 'Might be owed to Dom, to confirm' : 'Owed to Dom';
 }
 
 /**
@@ -162,8 +169,12 @@ export async function runDebrief(deps: DebriefDeps, input: DebriefInput): Promis
           domOwes: input.commitments
             .filter((commitment) => commitment.direction === 'outbound')
             .map((commitment) => commitment.description),
+          // An unconfirmed promise may have been made to someone else on the
+          // call, so the follow-up does not restate it (ADR 0037).
           theyOwe: input.commitments
-            .filter((commitment) => commitment.direction === 'inbound')
+            .filter(
+              (commitment) => commitment.direction === 'inbound' && commitment.status === 'open',
+            )
             .map((commitment) => commitment.description),
           openQuestions: input.openQuestions.map((point) => point.text),
         }),

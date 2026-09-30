@@ -84,6 +84,7 @@ export const COMMITMENT_STATUS_LABELS: Record<CommitmentStatus, string> = {
   chased: 'Chased',
   done: 'Done',
   dropped: 'Dropped',
+  unconfirmed: 'Unconfirmed',
 };
 
 export const DECISION_LABELS: Record<PolicyDecision, string> = {

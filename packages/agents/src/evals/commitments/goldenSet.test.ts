@@ -7,8 +7,8 @@ import { runCommitmentEval } from './run.js';
 const fixtures = loadCommitmentFixtures(COMMITMENTS_FIXTURES_DIR);
 
 describe('the commitment golden set', () => {
-  it('holds twenty transcripts and thirty sent mails', () => {
-    expect(fixtures.filter((record) => record.kind === 'transcript')).toHaveLength(20);
+  it('holds twenty-three transcripts and thirty sent mails', () => {
+    expect(fixtures.filter((record) => record.kind === 'transcript')).toHaveLength(23);
     expect(fixtures.filter((record) => record.kind === 'sent_mail')).toHaveLength(30);
   });
 
@@ -27,6 +27,20 @@ describe('the commitment golden set', () => {
       fixtures.flatMap((record) => record.expected).map((item) => item.direction),
     );
     expect([...directions].sort()).toEqual(['inbound', 'outbound']);
+  });
+
+  it('covers inbound promises that are definitely and only possibly owed to Dom', () => {
+    const inbound = fixtures
+      .flatMap((record) => record.expected)
+      .filter((item) => item.direction === 'inbound');
+    expect(inbound.some((item) => (item.owedToPrincipal ?? 'definite') === 'definite')).toBe(true);
+    expect(inbound.some((item) => item.owedToPrincipal === 'possible')).toBe(true);
+  });
+
+  it('covers a group call where a client promises a colleague and nothing is owed to Dom', () => {
+    const record = fixtures.find((item) => item.id === 't21-ashcombe-promise-to-colleague');
+    expect(record?.participants.length).toBeGreaterThan(1);
+    expect(record?.expected).toEqual([]);
   });
 
   it('covers commitments with and without a due date', () => {

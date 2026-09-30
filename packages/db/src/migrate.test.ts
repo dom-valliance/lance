@@ -21,6 +21,7 @@ const EXPECTED_TABLES = [
   'agent_runs',
   'alerts',
   'briefs',
+  'commitment_notes',
   'commitments',
   'cursors',
   'graph_consent_states',
@@ -303,5 +304,71 @@ describe('the ledger as lance_retention', () => {
       ]),
     );
     expect(failure.code).toBe(PERMISSION_DENIED);
+  });
+});
+
+describe('commitment notes as lance_app', () => {
+  const COMMITMENT = `${ULID_PREFIX}3A`;
+  const NOTE = `${ULID_PREFIX}3B`;
+  const OTHER_PRINCIPAL = `${ULID_PREFIX}0Q`;
+
+  beforeAll(async () => {
+    await query(
+      `INSERT INTO commitments (id, direction, owner_person_id, counterparty_person_id, description, evidence_quote, source_refs)
+       VALUES ($1, 'outbound', 'p1', 'p2', 'Send the deck', 'I will send the deck', '[]'::jsonb)`,
+      [COMMITMENT],
+    );
+    await asRole('test_app', () =>
+      query(
+        "INSERT INTO commitment_notes (id, commitment_id, body, author) VALUES ($1, $2, 'Asked for a week more', 'user:principal')",
+        [NOTE, COMMITMENT],
+      ),
+    );
+  });
+
+  it('adds a note in the principal scope', async () => {
+    const rows = await asRole('test_app', () =>
+      query<{ principal_id: string }>('SELECT principal_id FROM commitment_notes WHERE id = $1', [
+        NOTE,
+      ]),
+    );
+    expect(rows).toEqual([{ principal_id: PRINCIPAL }]);
+  });
+
+  it('cannot change a note', async () => {
+    const failure = await asRole('test_app', () =>
+      rejectionOf("UPDATE commitment_notes SET body = 'rewritten' WHERE id = $1", [NOTE]),
+    );
+    expect(failure.code).toBe(PERMISSION_DENIED);
+  });
+
+  it('cannot remove a note', async () => {
+    const failure = await asRole('test_app', () =>
+      rejectionOf('DELETE FROM commitment_notes WHERE id = $1', [NOTE]),
+    );
+    expect(failure.code).toBe(PERMISSION_DENIED);
+  });
+
+  it('rejects a blank note', async () => {
+    const failure = await asRole('test_app', () =>
+      rejectionOf(
+        "INSERT INTO commitment_notes (id, commitment_id, body, author) VALUES ($1, $2, '   ', 'user:principal')",
+        [`${ULID_PREFIX}3C`, COMMITMENT],
+      ),
+    );
+    expect(failure.code).toBe(CHECK_VIOLATION);
+  });
+
+  it('cannot add a note for another principal', async () => {
+    await query("INSERT INTO principals (id, upn) VALUES ($1, 'other@example.test')", [
+      OTHER_PRINCIPAL,
+    ]);
+    const failure = await asRole('test_app', () =>
+      rejectionOf(
+        "INSERT INTO commitment_notes (id, principal_id, commitment_id, body, author) VALUES ($1, $2, $3, 'Not mine', 'user:other')",
+        [`${ULID_PREFIX}3D`, OTHER_PRINCIPAL, COMMITMENT],
+      ),
+    );
+    expect(failure.message).toContain('row-level security');
   });
 });

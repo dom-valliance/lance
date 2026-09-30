@@ -29,6 +29,10 @@ const CREATE_DB_ALLOWED = [
   'apps/worker/src/offboarding/drill.ts',
   // The load harness, likewise an entrypoint of its own (docs/runbooks/load-test.md).
   'apps/worker/src/load/run.ts',
+  // The transcript duplicate repair, likewise (docs/runbooks/transcript-duplicates.md).
+  'apps/worker/src/repair/transcriptDuplicates.cli.ts',
+  // The move of open inbound commitments to triage, likewise (docs/runbooks/inbound-to-triage.md).
+  'apps/worker/src/repair/inboundToTriage.cli.ts',
   'packages/db/src/**/*.ts',
   '**/*.test.ts',
 ];

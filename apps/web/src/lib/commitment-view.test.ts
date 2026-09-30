@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  commitmentTabFrom,
+  isCommitmentUnconfirmed,
   ageingLabel,
+  authorLabel,
+  dueDayOf,
+  sourceStateSentence,
+  statusChoices,
   chaseLabel,
   chasePhrase,
   commitmentBadgeFor,
@@ -248,5 +254,92 @@ describe('firstName', () => {
 
   it('keeps a single-word name as it is', () => {
     expect(firstName('Marcus')).toBe('Marcus');
+  });
+});
+
+describe('statusChoices', () => {
+  it('offers every other status for a done commitment that was chased', () => {
+    expect(statusChoices({ status: 'done', chaseCount: 1, direction: 'inbound' })).toEqual([
+      'open',
+      'chased',
+      'dropped',
+      'unconfirmed',
+    ]);
+  });
+
+  it('leaves out chased for a commitment never chased', () => {
+    expect(statusChoices({ status: 'done', chaseCount: 0, direction: 'outbound' })).toEqual([
+      'open',
+      'dropped',
+    ]);
+  });
+
+  it('offers done and dropped for an open commitment', () => {
+    expect(statusChoices({ status: 'open', chaseCount: 0, direction: 'outbound' })).toEqual([
+      'done',
+      'dropped',
+    ]);
+  });
+
+  it('offers triage only for a commitment owed to Dom', () => {
+    expect(statusChoices({ status: 'open', chaseCount: 0, direction: 'inbound' })).toContain(
+      'unconfirmed',
+    );
+  });
+});
+
+describe('dueDayOf', () => {
+  it('reads a BST instant as its London day', () => {
+    expect(dueDayOf('2026-09-30T23:30:00.000Z')).toBe('2026-10-01');
+  });
+
+  it('gives an empty value for no date', () => {
+    expect(dueDayOf(null)).toBe('');
+  });
+});
+
+describe('authorLabel', () => {
+  it('names a user actor', () => {
+    expect(authorLabel('user:dom')).toBe('Dom');
+  });
+
+  it('shows any other actor as it is', () => {
+    expect(authorLabel('system:commitments')).toBe('system:commitments');
+  });
+});
+
+describe('sourceStateSentence', () => {
+  it('says nothing for a source whose text is held', () => {
+    expect(sourceStateSentence({ state: 'found', kind: 'email' })).toBeNull();
+  });
+
+  it('points to the source once the text has expired', () => {
+    expect(sourceStateSentence({ state: 'expired', kind: 'meeting' })).toMatch(/retention window/);
+  });
+});
+
+describe('commitmentTabFrom', () => {
+  it('shows the triage tab when asked for it', () => {
+    expect(commitmentTabFrom({ tab: 'triage', direction: 'outbound' })).toBe('triage');
+  });
+
+  it('falls back to the direction otherwise', () => {
+    expect(commitmentTabFrom({ direction: 'inbound' })).toBe('inbound');
+    expect(commitmentTabFrom({ tab: 'nonsense' })).toBe('outbound');
+  });
+});
+
+describe('the triage status', () => {
+  it('is neither open for action nor closed', () => {
+    expect(isCommitmentOpenForAction({ status: 'unconfirmed' })).toBe(false);
+    expect(isCommitmentUnconfirmed({ status: 'unconfirmed' })).toBe(true);
+  });
+
+  it('carries its own badge', () => {
+    expect(commitmentBadgeFor({ status: 'unconfirmed', overdueDays: null })).toBe('unconfirmed');
+  });
+
+  it('is not a status filter, because it has its own tab', () => {
+    expect(commitmentStatusSelected({ status: 'unconfirmed' })).toBe('open');
   });
 });

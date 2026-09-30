@@ -199,7 +199,14 @@ export function createSlackLinks(options: SlackLinksOptions): SlackLinksLike {
     const profile =
       options.provisioner === null
         ? null
-        : await options.provisioner.userProfile(slackUserId).catch(() => null);
+        : await options.provisioner.userProfile(slackUserId).catch((error: unknown) => {
+            // Refused as email_unavailable either way; the log says why.
+            console.warn(
+              { slackUserId, err: error instanceof Error ? error.message : String(error) },
+              'Slack profile read failed during a link check',
+            );
+            return null;
+          });
     if (profile === null || profile.email === null) return { status: 'email_unavailable' };
     if (profile.email.toLowerCase() !== principal.upn.toLowerCase()) {
       return { status: 'email_mismatch' };

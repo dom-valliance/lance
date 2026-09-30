@@ -7,9 +7,13 @@ import {
   type FakeDeps,
 } from '../test-fakes.js';
 import {
+  addCommitmentNote,
+  changeCommitmentStatus,
   chaseCommitment,
   commitmentSummary,
+  editCommitment,
   getCommitment,
+  getCommitmentDetail,
   listCommitments,
   resolveCommitment,
 } from './service.js';
@@ -91,6 +95,7 @@ describe('commitmentSummary', () => {
     expect(await commitmentSummary(harness.deps)).toEqual({
       inbound: { open: 2, overdue: 1 },
       outbound: { open: 1, overdue: 0 },
+      unconfirmed: 0,
     });
   });
 });
@@ -143,22 +148,291 @@ describe('resolveCommitment', () => {
     expect(harness.writer.appended).toHaveLength(1);
   });
 
-  it('refuses to drop a commitment that is already done', async () => {
-    await resolveCommitment(harness.deps, { id: TEST_COMMITMENT_ID, to: 'done' });
-
-    await expect(
-      resolveCommitment(harness.deps, {
-        id: TEST_COMMITMENT_ID,
-        to: 'dropped',
-        reason: 'Too late.',
-      }),
-    ).rejects.toThrow(/already done/);
-  });
-
   it('refuses an id no commitment has', async () => {
     await expect(resolveCommitment(harness.deps, { id: SECOND_ID, to: 'done' })).rejects.toThrow(
       /does not exist/,
     );
+  });
+});
+
+describe('changeCommitmentStatus', () => {
+  it('reopens a done commitment and records the move back', async () => {
+    harness.commitments.rows = [fakeCommitment({ status: 'done' })];
+
+    const view = await changeCommitmentStatus(harness.deps, {
+      id: TEST_COMMITMENT_ID,
+      to: 'open',
+      reason: 'Ann sent the unsigned version.',
+    });
+
+    expect(view.status).toBe('open');
+    expect(harness.writer.appended[0]?.payload).toEqual({
+      kind: 'commitment_status',
+      commitmentId: TEST_COMMITMENT_ID,
+      from: 'done',
+      to: 'open',
+      reason: 'Ann sent the unsigned version.',
+    });
+  });
+
+  it('drops a commitment that was done', async () => {
+    harness.commitments.rows = [fakeCommitment({ status: 'done' })];
+
+    const view = await changeCommitmentStatus(harness.deps, {
+      id: TEST_COMMITMENT_ID,
+      to: 'dropped',
+      reason: 'Marked done by mistake; the order was cancelled.',
+    });
+
+    expect(view.status).toBe('dropped');
+  });
+
+  it('refuses to drop without a reason and writes nothing', async () => {
+    await expect(
+      changeCommitmentStatus(harness.deps, { id: TEST_COMMITMENT_ID, to: 'dropped', reason: ' ' }),
+    ).rejects.toThrow(/Give a reason/);
+    expect(harness.writer.appended).toEqual([]);
+  });
+
+  it('refuses chased for a commitment never chased', async () => {
+    harness.commitments.rows = [fakeCommitment({ status: 'done', chaseCount: 0 })];
+
+    await expect(
+      changeCommitmentStatus(harness.deps, { id: TEST_COMMITMENT_ID, to: 'chased' }),
+    ).rejects.toThrow(/never been chased/);
+  });
+
+  it('reopens as chased a commitment chased before', async () => {
+    harness.commitments.rows = [fakeCommitment({ status: 'done', chaseCount: 2 })];
+
+    const view = await changeCommitmentStatus(harness.deps, {
+      id: TEST_COMMITMENT_ID,
+      to: 'chased',
+    });
+
+    expect(view.status).toBe('chased');
+    expect(harness.writer.appended[0]?.payload).not.toHaveProperty('reason');
+  });
+});
+
+describe('triage of commitments possibly owed to Dom', () => {
+  it('opens an unconfirmed commitment and records the move out of triage', async () => {
+    harness.commitments.rows = [fakeCommitment({ status: 'unconfirmed' })];
+
+    const view = await changeCommitmentStatus(harness.deps, { id: TEST_COMMITMENT_ID, to: 'open' });
+
+    expect(view.status).toBe('open');
+    expect(harness.writer.appended[0]?.payload).toMatchObject({ from: 'unconfirmed', to: 'open' });
+  });
+
+  it('sends an inbound commitment back to triage', async () => {
+    const view = await changeCommitmentStatus(harness.deps, {
+      id: TEST_COMMITMENT_ID,
+      to: 'unconfirmed',
+    });
+
+    expect(view.status).toBe('unconfirmed');
+  });
+
+  it('refuses to send a commitment Dom owes to triage', async () => {
+    harness.commitments.rows = [fakeCommitment({ direction: 'outbound' })];
+
+    await expect(
+      changeCommitmentStatus(harness.deps, { id: TEST_COMMITMENT_ID, to: 'unconfirmed' }),
+    ).rejects.toThrow(/Only a commitment owed to you/);
+  });
+
+  it('leaves unconfirmed commitments out of a list that names no status', async () => {
+    harness.commitments.rows = [
+      fakeCommitment(),
+      fakeCommitment({ id: SECOND_ID, status: 'unconfirmed' }),
+    ];
+
+    const everything = await listCommitments(harness.deps, { direction: 'inbound' });
+    const triage = await listCommitments(harness.deps, { status: 'unconfirmed' });
+
+    expect(everything.items.map((item) => item.id)).toEqual([TEST_COMMITMENT_ID]);
+    expect(triage.items.map((item) => item.id)).toEqual([SECOND_ID]);
+  });
+
+  it('counts the unconfirmed commitments apart from the open ones', async () => {
+    harness.commitments.rows = [
+      fakeCommitment(),
+      fakeCommitment({ id: SECOND_ID, status: 'unconfirmed' }),
+    ];
+
+    expect(await commitmentSummary(harness.deps)).toMatchObject({
+      inbound: { open: 1 },
+      unconfirmed: 1,
+    });
+  });
+});
+
+describe('editCommitment', () => {
+  it('changes the description and records both versions', async () => {
+    const view = await editCommitment(harness.deps, {
+      id: TEST_COMMITMENT_ID,
+      description: '  Send the countersigned order form ',
+    });
+
+    expect(view.description).toBe('Send the countersigned order form');
+    expect(view.evidenceQuote).toBe('I will get the order form over to you by Friday');
+    expect(harness.writer.appended[0]?.payload).toEqual({
+      kind: 'commitment_edited',
+      commitmentId: TEST_COMMITMENT_ID,
+      changes: {
+        description: {
+          from: 'Send the signed order form',
+          to: 'Send the countersigned order form',
+        },
+      },
+    });
+  });
+
+  it('reads a due day as 17:00 London, with full confidence and a chase two days later', async () => {
+    const view = await editCommitment(harness.deps, {
+      id: TEST_COMMITMENT_ID,
+      dueDay: '2026-09-30',
+    });
+
+    expect(view.dueAt).toBe('2026-09-30T16:00:00.000Z');
+    expect(view.dueConfidence).toBe(1);
+    expect(view.nextChaseAt).toBe('2026-10-02T16:00:00.000Z');
+  });
+
+  it('clears the due date and the first chase of a commitment never chased', async () => {
+    const view = await editCommitment(harness.deps, { id: TEST_COMMITMENT_ID, dueDay: null });
+
+    expect(view.dueAt).toBeNull();
+    expect(view.dueConfidence).toBeNull();
+    expect(view.nextChaseAt).toBeNull();
+  });
+
+  it('keeps the next chase of an outbound commitment, which is never chased', async () => {
+    harness.commitments.rows = [fakeCommitment({ direction: 'outbound', nextChaseAt: null })];
+
+    const view = await editCommitment(harness.deps, {
+      id: TEST_COMMITMENT_ID,
+      dueDay: '2026-09-30',
+    });
+
+    expect(view.nextChaseAt).toBeNull();
+  });
+
+  it('writes nothing for an edit that changes nothing', async () => {
+    await editCommitment(harness.deps, {
+      id: TEST_COMMITMENT_ID,
+      description: 'Send the signed order form',
+    });
+
+    expect(harness.writer.appended).toEqual([]);
+  });
+
+  it('refuses a blank description', async () => {
+    await expect(
+      editCommitment(harness.deps, { id: TEST_COMMITMENT_ID, description: '   ' }),
+    ).rejects.toThrow(/needs a description/);
+  });
+
+  it('refuses a day the calendar does not have', async () => {
+    await expect(
+      editCommitment(harness.deps, { id: TEST_COMMITMENT_ID, dueDay: '2026-02-30' }),
+    ).rejects.toThrow(/not a calendar day/);
+  });
+
+  it('refuses an edit to a commitment that changed after it was read', async () => {
+    const store = harness.commitments;
+    const read = store.get.bind(store);
+    store.get = async (id) => {
+      const row = await read(id);
+      return row === null ? null : { ...row, updatedAt: new Date('2026-09-01T00:00:00.000Z') };
+    };
+
+    await expect(
+      editCommitment(harness.deps, { id: TEST_COMMITMENT_ID, description: 'Changed' }),
+    ).rejects.toThrow(/changed while it was being edited/);
+    expect(harness.writer.appended).toEqual([]);
+  });
+});
+
+describe('addCommitmentNote', () => {
+  it('stores the note under its author and records it in the ledger first', async () => {
+    const note = await addCommitmentNote(harness.deps, {
+      id: TEST_COMMITMENT_ID,
+      body: ' Ann says Monday. ',
+      actor: 'user:dom',
+    });
+
+    expect(note).toMatchObject({ body: 'Ann says Monday.', author: 'user:dom' });
+    expect(harness.writer.appended[0]?.payload).toEqual({
+      kind: 'commitment_note_added',
+      commitmentId: TEST_COMMITMENT_ID,
+      noteId: note.id,
+      body: 'Ann says Monday.',
+    });
+  });
+
+  it('refuses a blank note', async () => {
+    await expect(
+      addCommitmentNote(harness.deps, { id: TEST_COMMITMENT_ID, body: '  ' }),
+    ).rejects.toThrow(/between 1 and 4000/);
+    expect(harness.commitments.noteRows).toEqual([]);
+  });
+
+  it('refuses a note on an id no commitment has', async () => {
+    await expect(addCommitmentNote(harness.deps, { id: SECOND_ID, body: 'Hello' })).rejects.toThrow(
+      /does not exist/,
+    );
+    expect(harness.writer.appended).toEqual([]);
+  });
+});
+
+describe('getCommitmentDetail', () => {
+  it('returns null for an id no commitment has', async () => {
+    expect(await getCommitmentDetail(harness.deps, SECOND_ID)).toBeNull();
+  });
+
+  it('returns the notes and the passage the quote came from', async () => {
+    await addCommitmentNote(harness.deps, { id: TEST_COMMITMENT_ID, body: 'Asked again' });
+    harness.commitments.observed = [
+      {
+        sourceSystem: 'graph',
+        sourceRecordId: 'AAMk2',
+        ts: new Date('2026-09-14T09:00:00.000Z'),
+        summary: 'Ann Example: Order form',
+        payload: {
+          subject: 'Order form',
+          from: { name: 'Ann Example', address: 'ann@client.test' },
+          toRecipients: [{ name: 'Dom Selvon', address: 'dom@valliance.ai' }],
+          sentDateTime: '2026-09-14T08:55:00.000Z',
+          bodyText:
+            'Hi Dom, thanks for the call. I will get the order form over to you by Friday. Ann',
+        },
+      },
+    ];
+
+    const detail = await getCommitmentDetail(harness.deps, TEST_COMMITMENT_ID);
+
+    expect(detail?.notes.map((note) => note.body)).toEqual(['Asked again']);
+    expect(detail?.sources).toHaveLength(1);
+    expect(detail?.sources[0]).toMatchObject({
+      state: 'found',
+      kind: 'email',
+      title: 'Order form',
+      from: 'Ann Example <ann@client.test>',
+      people: ['Dom Selvon <dom@valliance.ai>'],
+      excerpt: {
+        before: 'Hi Dom, thanks for the call. ',
+        quote: 'I will get the order form over to you by Friday',
+        after: '. Ann',
+      },
+    });
+  });
+
+  it('says a cited record was never observed rather than dropping it', async () => {
+    const detail = await getCommitmentDetail(harness.deps, TEST_COMMITMENT_ID);
+
+    expect(detail?.sources[0]).toMatchObject({ recordId: 'AAMk2', state: 'missing' });
   });
 });
 

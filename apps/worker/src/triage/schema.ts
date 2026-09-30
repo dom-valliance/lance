@@ -53,6 +53,10 @@ export const EntityRefSchema = z.object({
 export const CommitmentCandidateSchema = z.object({
   direction: CommitmentDirectionSchema,
   description: z.string().min(1).max(500),
+  /** The person the promise was made to; null when nobody in particular (ADR 0037). */
+  promisedTo: z.string().max(200).nullable(),
+  /** Inbound only: how sure it is that the principal is the one waiting; null for outbound. */
+  owedToPrincipal: z.enum(['definite', 'possible', 'not_principal']).nullable(),
   counterpartyName: z.string().max(200).nullable(),
   counterpartyEmail: z.string().max(320).nullable(),
   dueAt: z.string().max(40).nullable(),

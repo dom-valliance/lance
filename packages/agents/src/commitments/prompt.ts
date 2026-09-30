@@ -16,15 +16,22 @@ export function commitmentSystemPrompt(displayName: string): string {
     '2. A promise is made to someone. A person narrating their own to-do list, saying what they are about to do next, or being handed an action in a group meeting is not making a commitment unless another named person asked for the thing and is waiting on it. Housekeeping in the moment (letting someone into the call, sharing a screen, reading something before the next session) is never a commitment. When it is not clear who the promise is to, leave it out: the debrief records action items separately.',
     '3. One commitment per promise. A sentence that promises two separate deliverables yields two items; a promise and its follow-up notification (do X and let you know) is one item.',
     '4. description is one plain sentence naming the thing to be done, without the date and without "I will".',
-    '5. counterpartyName is the other party, always one named person from the participants list, never a group, board, team or organisation; counterpartyEmail when the participants list gives it, else null. For an outbound commitment made to a group in a meeting, the counterparty is the person who asked for it or who is chairing.',
-    '6. dueAt is an ISO date (YYYY-MM-DD) or date-time when the text gives a date or a phrase that resolves to one from the source date (by Friday, end of the month, tomorrow). dueConfidence is 1.0 for an explicit date, 0.7 for a resolved phrase, 0.3 for a vague window such as next week, 0 with dueAt null when nothing is said.',
-    '7. evidenceQuote is a verbatim span from the text containing the promise. Never paraphrase, never add speaker names that are not in the span, keep it under 500 characters.',
-    '8. recordId is the id of the source given in the prompt.',
-    '9. Reply with only the JSON object.',
+    "5. promisedTo is the one named person the promise was said or written to: the person who asked for it, or who the speaker was answering. Write their name as the participants list gives it, the principal's included. Null when the promise is made to the room, to a group, or to nobody in particular.",
+    '6. owedToPrincipal says, for an inbound commitment only, how sure it is that the principal is the one waiting on it. It is null for outbound.',
+    '   - definite: the promise answers a request the principal made, names or addresses the principal, is an offer made to the principal that the principal accepts ("please do"), or is made in a conversation between only the speaker and the principal. promisedTo is then the principal.',
+    '   - possible: the promise is made to the room or to "you" where it is not clear who "you" is, or in mail where the principal is copied rather than addressed, or it is owed to Valliance without saying to whom.',
+    '   - not_principal: the promise is made to someone else on the call or thread, such as a colleague of the principal who asked for it. On a call with several people, a promise made in answer to a colleague is not_principal even when the principal is present.',
+    '   When you are unsure between definite and possible, choose possible.',
+    '7. counterpartyName is the other party, always one named person from the participants list, never a group, board, team or organisation; counterpartyEmail when the participants list gives it, else null. For an outbound commitment made to a group in a meeting, the counterparty is the person who asked for it or who is chairing.',
+    '8. dueAt is an ISO date (YYYY-MM-DD) or date-time when the text gives a date or a phrase that resolves to one from the source date (by Friday, end of the month, tomorrow). dueConfidence is 1.0 for an explicit date, 0.7 for a resolved phrase, 0.3 for a vague window such as next week, 0 with dueAt null when nothing is said.',
+    '9. evidenceQuote is a verbatim span from the text containing the promise. Never paraphrase, never add speaker names that are not in the span, keep it under 500 characters.',
+    '10. recordId is the id of the source given in the prompt.',
+    '11. Reply with only the JSON object.',
   ].join('\n');
 }
 
 export function commitmentUserPrompt(source: CommitmentSource): string {
+  const alreadyRecorded = source.alreadyRecorded ?? [];
   const participants = source.participants
     .map((person) => (person.email === null ? person.name : `${person.name} <${person.email}>`))
     .join('; ');
@@ -38,6 +45,13 @@ export function commitmentUserPrompt(source: CommitmentSource): string {
     `Principal: ${source.principal.name} <${source.principal.email}>`,
     `Participants: ${participants === '' ? 'none listed' : participants}`,
     `Source date: ${source.occurredAt ?? 'unknown'}`,
+    ...(alreadyRecorded.length === 0
+      ? []
+      : [
+          '',
+          'Already recorded from an earlier version of this source. Do not list these again, in these words or any others; list only commitments none of them covers:',
+          ...alreadyRecorded.map((description) => `- ${description}`),
+        ]),
     '',
     'Text:',
     text,
