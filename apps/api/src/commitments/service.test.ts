@@ -10,6 +10,7 @@ import {
   addCommitmentNote,
   changeCommitmentStatus,
   chaseCommitment,
+  commitmentBoard,
   commitmentSummary,
   editCommitment,
   getCommitment,
@@ -265,6 +266,43 @@ describe('triage of commitments possibly owed to Dom', () => {
       inbound: { open: 1 },
       unconfirmed: 1,
     });
+  });
+});
+
+describe('commitmentBoard', () => {
+  it('shows live commitments and ones closed in the last fortnight, never triage', async () => {
+    harness.commitments.rows = [
+      fakeCommitment(),
+      fakeCommitment({
+        id: SECOND_ID,
+        status: 'done',
+        updatedAt: new Date('2026-09-20T09:00:00Z'),
+      }),
+      fakeCommitment({
+        id: '01K5S9V6QW3SWCCPVB0N0E302C',
+        status: 'dropped',
+        updatedAt: new Date('2026-09-01T09:00:00Z'),
+      }),
+      fakeCommitment({ id: '01K5S9V6QW3SWCCPVB0N0E302D', status: 'unconfirmed' }),
+    ];
+
+    const board = await commitmentBoard(harness.deps);
+
+    expect(board.items.map((item) => item.id)).toEqual([SECOND_ID, TEST_COMMITMENT_ID]);
+    expect(board.truncated).toBe(false);
+    expect(harness.commitments.boardQueries[0]?.closedSince.toISOString()).toBe(
+      '2026-09-07T09:00:00.000Z',
+    );
+  });
+
+  it('names the chase draft waiting for approval', async () => {
+    harness.commitments.pending = [
+      { commitmentId: TEST_COMMITMENT_ID, proposalId: '01K5S9V6QW3SWCCPVB0N0E309P' },
+    ];
+
+    const board = await commitmentBoard(harness.deps);
+
+    expect(board.items[0]?.pendingChaseProposalId).toBe('01K5S9V6QW3SWCCPVB0N0E309P');
   });
 });
 

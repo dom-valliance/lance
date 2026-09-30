@@ -1,4 +1,11 @@
-import { commitments, observations, runMigrations, type Db, type NewCommitment } from '@lance/db';
+import {
+  commitments,
+  observations,
+  proposals,
+  runMigrations,
+  type Db,
+  type NewCommitment,
+} from '@lance/db';
 import { openSeededTestDb, startPostgresContainer } from '@lance/db/testing';
 import { newUlid } from '@lance/shared';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -217,5 +224,58 @@ describe('createCommitmentStore', () => {
     await insert({ status: 'unconfirmed', description: 'Share the deck with everyone' });
 
     expect((await store.summary(new Date())).unconfirmed).toBe(before + 1);
+  });
+
+  it('draws the board from live rows and recently closed ones, leaving triage out', async () => {
+    const live = await insert({ status: 'chased', description: 'Board live' });
+    const recent = await insert({
+      status: 'done',
+      description: 'Board recent',
+      updatedAt: new Date('2026-09-25T09:00:00Z'),
+    });
+    const old = await insert({
+      status: 'dropped',
+      description: 'Board old',
+      updatedAt: new Date('2026-08-01T09:00:00Z'),
+    });
+    const triage = await insert({ status: 'unconfirmed', description: 'Board triage' });
+
+    const ids = (
+      await store.board({ closedSince: new Date('2026-09-16T00:00:00Z'), limit: 5000 })
+    ).map((row) => row.id);
+
+    expect(ids).toEqual(expect.arrayContaining([live, recent]));
+    expect(ids).not.toContain(old);
+    expect(ids).not.toContain(triage);
+  });
+
+  it('finds the pending chase draft for a commitment and ignores decided ones', async () => {
+    const chased = await insert({ description: 'Chase me' });
+    const draft = (status: 'pending' | 'rejected') => ({
+      id: newUlid(),
+      correlationId: newUlid(),
+      actionClass: 'draft_email' as const,
+      counterpartyClass: 'unknown' as const,
+      targetSystem: 'graph' as const,
+      payload: {
+        subject: 'Chasing',
+        bodyText: 'Hello',
+        to: ['ann@client.test'],
+        commitmentId: chased,
+      },
+      preview: 'Chase Ann',
+      rationale: 'Overdue',
+      provenance: [],
+      reversibility: 'reversible' as const,
+      policyDecision: 'propose' as const,
+      status,
+      expiresAt: new Date('2026-12-01T00:00:00Z'),
+    });
+    const pending = draft('pending');
+    await db.insert(proposals).values([draft('rejected'), pending]);
+
+    expect(await store.pendingChases([chased, newUlid()])).toEqual([
+      { commitmentId: chased, proposalId: pending.id },
+    ]);
   });
 });

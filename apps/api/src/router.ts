@@ -46,6 +46,7 @@ import {
   addCommitmentNote,
   changeCommitmentStatus,
   chaseCommitment,
+  commitmentBoard,
   commitmentSummary,
   COMMITMENT_DESCRIPTION_MAX_CHARS,
   editCommitment,
@@ -580,6 +581,8 @@ export const appRouter = router({
       .query(({ ctx, input }) => listCommitments(ctx.deps, input)),
     /** Open and overdue counts for both tabs, counted in SQL. */
     summary: procedure.query(({ ctx }) => commitmentSummary(ctx.deps)),
+    /** The board: live commitments both ways, and the ones closed in the last fortnight. */
+    board: procedure.query(({ ctx }) => commitmentBoard(ctx.deps)),
     get: procedure
       .input(z.object({ id: UlidSchema }))
       .query(({ ctx, input }) => getCommitment(ctx.deps, input.id)),

@@ -64,12 +64,14 @@ import type {
 } from './alerts/store.js';
 import type { BriefQuery, BriefRecord, BriefStoreLike, LatestBriefQuery } from './briefs/store.js';
 import type {
+  BoardQuery,
   CommitmentCountQuery,
   CommitmentEdit,
   CommitmentQuery,
   CommitmentStoreLike,
   CommitmentSummary,
   CommitmentTally,
+  PendingChase,
   SourceKey,
   SourceObservation,
 } from './commitments/store.js';
@@ -535,6 +537,30 @@ export class FakeCommitmentStore implements CommitmentStoreLike {
     const updated = { ...this.rows[index]!, ...input.set, updatedAt: input.at };
     this.rows[index] = updated;
     return Promise.resolve(updated);
+  }
+
+  readonly boardQueries: BoardQuery[] = [];
+
+  board(query: BoardQuery): Promise<Commitment[]> {
+    this.boardQueries.push(query);
+    const rows = this.rows
+      .filter(
+        (row) =>
+          row.status === 'open' ||
+          row.status === 'chased' ||
+          ((row.status === 'done' || row.status === 'dropped') &&
+            row.updatedAt >= query.closedSince),
+      )
+      .sort((left, right) => (left.id < right.id ? 1 : -1));
+    return Promise.resolve(rows.slice(0, query.limit));
+  }
+
+  pending: PendingChase[] = [];
+
+  pendingChases(commitmentIds: readonly string[]): Promise<PendingChase[]> {
+    return Promise.resolve(
+      this.pending.filter((chase) => commitmentIds.includes(chase.commitmentId)),
+    );
   }
 
   noteRows: CommitmentNote[] = [];
