@@ -11,16 +11,33 @@ import {
   PROPOSAL_STATUS_LABELS,
   SYSTEM_LABELS,
 } from '@/lib/humanise';
-import { expiryCell, previewDetail, type ExpiryCell } from '@/lib/proposal-view';
+import {
+  allowedActions,
+  expiryCell,
+  previewDetail,
+  type ExpiryCell,
+} from '@/lib/proposal-view';
 import { PROPOSAL_STATUS_TONES, SYSTEM_TONES } from '@/lib/tones';
+import { approveProposal, rejectProposal, snoozeProposal } from './actions';
+import { ProposalCard, ProposalRowPair } from './proposal-row-actions';
 
 /**
  * The proposals queue, one page of it: the table on a desktop and the same
  * rows as cards on a phone. The page fetches and filters; this renders.
+ * A decidable row (pending or held) carries Approve and Reject in situ,
+ * the same pattern the commitments table uses for its row actions.
  */
 
-/** The six columns, in order; `loading.tsx` keeps its own copy of the names. */
-const PROPOSAL_COLUMNS = ['Preview', 'Action class', 'Counterparty', 'System', 'Status', 'Expires'];
+/** The seven columns, in order; `loading.tsx` keeps its own copy of the names. */
+const PROPOSAL_COLUMNS = [
+  'Preview',
+  'Action class',
+  'Counterparty',
+  'System',
+  'Status',
+  'Expires',
+  'Actions',
+];
 
 /** Structurally what `proposals.list` returns, down to the columns shown here. */
 export interface ProposalRow {
@@ -57,6 +74,56 @@ function Expiry({ cell }: { cell: ExpiryCell }) {
   );
 }
 
+/** The five leading cells of a row, shared by decidable and decided proposals. */
+function RowCells({
+  proposal,
+  open,
+  detail,
+  expiry,
+}: {
+  proposal: ProposalRow;
+  open: boolean;
+  detail: string | null;
+  expiry: ExpiryCell;
+}) {
+  return (
+    <>
+      <Td>
+        <TextLink
+          href={`/proposals/${proposal.id}`}
+          tone="foreground"
+          className={cn('font-medium', !open && 'text-[oklch(0.85_0_0)]')}
+        >
+          {proposal.preview}
+        </TextLink>
+        {detail === null ? null : (
+          <div className="mt-0.5 max-w-[46ch] truncate text-xs text-muted-foreground">{detail}</div>
+        )}
+      </Td>
+      <Td>{ACTION_CLASS_LABELS[proposal.actionClass]}</Td>
+      <Td>{COUNTERPARTY_LABELS[proposal.counterpartyClass]}</Td>
+      <Td>
+        <Badge tone={SYSTEM_TONES[proposal.targetSystem]} className={open ? undefined : 'opacity-70'}>
+          {SYSTEM_LABELS[proposal.targetSystem]}
+        </Badge>
+      </Td>
+      <Td>
+        <Badge tone={PROPOSAL_STATUS_TONES[proposal.status]}>
+          {PROPOSAL_STATUS_LABELS[proposal.status]}
+        </Badge>
+      </Td>
+      <Td>
+        <Expiry cell={expiry} />
+      </Td>
+    </>
+  );
+}
+
+/** The Actions cell for a proposal whose decision is already made. */
+function DecidedActions() {
+  return <span className="text-xs text-muted-foreground">—</span>;
+}
+
 export function ProposalsTable({
   proposals,
   now,
@@ -76,6 +143,7 @@ export function ProposalsTable({
     detail: previewDetail(proposal),
     expiry: expiryCell(proposal, now),
     accent: ROW_ACCENT[proposal.status] ?? null,
+    actions: allowedActions(proposal.status),
   }));
 
   return (
@@ -90,47 +158,27 @@ export function ProposalsTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ proposal, open, detail, expiry, accent }) => (
-              <Tr
-                key={proposal.id}
-                liveId={proposal.id}
-                muted={!open}
-                {...(accent === null ? {} : { accent })}
-              >
-                <Td>
-                  <TextLink
-                    href={`/proposals/${proposal.id}`}
-                    tone="foreground"
-                    className={cn('font-medium', !open && 'text-[oklch(0.85_0_0)]')}
-                  >
-                    {proposal.preview}
-                  </TextLink>
-                  {detail === null ? null : (
-                    <div className="mt-0.5 max-w-[46ch] truncate text-xs text-muted-foreground">
-                      {detail}
-                    </div>
-                  )}
-                </Td>
-                <Td>{ACTION_CLASS_LABELS[proposal.actionClass]}</Td>
-                <Td>{COUNTERPARTY_LABELS[proposal.counterpartyClass]}</Td>
-                <Td>
-                  <Badge
-                    tone={SYSTEM_TONES[proposal.targetSystem]}
-                    className={open ? undefined : 'opacity-70'}
-                  >
-                    {SYSTEM_LABELS[proposal.targetSystem]}
-                  </Badge>
-                </Td>
-                <Td>
-                  <Badge tone={PROPOSAL_STATUS_TONES[proposal.status]}>
-                    {PROPOSAL_STATUS_LABELS[proposal.status]}
-                  </Badge>
-                </Td>
-                <Td>
-                  <Expiry cell={expiry} />
-                </Td>
-              </Tr>
-            ))}
+            {rows.map(({ proposal, open, detail, expiry, accent, actions }) =>
+              actions.includes('approve') ? (
+                <ProposalRowPair
+                  key={proposal.id}
+                  proposalId={proposal.id}
+                  {...(accent === null ? {} : { accent })}
+                  approveAction={approveProposal}
+                  rejectAction={rejectProposal}
+                  snoozeAction={actions.includes('snooze') ? snoozeProposal : null}
+                >
+                  <RowCells proposal={proposal} open={open} detail={detail} expiry={expiry} />
+                </ProposalRowPair>
+              ) : (
+                <Tr key={proposal.id} liveId={proposal.id} muted={!open}>
+                  <RowCells proposal={proposal} open={open} detail={detail} expiry={expiry} />
+                  <Td>
+                    <DecidedActions />
+                  </Td>
+                </Tr>
+              ),
+            )}
           </tbody>
         </Table>
         {rows.length === 0 ? empty : null}
@@ -139,34 +187,65 @@ export function ProposalsTable({
 
       <div className="flex flex-col gap-3 lg:hidden">
         {rows.length === 0 ? <div className="rounded-xl bg-card">{empty}</div> : null}
-        {rows.map(({ proposal, open, expiry, accent }) => (
-          <Link
-            key={proposal.id}
-            href={`/proposals/${proposal.id}`}
-            data-live-id={proposal.id}
-            className={cn(
-              'flex flex-col gap-2 rounded-xl bg-card p-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/45',
-              accent === null ? null : CARD_ACCENT[accent],
-            )}
-          >
-            <span className="flex items-start justify-between gap-3">
-              <span className={cn('font-medium', !open && 'text-[oklch(0.85_0_0)]')}>
-                {proposal.preview}
+        {rows.map(({ proposal, open, expiry, accent, actions }) => {
+          const meta = (
+            <>
+              <span className="text-xs text-muted-foreground">
+                {ACTION_CLASS_LABELS[proposal.actionClass]} ·{' '}
+                {COUNTERPARTY_LABELS[proposal.counterpartyClass]} ·{' '}
+                {SYSTEM_LABELS[proposal.targetSystem]}
               </span>
-              <Badge tone={PROPOSAL_STATUS_TONES[proposal.status]}>
-                {PROPOSAL_STATUS_LABELS[proposal.status]}
-              </Badge>
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {ACTION_CLASS_LABELS[proposal.actionClass]} ·{' '}
-              {COUNTERPARTY_LABELS[proposal.counterpartyClass]} ·{' '}
-              {SYSTEM_LABELS[proposal.targetSystem]}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {expiry.lead} · {expiry.detail}
-            </span>
-          </Link>
-        ))}
+              <span className="text-xs text-muted-foreground">
+                {expiry.lead} · {expiry.detail}
+              </span>
+            </>
+          );
+
+          return actions.includes('approve') ? (
+            <ProposalCard
+              key={proposal.id}
+              proposalId={proposal.id}
+              {...(accent === null ? {} : { accent })}
+              approveAction={approveProposal}
+              rejectAction={rejectProposal}
+              snoozeAction={actions.includes('snooze') ? snoozeProposal : null}
+            >
+              <span className="flex items-start justify-between gap-3">
+                <TextLink
+                  href={`/proposals/${proposal.id}`}
+                  tone="foreground"
+                  className="font-medium"
+                >
+                  {proposal.preview}
+                </TextLink>
+                <Badge tone={PROPOSAL_STATUS_TONES[proposal.status]}>
+                  {PROPOSAL_STATUS_LABELS[proposal.status]}
+                </Badge>
+              </span>
+              {meta}
+            </ProposalCard>
+          ) : (
+            <Link
+              key={proposal.id}
+              href={`/proposals/${proposal.id}`}
+              data-live-id={proposal.id}
+              className={cn(
+                'flex flex-col gap-2 rounded-xl bg-card p-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/45',
+                accent === null ? null : CARD_ACCENT[accent],
+              )}
+            >
+              <span className="flex items-start justify-between gap-3">
+                <span className={cn('font-medium', !open && 'text-[oklch(0.85_0_0)]')}>
+                  {proposal.preview}
+                </span>
+                <Badge tone={PROPOSAL_STATUS_TONES[proposal.status]}>
+                  {PROPOSAL_STATUS_LABELS[proposal.status]}
+                </Badge>
+              </span>
+              {meta}
+            </Link>
+          );
+        })}
         <div className="overflow-hidden rounded-xl bg-card [&>div]:border-t-0">{footer}</div>
       </div>
     </>
