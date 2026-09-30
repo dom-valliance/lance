@@ -9,7 +9,15 @@ export default function ProposalsLoading() {
         <Skeleton className="w-72 max-w-full" />
       </div>
       <TableSkeleton
-        columns={['Preview', 'Action class', 'Counterparty', 'System', 'Status', 'Expires']}
+        columns={[
+          'Preview',
+          'Action class',
+          'Counterparty',
+          'System',
+          'Status',
+          'Expires',
+          'Actions',
+        ]}
         rows={5}
       />
     </div>
