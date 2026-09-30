@@ -152,7 +152,7 @@ For the principal whose UPN is `DOM_EMAIL`, the pre-ADR 0022 secrets `graph-refr
 
 ## Rehearse in dev with a synthetic principal
 
-Once per environment, before the first real offboarding and before the pilot (`deploy.md`, Phase 5 checklist step 13). It onboards a test account end to end and then offboards it, so every step of both runs against real Entra, Key Vault and Slack.
+Once per environment, before the first real offboarding and before the pilot (`deploy.md`, Phase 5 checklist step 13). It onboards a test account end to end and then offboards it, so every step of both runs against real Entra, Key Vault and Slack. It spans two days, because the nightly role check runs between them, and it is the evidence for four multi-user acceptance criteria (`docs/plans/multi-user.md` section 8): access controlled from Entra, onboarding without help, Slack identity scoped, and offboarding exercised.
 
 **The test account.** A Microsoft 365 user in the Valliance tenant, created for this and holding no one's real mail, so the rehearsal processes no personal data before the DPO signs off the LIA. It needs an Exchange Online licence (Graph consent and the mailbox-settings read need a mailbox), a Slack account in `valliance-ai.slack.com` whose profile email is its UPN, and, to finish onboarding, a Jamie account with its own API key. Never enter Dom's Jamie key for it: the worker would read Dom's meetings into the test principal. Without Jamie the checklist stops at that step; offboarding still runs, and the `secrets` step finds no Jamie secret to delete. Capture the UPN: `TEST_UPN=<test UPN>`, then `echo "$TEST_UPN"`.
 
@@ -167,11 +167,20 @@ Onboard, as the test account in a private browser window:
 7. Confirm the preferences. The checklist completes and the principal starts its five working days in dry run.
 8. From Dom's account, the admin page lists the test principal with its status. Capture its id as in step 2 above: `PRINCIPAL=<id>`, then `echo "$PRINCIPAL"`.
 
-Offboard, from Dom's account:
+Prove Slack is scoped, from both accounts:
 
-9. Steps 3 to 5 above: offboard the test principal from the admin page, watch the worker log for `principal offboarded`, and run the checks. Expected differences from a colleague: `slack_channel:done` for the test channel, and few or no observations, since the mailbox is empty.
-10. Step 1 last: remove the role in the portal (the same Users and groups page, select the assignment, Remove), revoke the account's sessions, and delete its Jamie key in Jamie.
-11. In the test browser window, sign in again: Microsoft refuses it.
+9. Invite the test account to `dom-claude-agent`. As the test account, press Approve on one of Dom's pending cards. Lance refuses it, and Dom receives a P1 `foreign_decision_attempt` alert. Remove the test account from the channel afterwards.
+
+Prove access is controlled from Entra, the same day:
+
+10. Step 1 above, the role part only: remove the test account's `Lance.User` assignment in the portal (the same Users and groups page, select the assignment, Remove).
+11. In the test browser window, sign out and sign in again: Microsoft refuses it.
+12. The next morning, after the nightly role check at 02:30, the admin page shows the test principal as paused, and its ledger holds the role check's `pause` event. If it is still onboarding, read the worker log for the role check's line (`az containerapp logs show -g rg-lance-dev -n ca-lance-worker-dev --type console --tail 300 | grep -i 'role check'`); a Graph 403 means the `Application.Read.All` admin consent from `entra-setup.md` section 8 is missing.
+
+Offboard, from Dom's account, the day after step 10:
+
+13. Steps 3 to 5 above: offboard the test principal from the admin page, watch the worker log for `principal offboarded`, and run the checks. Expected differences from a colleague: `pause:already_done` if the role check paused it first, `slack_channel:done` for the test channel, and few or no observations, since the mailbox is empty.
+14. The rest of step 1: revoke the account's sessions and delete its Jamie key in Jamie.
 
 Record the date, the test UPN and the principal id in `docs/adr/0000-phase-log.md` under Phase 5. To rehearse again with the same account, follow "Re-onboarding after offboarding" below first.
 
