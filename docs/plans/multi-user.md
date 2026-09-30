@@ -197,7 +197,7 @@ With Phase 4 WP4.1 this is close to the two weeks of dedicated time Dom estimate
 
 | Criterion | Evidence expected |
 |---|---|
-| Access is controlled from Entra | In dev, removing a test user from `Lance Users` stops their next sign-in and pauses them within a day; the ledger holds both events |
+| Access is controlled from Entra | In dev, removing a test user's `Lance.User` role stops their next sign-in and pauses them within a day; the ledger holds both events |
 | A second principal can onboard without Dom's help | A synthetic principal completes all six onboarding steps in dev, with no hand edits to Key Vault, Postgres or Slack |
 | Slack identity is proven and scoped | `/lance login` binds a second Slack user; their cards reach only their channel; Dom's buttons cannot decide their proposals, and the reverse |
 | Secrets are isolated | The web identity has no secret access in the deployed vault; each principal's secrets are read only by the worker |
