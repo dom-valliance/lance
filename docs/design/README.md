@@ -13,7 +13,7 @@ The index page of the package records ten decisions that changed the existing bu
 - Enum values are humanised everywhere the reader sees them (`apps/web/src/lib/humanise.ts`); the raw value stays in URLs and forms.
 - Expiry and due dates show a relative form with the absolute time beside it (`apps/web/src/lib/time.ts`, `apps/web/src/lib/ageing.ts`).
 - Ledger trails and status histories are timelines. Failures are inline `role="alert"` text under the form that failed, never a toast; loading is a skeleton, never a page spinner.
-- The page beside the sidebar is at most 1440px wide and centred in the space left (`apps/web/src/components/shell/app-shell.tsx`). This overrides the brief's "content column has no maximum width": on a monitor wider than the 1440 the designs were drawn at, tables and cards otherwise stretch well past the proportions the designs show.
+- The page beside the sidebar is at most 1440px wide and left-aligned against the sidebar, the spare width falling on the right (`apps/web/src/components/shell/app-shell.tsx`). This overrides the brief's "content column has no maximum width": on a monitor wider than the 1440 the designs were drawn at, tables and cards otherwise stretch well past the proportions the designs show.
 - Below 1024px the sidebar becomes a 56px top bar with a drawer; hit targets are 44px.
 - The reversed wordmark is the supplied JPEG with an invert and screen blend. A vector should replace it; the star mark path is in `apps/web/src/components/shell/star-mark.tsx`.
 

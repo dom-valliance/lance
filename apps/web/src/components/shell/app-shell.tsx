@@ -9,11 +9,12 @@ import type { ShellData } from '@/lib/shell-data';
  * Sidebar at 1024 and up, top bar and drawer beneath; the paused banner
  * above every page while the kill switch is on; 32px of padding around
  * the page at desktop, 16px on a phone. Beside the sidebar the page is at
- * most 1440px wide, padding included, and centred in the space left, so a
- * wide monitor shows the page as the designs drew it rather than
- * stretched. Signed out, or signed in and still onboarding, none of that
- * has a reading, so the shell steps back to a centred canvas for the
- * sign-in card or the onboarding checklist (design 7.12).
+ * most 1440px wide, padding included, and starts against the sidebar, so
+ * a wide monitor shows the page as the designs drew it rather than
+ * stretched, and the spare width falls on the right. Signed out, or
+ * signed in and still onboarding, none of that has a reading, so the
+ * shell steps back to a centred canvas for the sign-in card or the
+ * onboarding checklist (design 7.12).
  */
 export function AppShell({
   agentName,
@@ -34,7 +35,7 @@ export function AppShell({
       <Sidebar agentName={agentName} items={items} counts={data.counts} status={data.statusLine} />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileNav items={items} counts={data.counts} status={data.statusLine} />
-        <main className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-6 p-4 lg:p-8">
+        <main className="flex w-full max-w-[1440px] flex-1 flex-col gap-6 p-4 lg:p-8">
           {data.paused === null ? null : <PausedBanner {...data.paused} />}
           {children}
         </main>
