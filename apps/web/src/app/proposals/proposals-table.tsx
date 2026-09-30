@@ -11,12 +11,7 @@ import {
   PROPOSAL_STATUS_LABELS,
   SYSTEM_LABELS,
 } from '@/lib/humanise';
-import {
-  allowedActions,
-  expiryCell,
-  previewDetail,
-  type ExpiryCell,
-} from '@/lib/proposal-view';
+import { allowedActions, expiryCell, previewDetail, type ExpiryCell } from '@/lib/proposal-view';
 import { PROPOSAL_STATUS_TONES, SYSTEM_TONES } from '@/lib/tones';
 import { approveProposal, rejectProposal, snoozeProposal } from './actions';
 import { ProposalCard, ProposalRowPair } from './proposal-row-actions';
@@ -103,7 +98,10 @@ function RowCells({
       <Td>{ACTION_CLASS_LABELS[proposal.actionClass]}</Td>
       <Td>{COUNTERPARTY_LABELS[proposal.counterpartyClass]}</Td>
       <Td>
-        <Badge tone={SYSTEM_TONES[proposal.targetSystem]} className={open ? undefined : 'opacity-70'}>
+        <Badge
+          tone={SYSTEM_TONES[proposal.targetSystem]}
+          className={open ? undefined : 'opacity-70'}
+        >
           {SYSTEM_LABELS[proposal.targetSystem]}
         </Badge>
       </Td>
