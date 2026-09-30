@@ -10,20 +10,13 @@
  * `ProposalStatus`).
  */
 
-import { oneOf, selected, type SearchParams, type SourceSystem } from '@/lib/filters';
+import { oneOf, type SearchParams, type SourceSystem } from '@/lib/filters';
 
 export const COMMITMENT_DIRECTIONS = ['outbound', 'inbound'] as const;
 export type CommitmentDirection = (typeof COMMITMENT_DIRECTIONS)[number];
 
 export const COMMITMENT_STATUSES = ['open', 'chased', 'done', 'dropped', 'unconfirmed'] as const;
 export type CommitmentStatus = (typeof COMMITMENT_STATUSES)[number];
-
-/**
- * The status filter options the page offers, in display order. Unconfirmed
- * is not among them: those commitments have their own tab (ADR 0037).
- */
-export const COMMITMENT_STATUS_FILTERS = ['open', 'chased', 'done', 'dropped', 'all'] as const;
-export type CommitmentStatusFilter = (typeof COMMITMENT_STATUS_FILTERS)[number];
 
 export interface CommitmentPerson {
   id: string;
@@ -87,30 +80,9 @@ export interface SourceContextView {
   fallback: string | null;
 }
 
-/** The tab the page shows: `?direction=inbound`, otherwise the default. */
+/** The lane the phone board opens on: `?direction=inbound`, otherwise I owe. */
 export function commitmentDirectionFrom(params: SearchParams): CommitmentDirection {
   return oneOf(COMMITMENT_DIRECTIONS, params['direction']) ?? 'outbound';
-}
-
-/** The three tabs: the two directions and the triage bucket of possibly owed commitments. */
-export const COMMITMENT_TABS = ['outbound', 'inbound', 'triage'] as const;
-export type CommitmentTab = (typeof COMMITMENT_TABS)[number];
-
-/** `?tab=triage` shows the triage bucket; otherwise the direction names the tab. */
-export function commitmentTabFrom(params: SearchParams): CommitmentTab {
-  return selected(params, 'tab') === 'triage' ? 'triage' : commitmentDirectionFrom(params);
-}
-
-/** The status filter selected in the query string, `open` when absent. */
-export function commitmentStatusSelected(params: SearchParams): CommitmentStatusFilter {
-  const raw = selected(params, 'status');
-  return raw === '' ? 'open' : (oneOf(COMMITMENT_STATUS_FILTERS, raw) ?? 'open');
-}
-
-/** The status the api should filter by; `undefined` means "all". */
-export function commitmentStatusFilterFrom(params: SearchParams): CommitmentStatus | undefined {
-  const selectedFilter = commitmentStatusSelected(params);
-  return selectedFilter === 'all' ? undefined : selectedFilter;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -196,23 +168,6 @@ export const NOT_MINE_REASON = 'Not owed to me: the promise was made to someone 
 /** Whether the row is past its due date and still running. */
 export function isCommitmentOverdue(view: Pick<CommitmentView, 'overdueDays'>): boolean {
   return view.overdueDays !== null && view.overdueDays > 0;
-}
-
-/**
- * The badge that sits beside a row's description, as a key into
- * `COMMITMENT_STATUS_TONES` and the label table. Overdue beats the stored
- * status, since it is what the reader has to act on; an open row that is
- * not overdue carries no badge, and neither does a dropped one, whose cell
- * already says there is nothing left to do.
- */
-export function commitmentBadgeFor(
-  view: Pick<CommitmentView, 'status' | 'overdueDays'>,
-): CommitmentStatus | 'overdue' | null {
-  if (isCommitmentOverdue(view)) return 'overdue';
-  if (view.status === 'chased') return 'chased';
-  if (view.status === 'done') return 'done';
-  if (view.status === 'unconfirmed') return 'unconfirmed';
-  return null;
 }
 
 /** The Chased column's first line: "not yet", "1 time", "4 times". */

@@ -1,12 +1,20 @@
-import { TableSkeleton } from '@/components/data-table';
+import { Skeleton } from '@/components/ui/skeleton';
 
-/** The six Commitments columns, repeated here so the skeleton pulls in no server code. */
-const COLUMNS = ['Commitment', 'Counterparty', 'Due', 'Chased', 'Provenance', 'Actions'];
-
+/** The board's loading state (design 7.5): a pulsing block per column, per lane. */
 export default function CommitmentsLoading() {
   return (
-    <div className="flex flex-col gap-6">
-      <TableSkeleton columns={COLUMNS} rows={4} />
+    <div aria-busy="true" aria-label="Loading" className="flex flex-col gap-5">
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="h-4 w-[55%]" />
+      </div>
+      {[0, 1].map((lane) => (
+        <div key={lane} className="grid grid-cols-1 gap-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((column) => (
+            <Skeleton key={column} className="h-22 rounded-lg" />
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
