@@ -2,8 +2,8 @@
  * The Commitments board (design 7.5, the swimlane board): lanes are the
  * direction, columns the workflow stage. The api chooses the rows; this
  * groups, counts and words them, so the client component only renders.
- * Cards move only through recorded actions, never by dragging, so every
- * move lands in the ledger.
+ * A card moves only through a recorded action: a button, or a drag that
+ * runs the same action, so every move lands in the ledger.
  */
 
 import {
@@ -43,13 +43,14 @@ export interface BoardLane {
   note: string;
 }
 
+/** I owe first: what the principal has promised is theirs to act on. */
 export const BOARD_LANES: readonly BoardLane[] = [
-  { id: 'inbound', label: 'Owed to me', note: 'Lance drafts chases for your approval' },
   {
     id: 'outbound',
     label: 'I owe',
     note: 'Lance never chases you; an overdue one raises an alert',
   },
+  { id: 'inbound', label: 'Owed to me', note: 'Lance drafts chases for your approval' },
 ];
 
 /** Why the I owe lane has no Chased column, in the board's words and the phone's. */
@@ -72,8 +73,6 @@ export interface BoardLaneView extends BoardLane {
 
 export interface BoardView {
   lanes: BoardLaneView[];
-  /** Cards per stage across both lanes, for the column heads. */
-  stageCounts: Record<BoardStageId, number>;
   /** Live commitments owed to the principal, live ones they owe, and overdue across both. */
   totals: { owed: number; owe: number; overdue: number };
 }
@@ -81,15 +80,8 @@ export interface BoardView {
 const isLive = (item: Pick<CommitmentView, 'status'>): boolean =>
   item.status === 'open' || item.status === 'chased';
 
-const isBoardStage = (status: CommitmentView['status']): status is BoardStageId =>
-  (BOARD_STAGE_IDS as readonly string[]).includes(status);
-
 /** Groups the board's rows into lanes and columns, each column overdue first, then soonest due. */
 export function buildBoard(items: readonly BoardItem[]): BoardView {
-  const stageCounts: Record<BoardStageId, number> = { open: 0, chased: 0, done: 0, dropped: 0 };
-  for (const item of items) {
-    if (isBoardStage(item.status)) stageCounts[item.status] += 1;
-  }
   const lanes = BOARD_LANES.map((lane): BoardLaneView => {
     const inLane = items.filter((item) => item.direction === lane.id);
     const live = inLane.filter(isLive);
@@ -104,10 +96,10 @@ export function buildBoard(items: readonly BoardItem[]): BoardView {
       })),
     };
   });
-  const [owed, owe] = lanes;
+  const owed = lanes.find((lane) => lane.id === 'inbound');
+  const owe = lanes.find((lane) => lane.id === 'outbound');
   return {
     lanes,
-    stageCounts,
     totals: {
       owed: owed?.live ?? 0,
       owe: owe?.live ?? 0,
@@ -143,6 +135,44 @@ export function canChase(
   return item.direction === 'inbound' && isLive(item) && item.pendingChaseProposalId === null;
 }
 
+/**
+ * What dropping a card on a column does, or null when the column does not
+ * take it. A drag runs the same recorded action as the matching button:
+ *
+ * - Done marks it done; Dropped asks for a reason first.
+ * - Open reopens a chased, done or dropped card.
+ * - Chased queues a chase for a running open card owed to the principal,
+ *   and reopens as chased a closed one that was chased before.
+ *
+ * A card never changes lane (the direction is not editable), and the I
+ * owe lane has no Chased column.
+ */
+export type BoardMove =
+  | { kind: 'done' }
+  | { kind: 'drop' }
+  | { kind: 'chase' }
+  | { kind: 'status'; to: 'open' | 'chased' };
+
+export function moveFor(
+  item: Pick<BoardItem, 'direction' | 'status' | 'chaseCount' | 'pendingChaseProposalId'>,
+  lane: CommitmentDirection,
+  stage: BoardStageId,
+): BoardMove | null {
+  if (item.direction !== lane || item.status === stage) return null;
+  switch (stage) {
+    case 'done':
+      return { kind: 'done' };
+    case 'dropped':
+      return { kind: 'drop' };
+    case 'open':
+      return { kind: 'status', to: 'open' };
+    case 'chased':
+      if (lane === 'outbound') return null;
+      if (item.status === 'open') return canChase(item) ? { kind: 'chase' } : null;
+      return item.chaseCount > 0 ? { kind: 'status', to: 'chased' } : null;
+  }
+}
+
 /** What the status line says after each action. */
 export const boardMessages = {
   done: (item: Pick<BoardItem, 'description'>): string =>
@@ -151,6 +181,8 @@ export const boardMessages = {
     `Dropped "${item.description}". Nothing was sent to ${firstName(item.counterparty.name)}.`,
   chased: (item: Pick<BoardItem, 'counterparty'>): string =>
     `Chase queued for ${firstName(item.counterparty.name)}. The draft arrives in Proposals for your approval.`,
+  moved: (item: Pick<BoardItem, 'description'>, to: 'open' | 'chased'): string =>
+    `Moved "${item.description}" back to ${to === 'open' ? 'Open' : 'Chased'}. Recorded in the ledger.`,
   undone: (item: Pick<BoardItem, 'description'>): string =>
     `Put "${item.description}" back where it was. Recorded in the ledger.`,
 };

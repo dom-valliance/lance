@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, type FormEvent } from 'react';
+import { useState, useTransition, type DragEvent, type FormEvent } from 'react';
 import { X } from 'lucide-react';
 import { cn } from 'cn';
 import { Ageing } from '@/components/ageing';
@@ -19,11 +19,13 @@ import {
   chaseButtonLabel,
   chaseLine,
   laneMeta,
+  moveFor,
   NOT_CHASED_NOTE,
   NOT_CHASED_SHORT,
   UNDO_REASON,
   type BoardColumn,
   type BoardItem,
+  type BoardMove,
   type BoardStageId,
 } from '@/lib/commitment-board';
 import {
@@ -45,9 +47,12 @@ import {
  * The swimlane board (design 7.5). Both lanes side by side from `lg`; at
  * 360 the lane is a tab and its stages stack. Cards move only through the
  * recorded actions: Mark done, Chase and Drop, each a server action that
- * writes the ledger. Mark done and Drop offer an Undo, itself a recorded
- * status change back. A chase cannot be undone here: it becomes a draft in
- * Proposals, where the principal approves or rejects it.
+ * writes the ledger. On the desktop board a card can also be dragged to
+ * another column of its lane, which runs the same action (`moveFor`); the
+ * buttons stay, so the keyboard and the phone lose nothing. Every move but
+ * a chase offers an Undo, itself a recorded status change back. A chase
+ * cannot be undone here: it becomes a draft in Proposals, where the
+ * principal approves or rejects it.
  */
 
 const STAGE_DOT: Record<BoardStageId, string> = {
@@ -57,7 +62,7 @@ const STAGE_DOT: Record<BoardStageId, string> = {
   dropped: 'bg-sem-red-fg',
 };
 
-type Action = 'done' | 'chase' | 'drop';
+type Action = 'done' | 'chase' | 'drop' | 'move';
 
 interface LastMove {
   label: string;
@@ -231,11 +236,13 @@ function CardActions({
 function LiveCard({
   item,
   handlers,
+  drag,
   now,
   size,
 }: {
   item: BoardItem;
   handlers: CardHandlers;
+  drag: DragProps;
   now: Date;
   size: 'sm' | 'lg';
 }) {
@@ -244,10 +251,13 @@ function LiveCard({
   const chased = item.pendingChaseProposalId === null ? chaseLine(item) : null;
   return (
     <article
+      {...(size === 'sm' ? drag.cardProps(item) : {})}
       className={cn(
         'flex flex-col gap-2 rounded-[10px] bg-card p-3',
+        size === 'sm' && 'cursor-grab active:cursor-grabbing',
         size === 'lg' && 'rounded-xl p-3.5',
         overdue && 'shadow-[inset_2px_0_0_var(--sem-red-fg)]',
+        drag.dragging === item.id && 'opacity-50',
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -299,7 +309,7 @@ function LiveCard({
       {handlers.error === null ? null : (
         <InlineFailure className="text-xs">{handlers.error}</InlineFailure>
       )}
-      {handlers.dropOpen ? (
+      {handlers.dropOpen && !drag.dropInColumn ? (
         <DropForm item={item} handlers={handlers} size={size} />
       ) : (
         <CardActions item={item} handlers={handlers} size={size} />
@@ -309,12 +319,28 @@ function LiveCard({
 }
 
 /** A closed card: done or dropped, quiet, linking to its page where it can be reopened. */
-function ClosedCard({ item, now, size }: { item: BoardItem; now: Date; size: 'sm' | 'lg' }) {
+function ClosedCard({
+  item,
+  handlers,
+  drag,
+  now,
+  size,
+}: {
+  item: BoardItem;
+  handlers: CardHandlers;
+  drag: DragProps;
+  now: Date;
+  size: 'sm' | 'lg';
+}) {
   return (
     <article
+      {...(size === 'sm' ? drag.cardProps(item) : {})}
+      aria-busy={handlers.busy !== null}
       className={cn(
         'flex flex-col gap-1 rounded-[10px] bg-card/70 px-3 py-2.5 text-muted-foreground',
+        size === 'sm' && 'cursor-grab active:cursor-grabbing',
         size === 'lg' && 'rounded-xl px-3.5 py-3',
+        (drag.dragging === item.id || handlers.busy !== null) && 'opacity-50',
       )}
     >
       <TextLink
@@ -327,18 +353,36 @@ function ClosedCard({ item, now, size }: { item: BoardItem; now: Date; size: 'sm
       <p className="m-0 text-xs">
         {item.counterparty.name} · {ageingLabel(item, now)}
       </p>
+      {handlers.error === null ? null : (
+        <InlineFailure className="text-xs">{handlers.error}</InlineFailure>
+      )}
     </article>
   );
+}
+
+/** What a card and a column need from the board's drag state. */
+interface DragProps {
+  /** The id of the card being dragged, if any. */
+  dragging: string | null;
+  /** Whether the open drop form belongs in the Dropped column, after a drag there. */
+  dropInColumn: boolean;
+  cardProps: (item: BoardItem) => {
+    draggable: true;
+    onDragStart: (event: DragEvent<HTMLElement>) => void;
+    onDragEnd: () => void;
+  };
 }
 
 function ColumnCards({
   column,
   handlersFor,
+  drag,
   now,
   size,
 }: {
   column: BoardColumn;
   handlersFor: (item: BoardItem) => CardHandlers;
+  drag: DragProps;
   now: Date;
   size: 'sm' | 'lg';
 }) {
@@ -355,9 +399,23 @@ function ColumnCards({
     <>
       {column.cards.map((item) =>
         item.status === 'open' || item.status === 'chased' ? (
-          <LiveCard key={item.id} item={item} handlers={handlersFor(item)} now={now} size={size} />
+          <LiveCard
+            key={item.id}
+            item={item}
+            handlers={handlersFor(item)}
+            drag={drag}
+            now={now}
+            size={size}
+          />
         ) : (
-          <ClosedCard key={item.id} item={item} now={now} size={size} />
+          <ClosedCard
+            key={item.id}
+            item={item}
+            handlers={handlersFor(item)}
+            drag={drag}
+            now={now}
+            size={size}
+          />
         ),
       )}
     </>
@@ -385,6 +443,9 @@ export function CommitmentBoard({
   const [reason, setReason] = useState('');
   const [reasonMissing, setReasonMissing] = useState(false);
   const [undoing, setUndoing] = useState(false);
+  const [dragging, setDragging] = useState<BoardItem | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const [dropInColumn, setDropInColumn] = useState(false);
   const [, startTransition] = useTransition();
 
   const run = (
@@ -406,6 +467,7 @@ export function CommitmentBoard({
       if (failure === null) {
         setLast(after);
         setDropFor(null);
+        setDropInColumn(false);
         setReason('');
       }
     });
@@ -430,11 +492,13 @@ export function CommitmentBoard({
     },
     onDropOpen: () => {
       setDropFor(item.id);
+      setDropInColumn(false);
       setReason('');
       setReasonMissing(false);
     },
     onDropCancel: () => {
       setDropFor(null);
+      setDropInColumn(false);
       setReason('');
       setReasonMissing(false);
     },
@@ -460,6 +524,89 @@ export function CommitmentBoard({
       );
     },
   });
+
+  /** Runs the recorded action a drop on a column stands for. */
+  const apply = (item: BoardItem, move: BoardMove): void => {
+    const handlers = handlersFor(item);
+    switch (move.kind) {
+      case 'done':
+        handlers.onDone();
+        return;
+      case 'chase':
+        handlers.onChase();
+        return;
+      case 'drop':
+        setDropFor(item.id);
+        setDropInColumn(true);
+        setReason('');
+        setReasonMissing(false);
+        return;
+      case 'status':
+        run(
+          item,
+          'move',
+          () => setCommitmentStatus(null, form({ commitmentId: item.id, status: move.to })),
+          {
+            label: boardMessages.moved(item, move.to),
+            undo: { id: item.id, status: item.status, description: item.description },
+          },
+        );
+    }
+  };
+
+  const drag: DragProps = {
+    dragging: dragging?.id ?? null,
+    dropInColumn,
+    cardProps: (item) => ({
+      draggable: true,
+      onDragStart: (event) => {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', item.id);
+        setDragging(item);
+      },
+      onDragEnd: () => {
+        setDragging(null);
+        setOver(null);
+      },
+    }),
+  };
+
+  /** The drag handlers and highlight for one lane's column on the desktop board. */
+  const target = (laneId: CommitmentDirection, stage: BoardStageId) => {
+    const key = `${laneId}:${stage}`;
+    const move = dragging === null ? null : moveFor(dragging, laneId, stage);
+    return {
+      accepts: move !== null,
+      over: over === key && move !== null,
+      props: {
+        onDragOver: (event: DragEvent<HTMLElement>) => {
+          if (move === null) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          if (over !== key) setOver(key);
+        },
+        onDragLeave: (event: DragEvent<HTMLElement>) => {
+          const next = event.relatedTarget;
+          if (next instanceof Node && event.currentTarget.contains(next)) return;
+          if (over === key) setOver(null);
+        },
+        onDrop: (event: DragEvent<HTMLElement>) => {
+          event.preventDefault();
+          const item = dragging;
+          setDragging(null);
+          setOver(null);
+          if (item !== null && move !== null) apply(item, move);
+        },
+      },
+    };
+  };
+
+  /** The card whose reason the Dropped column of this lane is asking for, after a drag. */
+  const droppingIn = (laneId: CommitmentDirection): BoardItem | null => {
+    if (!dropInColumn || dropFor === null) return null;
+    const item = items.find((candidate) => candidate.id === dropFor);
+    return item !== undefined && item.direction === laneId ? item : null;
+  };
 
   const undo = (): void => {
     const move = last?.undo;
@@ -520,22 +667,7 @@ export function CommitmentBoard({
         </div>
       )}
 
-      <div className="hidden flex-col gap-5 lg:flex">
-        <div className="grid grid-cols-4 gap-3">
-          {board.lanes[0]?.columns.map((column) => (
-            <div key={column.id} className="flex flex-col gap-0.5 border-b border-border px-1 pb-2">
-              <div className="flex items-center gap-2 font-medium">
-                <StageDot stage={column.id} />
-                {column.label}
-                <span className="text-xs font-normal text-muted-foreground">
-                  {board.stageCounts[column.id]}
-                </span>
-              </div>
-              <div className="text-xs text-muted-foreground">{column.hint}</div>
-            </div>
-          ))}
-        </div>
-
+      <div className="hidden flex-col gap-6 lg:flex">
         {board.lanes.map((row) => (
           <section key={row.id} aria-label={row.label} className="flex flex-col gap-2.5">
             <div className="flex items-baseline gap-3 px-1">
@@ -543,22 +675,71 @@ export function CommitmentBoard({
               <span className="text-xs text-muted-foreground">{laneMeta(row)}</span>
               <span className="ml-auto text-xs text-muted-foreground">{row.note}</span>
             </div>
-            <div className="grid grid-cols-4 gap-3 rounded-xl bg-card/50 p-3">
+            <div className="grid grid-cols-4 gap-3">
               {row.columns.map((column) => (
                 <div
                   key={column.id}
-                  aria-label={`${row.label}, ${column.label}`}
-                  className="flex min-h-24 min-w-0 flex-col gap-2"
+                  className="flex flex-col gap-0.5 border-b border-border px-1 pb-2"
                 >
-                  {column.disabled ? (
-                    <div className="flex flex-1 items-center rounded-[10px] border border-dashed border-border p-3 text-xs text-pretty text-muted-foreground">
-                      {NOT_CHASED_NOTE}
-                    </div>
-                  ) : (
-                    <ColumnCards column={column} handlersFor={handlersFor} now={now} size="sm" />
-                  )}
+                  <div className="flex items-center gap-2 font-medium">
+                    <StageDot stage={column.id} />
+                    {column.label}
+                    {column.disabled ? null : (
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {column.cards.length}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground">{column.hint}</div>
                 </div>
               ))}
+            </div>
+            <div className="grid grid-cols-4 gap-3 rounded-xl bg-card/50 p-3">
+              {row.columns.map((column) => {
+                const zone = target(row.id, column.id);
+                const pending = column.id === 'dropped' ? droppingIn(row.id) : null;
+                return (
+                  <div
+                    key={column.id}
+                    aria-label={`${row.label}, ${column.label}`}
+                    {...zone.props}
+                    className={cn(
+                      'flex min-h-24 min-w-0 flex-col rounded-[10px] transition-colors',
+                      zone.accepts && 'outline-1 outline-offset-4 outline-border outline-dashed',
+                      zone.over && 'bg-brand-soft outline-brand',
+                    )}
+                  >
+                    {column.disabled ? (
+                      <div className="flex min-h-24 items-center rounded-[10px] border border-dashed border-border p-3 text-xs text-pretty text-muted-foreground">
+                        {NOT_CHASED_NOTE}
+                      </div>
+                    ) : (
+                      // Each column scrolls on its own, so a long Done or
+                      // Dropped column never stretches the lane.
+                      <div
+                        tabIndex={0}
+                        className="-mr-1.5 flex max-h-[min(34rem,62vh)] flex-col gap-2 overflow-y-auto overscroll-contain rounded-[10px] pr-1.5 outline-none [scrollbar-width:thin] focus-visible:ring-3 focus-visible:ring-ring/45"
+                      >
+                        {pending === null ? null : (
+                          <article className="flex flex-col gap-2 rounded-[10px] bg-card p-3">
+                            <p className="m-0 text-[13px] leading-snug font-medium text-pretty">
+                              {pending.description}
+                            </p>
+                            <DropForm item={pending} handlers={handlersFor(pending)} size="sm" />
+                          </article>
+                        )}
+                        <ColumnCards
+                          column={column}
+                          handlersFor={handlersFor}
+                          drag={drag}
+                          now={now}
+                          size="sm"
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </section>
         ))}
@@ -603,7 +784,13 @@ export function CommitmentBoard({
               {column.disabled ? (
                 <p className="m-0 pb-1 pl-4 text-xs text-muted-foreground">{NOT_CHASED_SHORT}</p>
               ) : (
-                <ColumnCards column={column} handlersFor={handlersFor} now={now} size="lg" />
+                <ColumnCards
+                  column={column}
+                  handlersFor={handlersFor}
+                  drag={drag}
+                  now={now}
+                  size="lg"
+                />
               )}
             </section>
           ))}
