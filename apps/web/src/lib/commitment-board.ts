@@ -2,8 +2,8 @@
  * The Commitments board (design 7.5, the swimlane board): lanes are the
  * direction, columns the workflow stage. The api chooses the rows; this
  * groups, counts and words them, so the client component only renders.
- * Cards move only through recorded actions, never by dragging, so every
- * move lands in the ledger.
+ * A card moves only through a recorded action: a button, or a drag that
+ * runs the same action, so every move lands in the ledger.
  */
 
 import {
@@ -143,6 +143,44 @@ export function canChase(
   return item.direction === 'inbound' && isLive(item) && item.pendingChaseProposalId === null;
 }
 
+/**
+ * What dropping a card on a column does, or null when the column does not
+ * take it. A drag runs the same recorded action as the matching button:
+ *
+ * - Done marks it done; Dropped asks for a reason first.
+ * - Open reopens a chased, done or dropped card.
+ * - Chased queues a chase for a running open card owed to the principal,
+ *   and reopens as chased a closed one that was chased before.
+ *
+ * A card never changes lane (the direction is not editable), and the I
+ * owe lane has no Chased column.
+ */
+export type BoardMove =
+  | { kind: 'done' }
+  | { kind: 'drop' }
+  | { kind: 'chase' }
+  | { kind: 'status'; to: 'open' | 'chased' };
+
+export function moveFor(
+  item: Pick<BoardItem, 'direction' | 'status' | 'chaseCount' | 'pendingChaseProposalId'>,
+  lane: CommitmentDirection,
+  stage: BoardStageId,
+): BoardMove | null {
+  if (item.direction !== lane || item.status === stage) return null;
+  switch (stage) {
+    case 'done':
+      return { kind: 'done' };
+    case 'dropped':
+      return { kind: 'drop' };
+    case 'open':
+      return { kind: 'status', to: 'open' };
+    case 'chased':
+      if (lane === 'outbound') return null;
+      if (item.status === 'open') return canChase(item) ? { kind: 'chase' } : null;
+      return item.chaseCount > 0 ? { kind: 'status', to: 'chased' } : null;
+  }
+}
+
 /** What the status line says after each action. */
 export const boardMessages = {
   done: (item: Pick<BoardItem, 'description'>): string =>
@@ -151,6 +189,8 @@ export const boardMessages = {
     `Dropped "${item.description}". Nothing was sent to ${firstName(item.counterparty.name)}.`,
   chased: (item: Pick<BoardItem, 'counterparty'>): string =>
     `Chase queued for ${firstName(item.counterparty.name)}. The draft arrives in Proposals for your approval.`,
+  moved: (item: Pick<BoardItem, 'description'>, to: 'open' | 'chased'): string =>
+    `Moved "${item.description}" back to ${to === 'open' ? 'Open' : 'Chased'}. Recorded in the ledger.`,
   undone: (item: Pick<BoardItem, 'description'>): string =>
     `Put "${item.description}" back where it was. Recorded in the ledger.`,
 };

@@ -6,6 +6,7 @@ import {
   chaseButtonLabel,
   chaseLine,
   laneMeta,
+  moveFor,
   type BoardItem,
 } from './commitment-board';
 
@@ -100,5 +101,45 @@ describe('the card lines', () => {
     expect(boardMessages.dropped(item())).toBe(
       'Dropped "Send the intro deck". Nothing was sent to Marcus.',
     );
+  });
+});
+
+describe('moveFor', () => {
+  it('marks done or asks to drop from any other column of the same lane', () => {
+    expect(moveFor(item(), 'inbound', 'done')).toEqual({ kind: 'done' });
+    expect(moveFor(item({ status: 'done' }), 'inbound', 'dropped')).toEqual({ kind: 'drop' });
+  });
+
+  it('reopens a closed or chased card dropped on Open', () => {
+    expect(moveFor(item({ status: 'dropped' }), 'inbound', 'open')).toEqual({
+      kind: 'status',
+      to: 'open',
+    });
+    expect(moveFor(item({ status: 'chased', chaseCount: 1 }), 'inbound', 'open')).toEqual({
+      kind: 'status',
+      to: 'open',
+    });
+  });
+
+  it('queues a chase for an open card dropped on Chased', () => {
+    expect(moveFor(item(), 'inbound', 'chased')).toEqual({ kind: 'chase' });
+  });
+
+  it('refuses Chased for an open card whose draft is already waiting', () => {
+    expect(moveFor(item({ pendingChaseProposalId: 'p1' }), 'inbound', 'chased')).toBeNull();
+  });
+
+  it('reopens as chased only a closed card that was chased before', () => {
+    expect(moveFor(item({ status: 'done', chaseCount: 2 }), 'inbound', 'chased')).toEqual({
+      kind: 'status',
+      to: 'chased',
+    });
+    expect(moveFor(item({ status: 'done', chaseCount: 0 }), 'inbound', 'chased')).toBeNull();
+  });
+
+  it('never moves a card to the other lane, its own column or I owe Chased', () => {
+    expect(moveFor(item(), 'outbound', 'done')).toBeNull();
+    expect(moveFor(item(), 'inbound', 'open')).toBeNull();
+    expect(moveFor(item({ direction: 'outbound' }), 'outbound', 'chased')).toBeNull();
   });
 });

@@ -51,9 +51,9 @@ async function BoardView({ params }: { params: SearchParams }) {
         title="Commitments"
         summary={summary}
         actions={
-          <span className="hidden text-xs text-muted-foreground lg:inline">
-            Each column sorted overdue first, then soonest due. Done and Dropped show the last{' '}
-            {board.closedDays} days.
+          <span className="hidden max-w-md text-right text-xs text-muted-foreground lg:inline">
+            Drag a card to another column, or use its buttons. Each column sorted overdue first,
+            then soonest due; Done and Dropped show the last {board.closedDays} days.
           </span>
         }
       />
