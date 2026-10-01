@@ -11,55 +11,22 @@ import { ageingEmphasis } from '@/lib/ageing';
 import {
   ageingLabel,
   chaseLabel,
-  chasePhrase,
-  commitmentBadgeFor,
   commitmentHref,
   evidenceLine,
-  firstName,
-  isCommitmentOpenForAction,
-  isCommitmentOverdue,
-  isCommitmentUnconfirmed,
-  type CommitmentDirection,
-  type CommitmentStatus,
   type CommitmentView,
 } from '@/lib/commitment-view';
-import { COMMITMENT_STATUS_LABELS } from '@/lib/humanise';
 import { formatInstant } from '@/lib/proposal-view';
 import { formatDate } from '@/lib/time';
-import { COMMITMENT_STATUS_TONES } from '@/lib/tones';
-import {
-  chaseCommitment,
-  confirmCommitment,
-  dismissCommitment,
-  dropCommitment,
-  markCommitmentDone,
-} from './actions';
-import { CommitmentCard, CommitmentRowPair } from './drop-disclosure';
+import { confirmCommitment, dismissCommitment } from './actions';
 
 /**
- * One page of commitments: the table on a desktop and the same rows as
- * cards on a phone. Both put Drop behind the inline disclosure that asks
- * for a reason. The page fetches, filters and sorts; this renders.
+ * The To confirm list (ADR 0037): inbound commitments Lance could not
+ * place, as a table on a desktop and cards on a phone. Each row answers
+ * Owed to me, which puts it on the board, or Not mine, which drops it.
  */
 
-/** The six columns, in order; `loading.tsx` keeps its own copy of the names. */
-const COMMITMENT_COLUMNS = ['Commitment', 'Counterparty', 'Due', 'Chased', 'Provenance', 'Actions'];
-
-const BADGE_LABELS: Record<CommitmentStatus | 'overdue', string> = {
-  ...COMMITMENT_STATUS_LABELS,
-  overdue: 'Overdue',
-};
-
-/** The status badge beside a description, or nothing for a row that needs none. */
-function StatusBadge({ commitment }: { commitment: CommitmentView }) {
-  const key = commitmentBadgeFor(commitment);
-  if (key === null) return null;
-  return (
-    <Badge tone={COMMITMENT_STATUS_TONES[key]} size="sm">
-      {BADGE_LABELS[key]}
-    </Badge>
-  );
-}
+/** The six columns, in order. */
+const COLUMNS = ['Commitment', 'Counterparty', 'Due', 'Chased', 'Provenance', 'Actions'];
 
 /** Every source the commitment was read from, each with the time it was seen. */
 function Provenance({ commitment }: { commitment: CommitmentView }) {
@@ -95,7 +62,9 @@ function RowCells({ commitment, now }: { commitment: CommitmentView; now: Date }
           <TextLink href={commitmentHref(commitment.id)} tone="foreground" className="font-medium">
             {commitment.description}
           </TextLink>
-          <StatusBadge commitment={commitment} />
+          <Badge tone="neutral-strong" size="sm">
+            Unconfirmed
+          </Badge>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{evidenceLine(commitment)}</p>
       </Td>
@@ -130,36 +99,6 @@ function RowCells({ commitment, now }: { commitment: CommitmentView; now: Date }
   );
 }
 
-/** Mark done, and Chase on the tab where someone else owes the answer. */
-function OpenActions({
-  commitment,
-  direction,
-  size,
-}: {
-  commitment: CommitmentView;
-  direction: CommitmentDirection;
-  size: 'sm' | 'lg';
-}) {
-  return (
-    <>
-      <ActionForm action={markCommitmentDone} className={cn(size === 'lg' && 'flex-1')}>
-        <input type="hidden" name="commitmentId" value={commitment.id} />
-        <SubmitButton size={size} pendingLabel="Marking" className={cn(size === 'lg' && 'w-full')}>
-          Mark done
-        </SubmitButton>
-      </ActionForm>
-      {direction === 'inbound' ? (
-        <ActionForm action={chaseCommitment}>
-          <input type="hidden" name="commitmentId" value={commitment.id} />
-          <SubmitButton variant="outline" size={size} pendingLabel="Queuing">
-            Chase
-          </SubmitButton>
-        </ActionForm>
-      ) : null}
-    </>
-  );
-}
-
 /** A triage row's two answers: the promise was made to Dom, or to someone else. */
 function TriageActions({ commitment, size }: { commitment: CommitmentView; size: 'sm' | 'lg' }) {
   return (
@@ -180,29 +119,12 @@ function TriageActions({ commitment, size }: { commitment: CommitmentView; size:
   );
 }
 
-/** A closed row's actions cell: where to reopen it, edit it or add a note. */
-function ClosedActions({ commitment }: { commitment: CommitmentView }) {
-  return (
-    <span className="text-xs text-muted-foreground">
-      This commitment is {commitment.status}.{' '}
-      <TextLink href={commitmentHref(commitment.id)}>Open it</TextLink> to reopen, edit or add a
-      note.
-    </span>
-  );
-}
-
-export function CommitmentsTable({
+export function TriageTable({
   commitments,
-  direction,
-  triage,
   now,
   footer,
 }: {
   commitments: readonly CommitmentView[];
-  /** The tab being shown; Chase is offered only where someone else owes the answer. */
-  direction: CommitmentDirection;
-  /** The triage tab: commitments possibly owed to Dom, waiting for him to say (ADR 0037). */
-  triage: boolean;
   now: Date;
   /** The paging footer, rendered under the table and under the cards. */
   footer: ReactNode;
@@ -210,49 +132,23 @@ export function CommitmentsTable({
   return (
     <>
       <TableCard className="hidden lg:block">
-        <Table
-          caption={
-            triage
-              ? 'Commitments that may be owed to Dom, to confirm'
-              : `Commitments ${direction === 'outbound' ? 'Dom owes' : 'owed to Dom'}, overdue first`
-          }
-        >
+        <Table caption="Commitments that may be owed to Dom, to confirm">
           <thead>
             <tr>
-              {COMMITMENT_COLUMNS.map((column) => (
+              {COLUMNS.map((column) => (
                 <Th key={column}>{column}</Th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {commitments.map((commitment) =>
-              isCommitmentOpenForAction(commitment) ? (
-                <CommitmentRowPair
-                  key={commitment.id}
-                  commitmentId={commitment.id}
-                  counterpartyFirstName={firstName(commitment.counterparty.name)}
-                  dropAction={dropCommitment}
-                  {...(isCommitmentOverdue(commitment) ? { accent: 'red' as const } : {})}
-                  actions={<OpenActions commitment={commitment} direction={direction} size="sm" />}
-                >
-                  <RowCells commitment={commitment} now={now} />
-                </CommitmentRowPair>
-              ) : isCommitmentUnconfirmed(commitment) ? (
-                <Tr key={commitment.id}>
-                  <RowCells commitment={commitment} now={now} />
-                  <Td>
-                    <TriageActions commitment={commitment} size="sm" />
-                  </Td>
-                </Tr>
-              ) : (
-                <Tr key={commitment.id} muted>
-                  <RowCells commitment={commitment} now={now} />
-                  <Td>
-                    <ClosedActions commitment={commitment} />
-                  </Td>
-                </Tr>
-              ),
-            )}
+            {commitments.map((commitment) => (
+              <Tr key={commitment.id}>
+                <RowCells commitment={commitment} now={now} />
+                <Td>
+                  <TriageActions commitment={commitment} size="sm" />
+                </Td>
+              </Tr>
+            ))}
           </tbody>
         </Table>
         {footer}
@@ -261,10 +157,9 @@ export function CommitmentsTable({
       <ul className="flex flex-col gap-3 lg:hidden">
         {commitments.map((commitment) => {
           const ageing = ageingLabel(commitment, now);
-          const chased = chasePhrase(commitment.chaseCount);
           const firstRef = commitment.sourceRefs[0];
-          const body = (
-            <>
+          return (
+            <li key={commitment.id} className="flex flex-col gap-3 rounded-xl bg-card p-4">
               <div className="flex items-start justify-between gap-3">
                 <TextLink
                   href={commitmentHref(commitment.id)}
@@ -273,14 +168,15 @@ export function CommitmentsTable({
                 >
                   {commitment.description}
                 </TextLink>
-                <StatusBadge commitment={commitment} />
+                <Badge tone="neutral-strong" size="sm">
+                  Unconfirmed
+                </Badge>
               </div>
               <p className="text-xs text-muted-foreground">{evidenceLine(commitment)}</p>
               <p className="text-xs text-muted-foreground">
                 {commitment.counterparty.name} ·{' '}
                 {commitment.dueAt === null ? 'no date' : formatDate(commitment.dueAt)},{' '}
                 <Ageing label={ageing} emphasis={ageingEmphasis(ageing)} />
-                {chased === null ? null : ` · ${chased}`}
               </p>
               {firstRef === undefined ? null : (
                 <ProvenanceLink
@@ -292,34 +188,7 @@ export function CommitmentsTable({
                   }}
                 />
               )}
-            </>
-          );
-
-          return isCommitmentOpenForAction(commitment) ? (
-            <CommitmentCard
-              key={commitment.id}
-              commitmentId={commitment.id}
-              counterpartyFirstName={firstName(commitment.counterparty.name)}
-              dropAction={dropCommitment}
-              overdue={isCommitmentOverdue(commitment)}
-              actions={<OpenActions commitment={commitment} direction={direction} size="lg" />}
-            >
-              {body}
-            </CommitmentCard>
-          ) : isCommitmentUnconfirmed(commitment) ? (
-            <li key={commitment.id} className="flex flex-col gap-3 rounded-xl bg-card p-4">
-              {body}
               <TriageActions commitment={commitment} size="lg" />
-            </li>
-          ) : (
-            <li
-              key={commitment.id}
-              className="flex flex-col gap-3 rounded-xl bg-card p-4 text-muted-foreground"
-            >
-              {body}
-              <p className="m-0">
-                <ClosedActions commitment={commitment} />
-              </p>
             </li>
           );
         })}

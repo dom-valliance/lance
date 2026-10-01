@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  commitmentTabFrom,
   isCommitmentUnconfirmed,
   ageingLabel,
   authorLabel,
@@ -9,11 +8,8 @@ import {
   statusChoices,
   chaseLabel,
   chasePhrase,
-  commitmentBadgeFor,
   commitmentDirectionFrom,
   commitmentSort,
-  commitmentStatusFilterFrom,
-  commitmentStatusSelected,
   evidenceLine,
   firstName,
   isCommitmentOpenForAction,
@@ -160,28 +156,6 @@ describe('commitmentDirectionFrom', () => {
   });
 });
 
-describe('commitmentStatusSelected / commitmentStatusFilterFrom', () => {
-  it('defaults the selected status to open', () => {
-    expect(commitmentStatusSelected({})).toBe('open');
-    expect(commitmentStatusFilterFrom({})).toBe('open');
-  });
-
-  it('treats "all" as no status filter', () => {
-    expect(commitmentStatusSelected({ status: 'all' })).toBe('all');
-    expect(commitmentStatusFilterFrom({ status: 'all' })).toBeUndefined();
-  });
-
-  it('keeps a recognised status', () => {
-    expect(commitmentStatusSelected({ status: 'dropped' })).toBe('dropped');
-    expect(commitmentStatusFilterFrom({ status: 'dropped' })).toBe('dropped');
-  });
-
-  it('falls back to open for an unrecognised status', () => {
-    expect(commitmentStatusSelected({ status: 'archived' })).toBe('open');
-    expect(commitmentStatusFilterFrom({ status: 'archived' })).toBe('open');
-  });
-});
-
 describe('isCommitmentOverdue', () => {
   it('is overdue once a day has passed the due date', () => {
     expect(isCommitmentOverdue(view({ overdueDays: 3 }))).toBe(true);
@@ -193,28 +167,6 @@ describe('isCommitmentOverdue', () => {
 
   it('is not overdue when the api recorded no ageing', () => {
     expect(isCommitmentOverdue(view({ overdueDays: null }))).toBe(false);
-  });
-});
-
-describe('commitmentBadgeFor', () => {
-  it('shows nothing for an open row that is on time', () => {
-    expect(commitmentBadgeFor(view())).toBeNull();
-  });
-
-  it('shows overdue ahead of the stored status', () => {
-    expect(commitmentBadgeFor(view({ status: 'chased', overdueDays: 2 }))).toBe('overdue');
-  });
-
-  it('shows chased for a chased row that is not overdue', () => {
-    expect(commitmentBadgeFor(view({ status: 'chased' }))).toBe('chased');
-  });
-
-  it('shows done for a resolved row', () => {
-    expect(commitmentBadgeFor(view({ status: 'done' }))).toBe('done');
-  });
-
-  it('shows nothing for a dropped row', () => {
-    expect(commitmentBadgeFor(view({ status: 'dropped' }))).toBeNull();
   });
 });
 
@@ -318,28 +270,9 @@ describe('sourceStateSentence', () => {
   });
 });
 
-describe('commitmentTabFrom', () => {
-  it('shows the triage tab when asked for it', () => {
-    expect(commitmentTabFrom({ tab: 'triage', direction: 'outbound' })).toBe('triage');
-  });
-
-  it('falls back to the direction otherwise', () => {
-    expect(commitmentTabFrom({ direction: 'inbound' })).toBe('inbound');
-    expect(commitmentTabFrom({ tab: 'nonsense' })).toBe('outbound');
-  });
-});
-
 describe('the triage status', () => {
   it('is neither open for action nor closed', () => {
     expect(isCommitmentOpenForAction({ status: 'unconfirmed' })).toBe(false);
     expect(isCommitmentUnconfirmed({ status: 'unconfirmed' })).toBe(true);
-  });
-
-  it('carries its own badge', () => {
-    expect(commitmentBadgeFor({ status: 'unconfirmed', overdueDays: null })).toBe('unconfirmed');
-  });
-
-  it('is not a status filter, because it has its own tab', () => {
-    expect(commitmentStatusSelected({ status: 'unconfirmed' })).toBe('open');
   });
 });

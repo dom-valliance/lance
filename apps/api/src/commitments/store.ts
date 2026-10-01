@@ -3,11 +3,12 @@ import {
   commitments,
   newestObservationFirst,
   observations,
+  proposals,
   type Commitment,
   type CommitmentNote,
   type Db,
 } from '@lance/db';
-import { and, asc, count, desc, eq, inArray, lt, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, lt, ne, or, sql, type SQL } from 'drizzle-orm';
 
 /**
  * The Commitments page's reads and writes. The api sets the status, the
@@ -66,6 +67,19 @@ export interface SourceObservation {
   payload: unknown;
 }
 
+/** A chase draft still waiting for the principal's decision, by the commitment it chases. */
+export interface PendingChase {
+  commitmentId: string;
+  proposalId: string;
+}
+
+/** The board's rows: every live commitment, and the closed ones since `closedSince`. */
+export interface BoardQuery {
+  closedSince: Date;
+  /** Rows to return; the caller asks for one more to learn whether the board was cut. */
+  limit: number;
+}
+
 export interface CommitmentStoreLike {
   list(query: CommitmentQuery): Promise<Commitment[]>;
   /** Every row `list` would return across all its pages. */
@@ -73,6 +87,14 @@ export interface CommitmentStoreLike {
   /** The page header's numbers, counted in SQL rather than from a page of rows. */
   summary(now: Date): Promise<CommitmentSummary>;
   get(id: string): Promise<Commitment | null>;
+  /**
+   * Open and chased commitments, and done and dropped ones changed since
+   * `closedSince`, in both directions, newest first. Unconfirmed ones wait
+   * on the triage tab and are left out (ADR 0037).
+   */
+  board(query: BoardQuery): Promise<Commitment[]>;
+  /** The pending chase drafts among `commitmentIds`: at most one reported per commitment. */
+  pendingChases(commitmentIds: readonly string[]): Promise<PendingChase[]>;
   /** Sets the status of a commitment that is still in `from`, and returns the row as it now stands. */
   setStatus(input: {
     id: string;
@@ -173,6 +195,40 @@ export function createCommitmentStore(db: Db): CommitmentStoreLike {
         outbound: tally('outbound'),
         unconfirmed: waiting[0]?.total ?? 0,
       };
+    },
+
+    async board(query: BoardQuery): Promise<Commitment[]> {
+      return db
+        .select()
+        .from(commitments)
+        .where(
+          or(
+            inArray(commitments.status, ['open', 'chased']),
+            and(
+              inArray(commitments.status, ['done', 'dropped']),
+              gte(commitments.updatedAt, query.closedSince),
+            ),
+          ),
+        )
+        .orderBy(desc(commitments.id))
+        .limit(query.limit);
+    },
+
+    async pendingChases(commitmentIds: readonly string[]): Promise<PendingChase[]> {
+      if (commitmentIds.length === 0) return [];
+      const commitmentId = sql<string>`${proposals.payload}->>'commitmentId'`;
+      const rows = await db
+        .selectDistinctOn([commitmentId], { commitmentId, proposalId: proposals.id })
+        .from(proposals)
+        .where(
+          and(
+            eq(proposals.status, 'pending'),
+            eq(proposals.actionClass, 'draft_email'),
+            inArray(commitmentId, [...commitmentIds]),
+          ),
+        )
+        .orderBy(commitmentId, desc(proposals.id));
+      return rows;
     },
 
     async get(id: string): Promise<Commitment | null> {

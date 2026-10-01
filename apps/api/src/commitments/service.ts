@@ -123,6 +123,52 @@ export async function listCommitments(
   return { items: await render(deps, page, now), nextCursor, total };
 }
 
+/** How far back the board's Done and Dropped columns reach. */
+export const BOARD_CLOSED_DAYS = 14;
+
+/** The most rows the board draws; beyond it the page says the board was cut. */
+export const BOARD_MAX_ROWS = 1000;
+
+export interface BoardCommitmentView extends CommitmentView {
+  /** The chase draft waiting in Proposals for this commitment, if there is one. */
+  pendingChaseProposalId: string | null;
+}
+
+export interface CommitmentBoard {
+  items: BoardCommitmentView[];
+  /** True when there were more rows than `BOARD_MAX_ROWS`; the oldest are left off. */
+  truncated: boolean;
+  closedDays: number;
+}
+
+/**
+ * The Commitments board: every live commitment in both directions, and
+ * the ones closed in the last `BOARD_CLOSED_DAYS`, each with any chase
+ * draft still awaiting approval. The page groups them into lanes and
+ * columns; the api only chooses the rows.
+ */
+export async function commitmentBoard(deps: CommitmentDeps): Promise<CommitmentBoard> {
+  const now = new Date((deps.now ?? nowIso)());
+  const closedSince = new Date(now.getTime() - BOARD_CLOSED_DAYS * 24 * 60 * 60 * 1000);
+  const rows = await deps.commitments.board({ closedSince, limit: BOARD_MAX_ROWS + 1 });
+  const shown = rows.slice(0, BOARD_MAX_ROWS);
+  const [views, pending] = await Promise.all([
+    render(deps, shown, now),
+    deps.commitments.pendingChases(
+      shown.filter((row) => row.direction === 'inbound').map((row) => row.id),
+    ),
+  ]);
+  const draftFor = new Map(pending.map((chase) => [chase.commitmentId, chase.proposalId]));
+  return {
+    items: views.map((view) => ({
+      ...view,
+      pendingChaseProposalId: draftFor.get(view.id) ?? null,
+    })),
+    truncated: rows.length > BOARD_MAX_ROWS,
+    closedDays: BOARD_CLOSED_DAYS,
+  };
+}
+
 /** Open and overdue counts for both tabs, for the page header and the tab labels. */
 export async function commitmentSummary(deps: CommitmentDeps): Promise<CommitmentSummary> {
   return deps.commitments.summary(new Date((deps.now ?? nowIso)()));
