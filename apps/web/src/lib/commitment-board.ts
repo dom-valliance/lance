@@ -43,13 +43,14 @@ export interface BoardLane {
   note: string;
 }
 
+/** I owe first: what the principal has promised is theirs to act on. */
 export const BOARD_LANES: readonly BoardLane[] = [
-  { id: 'inbound', label: 'Owed to me', note: 'Lance drafts chases for your approval' },
   {
     id: 'outbound',
     label: 'I owe',
     note: 'Lance never chases you; an overdue one raises an alert',
   },
+  { id: 'inbound', label: 'Owed to me', note: 'Lance drafts chases for your approval' },
 ];
 
 /** Why the I owe lane has no Chased column, in the board's words and the phone's. */
@@ -72,8 +73,6 @@ export interface BoardLaneView extends BoardLane {
 
 export interface BoardView {
   lanes: BoardLaneView[];
-  /** Cards per stage across both lanes, for the column heads. */
-  stageCounts: Record<BoardStageId, number>;
   /** Live commitments owed to the principal, live ones they owe, and overdue across both. */
   totals: { owed: number; owe: number; overdue: number };
 }
@@ -81,15 +80,8 @@ export interface BoardView {
 const isLive = (item: Pick<CommitmentView, 'status'>): boolean =>
   item.status === 'open' || item.status === 'chased';
 
-const isBoardStage = (status: CommitmentView['status']): status is BoardStageId =>
-  (BOARD_STAGE_IDS as readonly string[]).includes(status);
-
 /** Groups the board's rows into lanes and columns, each column overdue first, then soonest due. */
 export function buildBoard(items: readonly BoardItem[]): BoardView {
-  const stageCounts: Record<BoardStageId, number> = { open: 0, chased: 0, done: 0, dropped: 0 };
-  for (const item of items) {
-    if (isBoardStage(item.status)) stageCounts[item.status] += 1;
-  }
   const lanes = BOARD_LANES.map((lane): BoardLaneView => {
     const inLane = items.filter((item) => item.direction === lane.id);
     const live = inLane.filter(isLive);
@@ -104,10 +96,10 @@ export function buildBoard(items: readonly BoardItem[]): BoardView {
       })),
     };
   });
-  const [owed, owe] = lanes;
+  const owed = lanes.find((lane) => lane.id === 'inbound');
+  const owe = lanes.find((lane) => lane.id === 'outbound');
   return {
     lanes,
-    stageCounts,
     totals: {
       owed: owed?.live ?? 0,
       owe: owe?.live ?? 0,

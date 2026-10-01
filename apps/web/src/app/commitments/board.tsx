@@ -667,28 +667,32 @@ export function CommitmentBoard({
         </div>
       )}
 
-      <div className="hidden flex-col gap-5 lg:flex">
-        <div className="grid grid-cols-4 gap-3">
-          {board.lanes[0]?.columns.map((column) => (
-            <div key={column.id} className="flex flex-col gap-0.5 border-b border-border px-1 pb-2">
-              <div className="flex items-center gap-2 font-medium">
-                <StageDot stage={column.id} />
-                {column.label}
-                <span className="text-xs font-normal text-muted-foreground">
-                  {board.stageCounts[column.id]}
-                </span>
-              </div>
-              <div className="text-xs text-muted-foreground">{column.hint}</div>
-            </div>
-          ))}
-        </div>
-
+      <div className="hidden flex-col gap-6 lg:flex">
         {board.lanes.map((row) => (
           <section key={row.id} aria-label={row.label} className="flex flex-col gap-2.5">
             <div className="flex items-baseline gap-3 px-1">
               <h2 className="text-[15px] font-semibold">{row.label}</h2>
               <span className="text-xs text-muted-foreground">{laneMeta(row)}</span>
               <span className="ml-auto text-xs text-muted-foreground">{row.note}</span>
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              {row.columns.map((column) => (
+                <div
+                  key={column.id}
+                  className="flex flex-col gap-0.5 border-b border-border px-1 pb-2"
+                >
+                  <div className="flex items-center gap-2 font-medium">
+                    <StageDot stage={column.id} />
+                    {column.label}
+                    {column.disabled ? null : (
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {column.cards.length}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground">{column.hint}</div>
+                </div>
+              ))}
             </div>
             <div className="grid grid-cols-4 gap-3 rounded-xl bg-card/50 p-3">
               {row.columns.map((column) => {
@@ -700,17 +704,22 @@ export function CommitmentBoard({
                     aria-label={`${row.label}, ${column.label}`}
                     {...zone.props}
                     className={cn(
-                      'flex min-h-24 min-w-0 flex-col gap-2 rounded-[10px] transition-colors',
+                      'flex min-h-24 min-w-0 flex-col rounded-[10px] transition-colors',
                       zone.accepts && 'outline-1 outline-offset-4 outline-border outline-dashed',
                       zone.over && 'bg-brand-soft outline-brand',
                     )}
                   >
                     {column.disabled ? (
-                      <div className="flex flex-1 items-center rounded-[10px] border border-dashed border-border p-3 text-xs text-pretty text-muted-foreground">
+                      <div className="flex min-h-24 items-center rounded-[10px] border border-dashed border-border p-3 text-xs text-pretty text-muted-foreground">
                         {NOT_CHASED_NOTE}
                       </div>
                     ) : (
-                      <>
+                      // Each column scrolls on its own, so a long Done or
+                      // Dropped column never stretches the lane.
+                      <div
+                        tabIndex={0}
+                        className="-mr-1.5 flex max-h-[min(34rem,62vh)] flex-col gap-2 overflow-y-auto overscroll-contain rounded-[10px] pr-1.5 outline-none [scrollbar-width:thin] focus-visible:ring-3 focus-visible:ring-ring/45"
+                      >
                         {pending === null ? null : (
                           <article className="flex flex-col gap-2 rounded-[10px] bg-card p-3">
                             <p className="m-0 text-[13px] leading-snug font-medium text-pretty">
@@ -726,7 +735,7 @@ export function CommitmentBoard({
                           now={now}
                           size="sm"
                         />
-                      </>
+                      </div>
                     )}
                   </div>
                 );

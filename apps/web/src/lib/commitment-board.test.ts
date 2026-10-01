@@ -41,10 +41,10 @@ describe('buildBoard', () => {
     item({ id: 'done', status: 'done' }),
     item({ id: 'mine', direction: 'outbound' }),
   ]);
-  const [owed, owe] = board.lanes;
+  const [owe, owed] = board.lanes;
 
-  it('puts Owed to me first and I owe second', () => {
-    expect(board.lanes.map((lane) => lane.label)).toEqual(['Owed to me', 'I owe']);
+  it('puts I owe first and Owed to me second', () => {
+    expect(board.lanes.map((lane) => lane.label)).toEqual(['I owe', 'Owed to me']);
   });
 
   it('sorts each column overdue first', () => {
@@ -57,8 +57,9 @@ describe('buildBoard', () => {
     expect(board.totals).toEqual({ owed: 3, owe: 1, overdue: 1 });
   });
 
-  it('counts each stage across both lanes', () => {
-    expect(board.stageCounts).toEqual({ open: 3, chased: 1, done: 1, dropped: 0 });
+  it('counts each column within its own lane', () => {
+    expect(owed?.columns.map((column) => column.cards.length)).toEqual([2, 1, 1, 0]);
+    expect(owe?.columns.map((column) => column.cards.length)).toEqual([1, 0, 0, 0]);
   });
 
   it('turns off the Chased column for what the principal owes', () => {
@@ -68,7 +69,7 @@ describe('buildBoard', () => {
 
   it('leaves a triage commitment off the board', () => {
     const withTriage = buildBoard([item({ status: 'unconfirmed' })]);
-    expect(withTriage.lanes[0]?.columns.flatMap((column) => column.cards)).toEqual([]);
+    expect(withTriage.lanes[1]?.columns.flatMap((column) => column.cards)).toEqual([]);
   });
 });
 
